@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1c1d24"/>
+      <stop offset="1" stop-color="#0c0d10"/>
+    </linearGradient>
+    <linearGradient id="disc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff3355"/>
+      <stop offset="1" stop-color="#ff7a59"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <g fill="#2b2d36">
+    <rect x="22" y="34" width="20" height="26" rx="5"/>
+    <rect x="22" y="80" width="20" height="26" rx="5"/>
+    <rect x="22" y="126" width="20" height="26" rx="5"/>
+    <rect x="22" y="172" width="20" height="26" rx="5"/>
+    <rect x="214" y="34" width="20" height="26" rx="5"/>
+    <rect x="214" y="80" width="20" height="26" rx="5"/>
+    <rect x="214" y="126" width="20" height="26" rx="5"/>
+    <rect x="214" y="172" width="20" height="26" rx="5"/>
+  </g>
+  <rect x="58" y="62" width="140" height="132" rx="34" fill="url(#disc)"/>
+  <path d="M110 98 L110 158 L160 128 Z" fill="#ffffff" stroke="#ffffff" stroke-width="10" stroke-linejoin="round"/>
+</svg>
