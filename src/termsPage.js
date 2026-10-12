@@ -41,7 +41,7 @@ function renderTermsPage({ contact, credits }) {
 <title>YouStream: terms of use and privacy</title>
 <link rel="icon" href="/logo.png" />
 <style>
-  :root { color-scheme: dark; --bg: #0c0d10; --card: #16171d; --text: #eef0f4; --muted: #9ea3ae; --link: #e8a0ad; }
+  :root { color-scheme: dark; --bg: #0c0d10; --card: #16171d; --text: #eef0f4; --muted: #9ea3ae; --link: #e29aa7; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 760px; margin: 0 auto; padding: 32px 18px 48px; }

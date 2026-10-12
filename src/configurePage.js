@@ -154,7 +154,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
 
   const tmdbNote = serverTmdb
     ? "This server already has a TMDB key that everyone shares, so you can leave this blank. Add your own only if you prefer to."
-    : "Optional. Lets YouStream read the tmdb: ids Nuvio uses for some titles, and adds TMDB's cast lists and other names to the evidence a match needs.";
+    : "Optional.";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -166,7 +166,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
 <style>
   :root {
     --bg: #0f1013; --card: #17181d; --border: #2b2d36; --field: #0c0d10;
-    --text: #eef0f4; --muted: #9ea3ae; --accent: #ff3355; --accent-2: #ff6b81; --warn: #ffb020;
+    --text: #eef0f4; --muted: #9ea3ae; --accent: #7a1a2b; --accent-2: #a3263c; --link: #e29aa7; --warn: #ffb020;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -180,7 +180,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   header h1 { font-size: 22px; margin: 0 0 6px; }
   header p { color: var(--muted); margin: 0 0 4px; font-size: 14px; line-height: 1.5; }
   .banner {
-    background: rgba(255,51,85,.12); border: 1px solid var(--accent);
+    background: rgba(122,26,43,.25); border: 1px solid var(--accent-2);
     border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 18px;
   }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 18px; }
@@ -188,7 +188,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .card .lead { font-size: 13px; color: var(--muted); margin: 0 0 14px; line-height: 1.5; }
   .chip {
     display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
-    padding: 2px 6px; border-radius: 5px; background: rgba(255,51,85,.2); color: var(--accent-2); margin-left: 6px;
+    padding: 2px 6px; border-radius: 5px; background: rgba(122,26,43,.45); color: var(--link); margin-left: 6px;
     vertical-align: middle;
   }
   input[type="password"], input[type="text"], input[type="number"], select, textarea {
@@ -196,7 +196,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     padding: 11px 12px; border-radius: 9px; font-size: 15px; font-family: inherit;
   }
   textarea { min-height: 96px; resize: vertical; font-size: 13px; line-height: 1.5; }
-  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-2); }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--link); }
   .field { display: block; margin-bottom: 14px; }
   .field:last-child { margin-bottom: 0; }
   .label-text { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
@@ -207,15 +207,15 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     color: var(--muted); border-radius: 9px; cursor: pointer; padding: 0;
     display: flex; align-items: center; justify-content: center;
   }
-  .key-toggle:hover { color: var(--text); border-color: var(--accent-2); }
+  .key-toggle:hover { color: var(--text); border-color: var(--link); }
   .key-toggle .eye-slash { display: none; }
-  .key-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+  .key-toggle[aria-pressed="true"] { color: var(--link); border-color: var(--link); }
   .key-toggle[aria-pressed="true"] .eye-slash { display: inline; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.55; }
-  .hint a, .lead a { color: var(--accent-2); }
+  .hint a, .lead a { color: var(--link); }
   .hint ol { margin: 6px 0 0; padding-left: 18px; }
   .check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0; flex: 1 1 auto; }
-  .check input { width: 16px; height: 16px; margin-top: 2px; flex: 0 0 auto; accent-color: var(--accent); }
+  .check input { width: 16px; height: 16px; margin-top: 2px; flex: 0 0 auto; accent-color: var(--accent-2); }
   .check strong { display: block; font-size: 14px; font-weight: 600; }
   .check em { display: block; font-size: 12px; color: var(--muted); font-style: normal; margin-top: 2px; line-height: 1.45; }
   .row-box {
@@ -248,7 +248,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   @media (max-width: 480px) { .grid-2 { grid-template-columns: 1fr; } }
   details summary { cursor: pointer; font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
   details[open] summary { margin-bottom: 12px; }
-  .reset { background: none; border: none; color: var(--accent-2); font-size: 12px; cursor: pointer; padding: 0; margin-top: 6px; }
+  .reset { background: none; border: none; color: var(--link); font-size: 12px; cursor: pointer; padding: 0; margin-top: 6px; }
   .submit {
     width: 100%; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; border: none;
     padding: 14px; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer;
@@ -278,7 +278,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   footer .credits img { vertical-align: middle; margin-right: 4px; }
   footer .disclaimer a { text-decoration: underline; }
   .agree { margin: 18px 0 4px; font-size: 13px; color: var(--muted); }
-  .agree a { color: var(--accent-2); }
+  .agree a { color: var(--link); }
 </style>
 </head>
 <body>
@@ -307,15 +307,15 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
           <li>Go to <a href="${YOUTUBE_CREDENTIALS_URL}" target="_blank" rel="noopener">Credentials</a>, then <strong>Create credentials &rarr; API key</strong>.</li>
           <li>Leave <strong>Application restrictions</strong> at <strong>None</strong>: this server makes the calls, not your browser. Limiting the key to the YouTube Data API v3 is fine.</li>
         </ol>
-        Your key is stored only inside your personal addon link, never on this server.
+        Your key is kept only inside your personal addon link; YouStream never stores it (see the <a href="/terms" target="_blank" rel="noopener">privacy policy</a>).
       </div>
     </div>
 
     <div class="card">
       <h2>TMDB key <span class="chip">optional</span></h2>
       <p class="lead">
-        TMDB knows each episode's own runtime, so episodes can be matched to the second rather than
-        against the show's usual length. It also lets ${ADDON_NAME} read the <code>tmdb:</code> ids Nuvio uses for some titles.
+        Lets ${ADDON_NAME} read the <code>tmdb:</code> ids Nuvio uses for some titles, and adds TMDB's cast
+        lists and other names to the evidence a match needs.
       </p>
       ${keyField({ id: "tmdb-key", label: "TMDB key", value: s.tmdbKey, placeholder: "API key or Read Access Token" })}
       <div class="hint">${escapeHtml(tmdbNote)} Get one free under <a href="${TMDB_KEY_URL}" target="_blank" rel="noopener">TMDB settings &rarr; API</a>; either the API key or the Read Access Token works.</div>

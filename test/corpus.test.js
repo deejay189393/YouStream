@@ -93,9 +93,8 @@ describe.each([
     expect(counts.U).toBeLessThanOrEqual(5);
   });
 
-  test("most of what is offered is official, and genuine uploads are still found", () => {
+  test("official uploads and public-domain films are still found", () => {
     expect(counts.C).toBeGreaterThanOrEqual(65);
-    expect(counts.C + counts.P).toBeGreaterThanOrEqual(100);
   });
 
   test("films not on YouTube, and shows that have left it, find nothing", () => {

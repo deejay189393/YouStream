@@ -14,7 +14,8 @@ beforeEach(() => {
 });
 
 const CONFIG = { youtubeKey: "KEY" };
-const SHAWSHANK = { meta: { name: "The Shawshank Redemption", year: "1994", runtime: "142 min" } };
+// A public-domain film.
+const NOTLD = { meta: { name: "Night of the Living Dead", year: "1968", runtime: "96 min" } };
 
 function youtubeReturns(videos) {
   return [
@@ -26,14 +27,14 @@ function youtubeReturns(videos) {
 describe("stream handler", () => {
   test("found videos become stream rows, cached for hours", async () => {
     routeFetch([
-      ["/meta/movie/tt0111161.json", SHAWSHANK],
+      ["/meta/movie/tt0063350.json", NOTLD],
       ...youtubeReturns([
-        apiVideo("full0000001", { snippet: { title: "The Shawshank Redemption (1994) Full Movie" }, contentDetails: { duration: "PT2H21M" } }),
-        apiVideo("trailer0001", { snippet: { title: "The Shawshank Redemption Trailer" }, contentDetails: { duration: "PT2M10S" } })
+        apiVideo("full0000001", { snippet: { title: "Night of the Living Dead (1968) Full Movie" }, contentDetails: { duration: "PT1H35M" } }),
+        apiVideo("trailer0001", { snippet: { title: "Night of the Living Dead Trailer" }, contentDetails: { duration: "PT2M10S" } })
       ])
     ]);
     const iface = createAddonInterface();
-    const res = await iface.get("stream", "movie", "tt0111161", {}, CONFIG);
+    const res = await iface.get("stream", "movie", "tt0063350", {}, CONFIG);
     expect(res.cacheMaxAge).toBe(AGES.maxAgeSeconds);
     expect(res.streams.map((s) => s.ytId || s.externalUrl)).toEqual([
       "full0000001",
@@ -43,8 +44,8 @@ describe("stream handler", () => {
   });
 
   test("nothing found is cached for an hour", async () => {
-    routeFetch([["/meta/movie/", SHAWSHANK], ...youtubeReturns([])]);
-    const res = await handleStream({ id: "tt0111161", config: CONFIG });
+    routeFetch([["/meta/movie/", NOTLD], ...youtubeReturns([])]);
+    const res = await handleStream({ id: "tt0063350", config: CONFIG });
     expect(res).toEqual({ streams: [], cacheMaxAge: AGES.emptyMaxAgeSeconds });
   });
 
@@ -54,21 +55,21 @@ describe("stream handler", () => {
   });
 
   test("a failed search is retried soon", async () => {
-    routeFetch([["/meta/movie/", SHAWSHANK], ["/search?", response({ error: { errors: [{ reason: "quotaExceeded" }] } }, { status: 403 })]]);
-    expect(await handleStream({ id: "tt0111161", config: CONFIG })).toEqual({ streams: [], cacheMaxAge: AGES.failedMaxAgeSeconds });
+    routeFetch([["/meta/movie/", NOTLD], ["/search?", response({ error: { errors: [{ reason: "quotaExceeded" }] } }, { status: 403 })]]);
+    expect(await handleStream({ id: "tt0063350", config: CONFIG })).toEqual({ streams: [], cacheMaxAge: AGES.failedMaxAgeSeconds });
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining("search failed: quota"));
   });
 
   test.each([[undefined], [false], [{}], [{ youtubeKey: "has spaces" }]])("no usable key, %p, is no streams", async (config) => {
     const fetch = routeFetch([]);
-    expect(await handleStream({ id: "tt0111161", config })).toEqual({ streams: [] });
+    expect(await handleStream({ id: "tt0063350", config })).toEqual({ streams: [] });
     expect(fetch).not.toHaveBeenCalled();
   });
 });
 
 describe("maxAgeFor", () => {
   const ages = { maxAgeSeconds: 21600, emptyMaxAgeSeconds: 3600, failedMaxAgeSeconds: 60 };
-  const OLD_FILM = { isEpisode: false, year: 1994, released: "1994-09-23" };
+  const OLD_FILM = { isEpisode: false, year: 1968, released: "1968-10-04" };
   const today = new Date().toISOString().slice(0, 10);
   const NEW_EPISODE = { isEpisode: true, year: 2019, released: today, releaseYear: Number(today.slice(0, 4)) };
 

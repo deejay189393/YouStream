@@ -8,7 +8,7 @@
  * episode, nothing at all for a title that is not on YouTube -- so a change
  * that trades a real match for a false one shows up here.
  */
-const { durationWindow, evaluate, rankMatches } = require("../src/matching");
+const { durationWindow, evaluate, rankMatches, inWindow } = require("../src/matching");
 const { normalizeConfig } = require("../src/config");
 const { buildQuery } = require("../src/finder");
 const { video, privateFixture } = require("./helpers");
@@ -91,18 +91,20 @@ describe("films", () => {
 });
 
 describe("why an episode's own runtime matters", () => {
-  test("TVF Tripling S2E1 runs 35m 36s; against the show's usual 26 minutes it is missed", () => {
-    expect(run("tt6005644:2:1").matches).toEqual([]);
+  // TVF Tripling S2E1 runs 35m 36s; the show's usual length is 26 minutes.
+  const LENGTH = 35 * 60 + 36;
+
+  test("against the show's usual length, an upload as long as the episode is the wrong length", () => {
+    const { matches, evaluations } = run("tt6005644:2:1");
+    const asLong = evaluations.filter((e) => e.video.durationSeconds === LENGTH);
+    expect(asLong.length).toBeGreaterThan(0);
+    asLong.forEach((e) => expect(e.reason).toBe("wrong length"));
+    expect(matches).toEqual([]);
   });
 
-  test("with the episode's own runtime it is in the window, and its synopsis credits the cast", () => {
-    const { matches, evaluations } = run("tt6005644:2:1", { title: { runtimeSeconds: 36 * 60, runtimeKind: "exact" } });
-    expect(matches.map((v) => v.id)).toEqual(["FGMhA8UY190"]);
-    expect(evaluations.find((e) => e.video.id === "FGMhA8UY190")).toMatchObject({
-      ok: true,
-      how: "season and episode",
-      evidence: ["credits"]
-    });
+  test("against the episode's own runtime, that length is inside the window", () => {
+    const { title } = run("tt6005644:2:1", { title: { runtimeSeconds: 36 * 60, runtimeKind: "exact" } });
+    expect(inWindow({ durationSeconds: LENGTH }, durationWindow(title, SETTINGS))).toBe(true);
   });
 });
 

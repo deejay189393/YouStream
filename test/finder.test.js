@@ -159,10 +159,10 @@ describe("findVideos", () => {
   test("uses the server's TMDB key for tmdb: ids when the reader has none", async () => {
     process.env.TMDB_API_KEY = "SERVER";
     const fetch = routeFetch([
-      ["/movie/278", { title: "The Shawshank Redemption", release_date: "1994-09-23", runtime: 142 }],
+      ["/movie/10331", { title: "Night of the Living Dead", release_date: "1968-10-04", runtime: 96 }],
       ["/search?", { items: [] }]
     ]);
-    expect((await findVideos("tmdb:278", SETTINGS)).status).toBe("ok");
+    expect((await findVideos("tmdb:10331", SETTINGS)).status).toBe("ok");
     expect(new URL(fetch.mock.calls[0][0]).searchParams.get("api_key")).toBe("SERVER");
   });
 

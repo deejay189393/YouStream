@@ -31,7 +31,7 @@ describe("a new setup", () => {
 
   test("offers the TMDB key as optional, and says what it is for", () => {
     expect(html).toContain('id="tmdb-key"');
-    expect(html).toContain("Lets YouStream read the tmdb: ids Nuvio uses");
+    expect(html).toContain("Lets YouStream read the <code>tmdb:</code> ids Nuvio uses for some titles");
   });
 
   test("the footer credits data sources, escaped, and has no credits line without them", () => {

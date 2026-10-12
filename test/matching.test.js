@@ -30,14 +30,16 @@ const { video } = require("./helpers");
 
 const SETTINGS = normalizeConfig({ youtubeKey: "k" });
 
+// A public-domain film, so the examples of full uploads below are of
+// something anyone may upload.
 const MOVIE = {
   isEpisode: false,
-  title: "The Shawshank Redemption",
+  title: "Night of the Living Dead",
   aliases: [],
-  year: 1994,
-  people: ["Tim Robbins", "Morgan Freeman", "Frank Darabont"],
-  imdbId: "tt0111161",
-  runtimeSeconds: 8520,
+  year: 1968,
+  people: ["Duane Jones", "Judith O'Dea", "George A. Romero"],
+  imdbId: "tt0063350",
+  runtimeSeconds: 5760,
   otherRuntimes: [],
   runtimeKind: "exact"
 };
@@ -62,7 +64,7 @@ const EPISODE = {
 describe("margins and the length window", () => {
   test("a margin in seconds, minutes or percent", () => {
     expect(marginSeconds({ value: 45, unit: "s" }, 1380)).toBe(45);
-    expect(marginSeconds({ value: 10, unit: "m" }, 8520)).toBe(600);
+    expect(marginSeconds({ value: 10, unit: "m" }, 5760)).toBe(600);
     expect(marginSeconds({ value: 10, unit: "%" }, 3000)).toBe(300);
   });
 
@@ -75,17 +77,17 @@ describe("margins and the length window", () => {
 
   test("films use the movie margin, and a wider one for official channels", () => {
     expect(durationWindow(MOVIE, SETTINGS)).toEqual({
-      min: 7920,
-      max: 9120,
-      spans: [[7920, 9120]],
-      runtimes: [8520],
-      target: 8520,
+      min: 5160,
+      max: 6360,
+      spans: [[5160, 6360]],
+      runtimes: [5760],
+      target: 5760,
       tolerance: 600,
       margin: { value: 10, unit: "m" },
       basis: "exact",
-      partnerMin: 6816,
-      partnerMax: 10224,
-      partnerSpans: [[6816, 10224]]
+      partnerMin: 4608,
+      partnerMax: 6912,
+      partnerSpans: [[4608, 6912]]
     });
   });
 
@@ -151,10 +153,10 @@ describe("margins and the length window", () => {
 
   test("inWindow: the ordinary span for everyone, the official one only for partners", () => {
     const window = durationWindow(MOVIE, SETTINGS);
-    expect(inWindow(video({ durationSeconds: 8000 }), window)).toBe(true);
-    expect(inWindow(video({ durationSeconds: 7000 }), window)).toBe(false);
-    expect(inWindow(video({ durationSeconds: 7000, licensed: true }), window)).toBe(true);
-    expect(inWindow(video({ durationSeconds: 6000, licensed: true }), window)).toBe(false);
+    expect(inWindow(video({ durationSeconds: 5500 }), window)).toBe(true);
+    expect(inWindow(video({ durationSeconds: 4800 }), window)).toBe(false);
+    expect(inWindow(video({ durationSeconds: 4800, licensed: true }), window)).toBe(true);
+    expect(inWindow(video({ durationSeconds: 4400, licensed: true }), window)).toBe(false);
     expect(inWindow(video({ durationSeconds: 2000, licensed: true }), durationWindow(EPISODE, SETTINGS))).toBe(false);
   });
 
@@ -305,9 +307,9 @@ describe("evidence", () => {
   });
 
   test("linkedImdbIds", () => {
-    expect(linkedImdbIds("Rate us on IMDb - https://www.imdb.com/title/tt28227737/ and imdb.com/title/TT0111161")).toEqual([
+    expect(linkedImdbIds("Rate us on IMDb - https://www.imdb.com/title/tt28227737/ and imdb.com/title/TT0063350")).toEqual([
       "tt28227737",
-      "tt0111161"
+      "tt0063350"
     ]);
     expect(linkedImdbIds(undefined)).toEqual([]);
   });
@@ -333,8 +335,8 @@ describe("evidence", () => {
 
   test("corroboration collects every kind there is", () => {
     const v = video({
-      title: "The Shawshank Redemption (1994)",
-      description: "Starring Morgan Freeman. https://www.imdb.com/title/tt0111161/"
+      title: "Night of the Living Dead (1968)",
+      description: "Starring Duane Jones. https://www.imdb.com/title/tt0063350/"
     });
     expect(corroboration(v, MOVIE)).toEqual(["year", "credits", "imdb link"]);
     expect(corroboration(video({ title: "Kota Factory - S01 E03 - Optimization", description: undefined }), EPISODE)).toEqual([
@@ -344,7 +346,7 @@ describe("evidence", () => {
   });
 
   test("a year counts for a film, give or take one, but not for an episode", () => {
-    expect(corroboration(video({ title: "Shawshank 1995" }), MOVIE)).toEqual(["year"]);
+    expect(corroboration(video({ title: "Living Dead 1969" }), MOVIE)).toEqual(["year"]);
     expect(corroboration(video({ title: "Kota Factory 2019" }), EPISODE)).toEqual([]);
   });
 
@@ -467,17 +469,22 @@ describe("regionBlocked", () => {
 describe("evaluate: films", () => {
   const window = durationWindow(MOVIE, SETTINGS);
   const judge = (overrides, settings = SETTINGS, title = MOVIE) =>
-    evaluate(video({ title: "The Shawshank Redemption (1994) Full Movie", ...overrides }), title, durationWindow(title, settings), settings);
+    evaluate(
+      video({ title: "Night of the Living Dead (1968) Full Movie", durationSeconds: MOVIE.runtimeSeconds, ...overrides }),
+      title,
+      durationWindow(title, settings),
+      settings
+    );
 
   test("a full upload of the right length that names the film and its year matches, scored", () => {
-    const result = judge({ durationSeconds: 8500 });
+    const result = judge({ durationSeconds: 5740 });
     expect(result).toMatchObject({ ok: true, offsetSeconds: -20, how: null, evidence: ["year"], language: null });
     expect(result.score).toBeGreaterThan(100);
   });
 
   test("a title built by hand, without credits or other runtimes, is judged on what it has", () => {
     const { people, otherRuntimes, ...bare } = MOVIE;
-    expect(judge({ durationSeconds: 8500 }, SETTINGS, bare)).toMatchObject({ ok: true, evidence: ["year"] });
+    expect(judge({ durationSeconds: 5740 }, SETTINGS, bare)).toMatchObject({ ok: true, evidence: ["year"] });
   });
 
   test.each([
@@ -486,19 +493,20 @@ describe("evaluate: films", () => {
     [{ durationSeconds: null }, "no length"],
     [{ durationSeconds: 150 }, "wrong length"],
     [{ durationSeconds: 99999 }, "wrong length"],
-    [{ title: "The Shawshank Redemption Trailer" }, 'says "trailer"'],
+    [{ title: "Night of the Living Dead Trailer" }, 'says "trailer"'],
     [{ description: "Thank you for watching our new full fan movie!" }, 'description says "fan movie"'],
-    [{ title: "Totally Different Film (1994)" }, "does not name the title"],
+    [{ title: "Totally Different Film (1968)" }, "does not name the title"],
     [{ description: "Rate it: https://www.imdb.com/title/tt9999999/" }, "links another title on IMDb"],
-    [{ title: "The Shawshank Redemption (2004) Full Movie" }, "names another year"],
-    [{ title: "The Shawshank Redemption 2 Full Movie" }, "a sequel"],
-    [{ title: "The Shawshank Redemption Full Movie" }, "no year, credits or episode title"]
+    // The 1990 remake, by its year.
+    [{ title: "Night of the Living Dead (1990) Full Movie" }, "names another year"],
+    [{ title: "Night of the Living Dead 2 Full Movie" }, "a sequel"],
+    [{ title: "Night of the Living Dead Full Movie" }, "no year, credits or episode title"]
   ])("%p is turned away: %s", (overrides, reason) => {
     expect(judge(overrides)).toMatchObject({ ok: false, reason });
   });
 
   test("evidence from the description is as good as from the title", () => {
-    expect(judge({ title: "The Shawshank Redemption Full Movie", description: "Directed by Frank Darabont" })).toMatchObject({
+    expect(judge({ title: "Night of the Living Dead Full Movie", description: "Directed by George A. Romero" })).toMatchObject({
       ok: true,
       evidence: ["credits"]
     });
@@ -506,18 +514,18 @@ describe("evaluate: films", () => {
 
   test("its own IMDb page linked is evidence, and is not 'another title'", () => {
     expect(
-      judge({ title: "The Shawshank Redemption Full Movie", description: "https://www.imdb.com/title/tt0111161/" })
+      judge({ title: "Night of the Living Dead Full Movie", description: "https://www.imdb.com/title/tt0063350/" })
     ).toMatchObject({ ok: true, evidence: ["imdb link"] });
   });
 
   test("an official channel's upload may sit further from the runtime", () => {
-    expect(judge({ durationSeconds: 7200 })).toMatchObject({ ok: false, reason: "wrong length" });
-    expect(judge({ durationSeconds: 7200, licensed: true }).ok).toBe(true);
+    expect(judge({ durationSeconds: 4800 })).toMatchObject({ ok: false, reason: "wrong length" });
+    expect(judge({ durationSeconds: 4800, licensed: true }).ok).toBe(true);
   });
 
   test("a recent film counts only from an official channel", () => {
     const recent = { ...MOVIE, year: new Date().getUTCFullYear() - 1 };
-    const title = `The Shawshank Redemption (${recent.year}) Full Movie`;
+    const title = `Night of the Living Dead (${recent.year}) Full Movie`;
     expect(judge({ title }, SETTINGS, recent)).toMatchObject({ ok: false, reason: "recent release, not an official channel" });
     expect(judge({ title, licensed: true }, SETTINGS, recent).ok).toBe(true);
   });
@@ -548,14 +556,14 @@ describe("evaluate: films", () => {
     const settings = normalizeConfig({ audioLanguage: "en" });
     const untagged = judge({ language: null }, settings).score;
     expect(judge({ language: "en" }, settings).score).toBeGreaterThan(untagged);
-    expect(judge({ title: "The Shawshank Redemption (1994) Full Movie in English" }, settings).score).toBeGreaterThan(untagged);
+    expect(judge({ title: "Night of the Living Dead (1968) Full Movie in English" }, settings).score).toBeGreaterThan(untagged);
   });
 
   test("what the title declares overrides YouTube's tag, both ways", () => {
     const hindi = normalizeConfig({ audioLanguage: "hi" });
     // Measured on Muse India: the "[Hindi dub]" upload is tagged English.
-    expect(judge({ title: "The Shawshank Redemption (1994) [Hindi dub]", language: "en" }, hindi)).toMatchObject({ ok: true, language: "hi" });
-    expect(judge({ title: "The Shawshank Redemption (1994) [English Dub]", language: "hi" }, hindi)).toMatchObject({
+    expect(judge({ title: "Night of the Living Dead (1968) [Hindi dub]", language: "en" }, hindi)).toMatchObject({ ok: true, language: "hi" });
+    expect(judge({ title: "Night of the Living Dead (1968) [English Dub]", language: "hi" }, hindi)).toMatchObject({
       ok: false,
       reason: "en audio"
     });
@@ -569,18 +577,18 @@ describe("evaluate: films", () => {
   test("credits, an official channel, HD and views all rank higher", () => {
     const base = { definition: "sd", views: null };
     const plain = judge(base).score;
-    expect(judge({ ...base, description: "with Morgan Freeman" }).score).toBeGreaterThan(plain);
+    expect(judge({ ...base, description: "with Duane Jones" }).score).toBeGreaterThan(plain);
     expect(judge({ ...base, licensed: true }).score).toBeGreaterThan(plain);
     expect(judge({ ...base, definition: "hd" }).score).toBeGreaterThan(plain);
     expect(judge({ ...base, views: 1e6 }).score).toBeGreaterThan(plain);
   });
 
   test("closer to the runtime ranks higher", () => {
-    expect(judge({ durationSeconds: 8520 }).score).toBeGreaterThan(judge({ durationSeconds: 8900 }).score);
+    expect(judge({ durationSeconds: 5760 }).score).toBeGreaterThan(judge({ durationSeconds: 6140 }).score);
   });
 
   test("an upload with no publish date is judged on the title's years alone", () => {
-    expect(judge({ publishedAt: null, title: "The Shawshank Redemption 2020 Full Movie" })).toMatchObject({
+    expect(judge({ publishedAt: null, title: "Night of the Living Dead 2020 Full Movie" })).toMatchObject({
       ok: false,
       reason: "names another year"
     });
@@ -593,11 +601,11 @@ describe("evaluate: films", () => {
 
   test("a zero margin still scores an exact match", () => {
     const settings = normalizeConfig({ movieMargin: "0s" });
-    expect(judge({ durationSeconds: 8520 }, settings).ok).toBe(true);
+    expect(judge({ durationSeconds: 5760 }, settings).ok).toBe(true);
   });
 
   test("the window is taken as given", () => {
-    expect(evaluate(video({ title: "The Shawshank Redemption (1994)", durationSeconds: 8520 }), MOVIE, window, SETTINGS).ok).toBe(true);
+    expect(evaluate(video({ title: "Night of the Living Dead (1968)", durationSeconds: 5760 }), MOVIE, window, SETTINGS).ok).toBe(true);
   });
 });
 
