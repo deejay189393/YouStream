@@ -113,6 +113,9 @@ function toVideo(detail) {
   return {
     id: detail.id,
     title: typeof snippet.title === "string" ? snippet.title : "",
+    // The start of the description is evidence both ways: genuine uploads
+    // credit the cast and director, fakes and re-uploads give themselves away.
+    description: typeof snippet.description === "string" ? snippet.description.slice(0, 1500) : "",
     channelTitle: typeof snippet.channelTitle === "string" ? snippet.channelTitle : "",
     channelId: typeof snippet.channelId === "string" ? snippet.channelId : "",
     publishedAt: typeof snippet.publishedAt === "string" ? snippet.publishedAt : null,
@@ -123,6 +126,7 @@ function toVideo(detail) {
     live: snippet.liveBroadcastContent && snippet.liveBroadcastContent !== "none" ? snippet.liveBroadcastContent : null,
     embeddable: status.embeddable !== false,
     ageRestricted: Boolean(content.contentRating && content.contentRating.ytRating === "ytAgeRestricted"),
+    licensed: content.licensedContent === true,
     regionAllowed: Array.isArray(restriction.allowed) ? restriction.allowed : null,
     regionBlocked: Array.isArray(restriction.blocked) ? restriction.blocked : null
   };

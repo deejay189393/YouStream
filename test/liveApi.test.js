@@ -16,7 +16,7 @@ function run(id, settingsOverride = {}, which = 0) {
   const found = cases.filter((c) => c.id === id)[which];
   const settings = normalizeConfig({ youtubeKey: "k", ...found.settings, ...settingsOverride });
   const window = durationWindow(found.title, settings);
-  const evaluations = found.videos.map((v) => evaluate(video({ ...v, publishedAt: null, definition: "hd" }), found.title, window, settings));
+  const evaluations = found.videos.map((v) => evaluate(video({ ...v, definition: "hd" }), found.title, window, settings));
   const matches = rankMatches(evaluations);
   return { found, settings, evaluations, matches, titles: matches.map((m) => m.video.title) };
 }
@@ -30,12 +30,17 @@ describe("TVF web series: the official upload of the right episode, and nothing 
     expect(run(id).titles).toEqual([title]);
   });
 
-  test("a 205-view podcast titled like the episode is kept out by the view minimum", () => {
+  test("TVF links each episode's IMDb page, which is evidence in itself", () => {
+    expect(run("tt28227737:1:5").matches[0].evidence).toContain("imdb link");
+  });
+
+  test("a 205-view podcast titled like the episode is kept out, by views and by name", () => {
     const { evaluations } = run("tt14392248:1:2");
     const podcast = evaluations.find((e) => e.video.title.includes("SOFTLIFE ASPIRANTs"));
     expect(podcast).toMatchObject({ ok: false, reason: "too few views" });
-    // Every other check passed it: with the floor off, it would be listed.
-    expect(run("tt14392248:1:2", { minViews: 0 }).titles).toContain(podcast.video.title);
+    // "SOFTLIFE ASPIRANTs" is another name that ends in the show's.
+    const unfloored = run("tt14392248:1:2", { minViews: 0 }).evaluations.find((e) => e.video.id === podcast.video.id);
+    expect(unfloored).toMatchObject({ ok: false, reason: "does not name the title" });
   });
 
   test("TVF Pitchers, which has left YouTube, finds nothing among its reactions", () => {
@@ -52,39 +57,43 @@ describe("films", () => {
     expect(matches[0].video).toMatchObject({ id: "VhGNhwOtbVs", channelTitle: "Cult Cinema Classics" });
   });
 
-  test("Night of the Living Dead: five genuine uploads within a minute of the runtime", () => {
+  test("Night of the Living Dead: genuine uploads within a minute of the runtime", () => {
     const { matches } = run("tt0063350");
     expect(matches.length).toBeGreaterThanOrEqual(5);
     matches.slice(0, 5).forEach((m) => expect(Math.abs(m.offsetSeconds)).toBeLessThan(60));
   });
 
-  test("The Shawshank Redemption, not on YouTube, finds nothing", () => {
-    expect(run("tt0111161").matches).toEqual([]);
+  test("The Shawshank Redemption, not on YouTube, finds nothing -- not even a partner's video essay titled like the film", () => {
+    const { matches, evaluations } = run("tt0111161");
+    expect(matches).toEqual([]);
+    expect(evaluations.find((e) => e.video.channelTitle === "Reel Mechanics").reason).toBe('description says "video essay"');
   });
 
-  test("Vivah: Rajshri's own Tamil upload, just inside the default margin", () => {
+  test("Vivah: Rajshri's own Tamil upload first", () => {
     expect(run("tt0494290").matches[0].video.channelTitle).toBe("Rajshri Tamil");
   });
 
-  test("Vivah at a 15% margin: Rajshri's Telugu upload, 16 minutes short, joins; the misspelt fake does not", () => {
-    const { matches, evaluations } = run("tt0494290", { movieMargin: "15%" });
-    expect(matches.map((m) => m.video.channelTitle)).toContain("Rajshri Telugu");
-    const fake = evaluations.find((e) => e.video.title.includes("Full Explaine & Ditails"));
-    expect(fake).toMatchObject({ ok: false, reason: 'says "explaine"' });
+  test("Vivah: Rajshri's Telugu upload, 16 minutes short, is inside the official channels' margin", () => {
+    const { matches, evaluations } = run("tt0494290");
+    expect(evaluations.find((e) => e.video.channelTitle === "Rajshri Telugu").reason).not.toBe("wrong length");
+    expect(matches.every((m) => m.video.views >= 1000)).toBe(true);
   });
 
-  test("Vivah's 'Review & Facts' uploads are all turned away", () => {
-    run("tt0494290", { movieMargin: "15%" })
+  test("Vivah's 'Review & Facts' uploads are all turned away, at any margin", () => {
+    run("tt0494290", { movieMargin: "20%" })
       .evaluations.filter((e) => /review|fact/i.test(e.video.title))
       .forEach((e) => expect(e.ok).toBe(false));
   });
 });
 
 describe("anime through Kitsu: Muse India's Spy x Family S1E3", () => {
-  test("every official upload of episode 3, and no other episode or season", () => {
+  test("every official upload of episode 3, by the publisher's own numbering, and no other episode or season", () => {
     const { matches, evaluations } = run("kitsu:45398:3");
     expect(matches.map((m) => m.video.channelTitle).sort()).toEqual(["Muse Hindi Dub", "Muse India", "Muse India", "Muse India"]);
-    matches.forEach((m) => expect(m.video.title).toMatch(/Episode 03/));
+    matches.forEach((m) => {
+      expect(m.video.title).toMatch(/Episode 03/);
+      expect(m.evidence).toContain("official numbering");
+    });
     expect(evaluations.filter((e) => e.reason === "season 3").length).toBeGreaterThan(5);
   });
 

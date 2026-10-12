@@ -156,9 +156,9 @@ describe("GET /:config/explain/:type/:id.json", () => {
 
   test("a lookup with no runtime known", async () => {
     routeFetch([
-      ["/meta/movie/", { meta: { name: "Untimed" } }],
+      ["/meta/movie/", { meta: { name: "Untimed", releaseInfo: "1990" } }],
       ["/search?", { items: [{ id: { videoId: "a" } }] }],
-      ["/videos?", { items: [apiVideo("a", { snippet: { title: "Untimed" }, contentDetails: { duration: "PT1H30M" } })] }]
+      ["/videos?", { items: [apiVideo("a", { snippet: { title: "Untimed (1990)" }, contentDetails: { duration: "PT1H30M" } })] }]
     ]);
     const res = await request(app).get(`/${CFG()}/explain/movie/tt1234567.json`);
     expect(res.body.length).toMatchObject({ basis: "unknown", runtime: null, margin: null });

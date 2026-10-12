@@ -13,8 +13,9 @@ const { COUNTRY_SET, LANGUAGE_SET } = require("./regions");
  *   youtubeKey      required -- the reader's YouTube Data API key
  *   tmdbKey         optional -- exact episode runtimes, and tmdb: ids
  *   movieMargin     "10m"  how far a film's length may be from its runtime
- *   episodeMargin   "45s"  the same for an episode whose own runtime is known
- *   typicalMargin   "20%"  for an episode when only the show's usual length is
+ *   partnerMovieMargin "20%" the same, for a film on an official channel
+ *   episodeMargin   "90s"  the same for an episode whose own runtime is known
+ *   typicalMargin   "30%"  for an episode when only the show's usual length is
  *   playback        ["app", "youtube"]  the ways to watch, in order
  *   playbackVersion 1      the option list the above was saved against
  *   types           ["movie", "series"]
@@ -23,7 +24,9 @@ const { COUNTRY_SET, LANGUAGE_SET } = require("./regions");
  *   region          "IN"   hides videos blocked there, ranks for it
  *   audioLanguage   "hi"   drops videos spoken in another language
  *   embeddableOnly  false  only videos that allow embedding (Stremio Web)
+ *   officialOnly    false  only uploads from YouTube content partners
  *   exclude         [...]  words that disqualify a video's title
+ *   excludeDescription [...] phrases that disqualify a video's description
  *   movieQuery      "{title} {year} full movie {language}"
  *   episodeQuery    "{title} season {season} episode {episode}"
  */
@@ -38,10 +41,26 @@ const MARGIN_UNITS = {
   "%": { label: "%", max: 100 }
 };
 
+/**
+ * Defaults chosen on measurements (see README, "Runtime margins"):
+ *
+ *   movies                10 minutes
+ *   movies, official      20% -- partner channels' cuts of Indian films run
+ *                         10 to 25 minutes short, and were all genuine
+ *   episodes              90 seconds -- listings are whole minutes and the
+ *                         YouTube cut differs by up to 70 s: at 45 s, two of
+ *                         the five official Aspirants episodes were missed
+ *   episodes, usual length 30% -- one Kota Factory episode runs 29% under
+ *                         the show's usual length
+ *
+ * The episode number, not the length, is what keeps the wrong episode out,
+ * so the wider episode margins cost no precision in the measured searches.
+ */
 const DEFAULT_MARGINS = {
   movieMargin: { value: 10, unit: "m" },
-  episodeMargin: { value: 45, unit: "s" },
-  typicalMargin: { value: 20, unit: "%" }
+  partnerMovieMargin: { value: 20, unit: "%" },
+  episodeMargin: { value: 90, unit: "s" },
+  typicalMargin: { value: 30, unit: "%" }
 };
 
 const CONTENT_TYPES = ["movie", "series"];
@@ -67,19 +86,44 @@ const MAX_RESULTS_LIMIT = 20;
  * compilations are sold as "full movie" and run feature length.
  */
 const DEFAULT_EXCLUDE = [
-  "trailer", "teaser", "promo", "sneak peek", "reaction", "react", "reacts", "reacting", "review", "explained",
-  "explanation", "explaine", "recap", "breakdown", "analysis", "commentary", "commentry", "behind the scenes",
+  "trailer", "teaser", "promo", "sneak peek", "reaction", "react", "reacts", "reacting", "review", "explain",
+  "explained", "explanation", "explaine", "recap", "breakdown", "analysis", "commentary", "commentry", "behind the scenes",
   "making of", "bloopers",
   "interview", "podcast", "spoof", "parody", "fan made", "fanmade", "fan film", "gameplay", "walkthrough",
   "cutscenes", "jukebox", "soundtrack", "ost", "lyrics", "amv", "edit", "shorts", "in minutes", "summary",
   "summarized", "ending explained", "theory", "theories", "best scenes", "deleted scenes", "compilation", "revisit",
-  "rewind", "watching", "watch along", "watchalong", "watch party", "discussion", "fact", "best of", "album"
+  "rewind", "watching", "watch along", "watchalong", "watch party", "discussion", "fact", "best of", "album",
+  "r&f", "script reading", "table read", "ambience", "ambient", "audiobook", "audio book", "pocket fm", "details",
+  "rifftrax", "abridged", "ytp", "meme", "ai generated", "full story", "game movie", "fandub", "critique",
+  "critica", "resena", "recensione", "reaccion", "reacao", "explicacion", "explicado", "resumen", "resumo"
+];
+
+/**
+ * Phrases in a video's description that mark it as something other than the
+ * title itself. Measured over 1,490 real results: every one of these appeared
+ * only on wrong matches or on unofficial re-uploads, never on an official or
+ * public-domain upload. A fan film says "our new full fan movie"; an
+ * explainer posing as a film says "in this video, we delve into"; a Hindi
+ * recap says "is video mein ... baat karenge"; a partner channel's video
+ * essay titled "The Shawshank Redemption (1994) | Tim Robbins, Morgan
+ * Freeman" says "in this in-depth video essay, we analyze"; re-uploads of
+ * other people's films cite "Section 107" and "fair use", or say "I do not
+ * own"; a review channel that titles its uploads "Full Movie" says "this is
+ * not a movie, this is just a movie review".
+ */
+const DEFAULT_EXCLUDE_DESCRIPTION = [
+  "fan movie", "fan film", "fanmade", "fan made", "in this video", "in this youtube video", "is video mein",
+  "is video me", "iss video mein", "we delve", "we will discuss", "we discuss", "we explore", "all rights belong",
+  "do not own", "dont own", "not monetized", "section 107", "fair use", "copyright disclaimer", "gameplay",
+  "game movie", "cutscenes", "troll", "critique", "video essay", "we analyze", "we analyse", "we examine",
+  "this breakdown", "in depth analysis", "not a movie", "not the full movie", "just a movie review", "just a review",
+  "only do reviews", "never show the full movie"
 ];
 
 const DEFAULT_MOVIE_QUERY = "{title} {year} full movie {language}";
 const DEFAULT_EPISODE_QUERY = "{title} season {season} episode {episode}";
 const MAX_QUERY_LENGTH = 200;
-const MAX_EXCLUDE_WORDS = 80;
+const MAX_EXCLUDE_WORDS = 200;
 const MAX_WORD_LENGTH = 40;
 const MAX_KEY_LENGTH = 512;
 
@@ -122,8 +166,8 @@ function cleanTemplate(raw, fallback) {
   return text.includes("{title}") ? text : fallback;
 }
 
-function cleanExclude(raw) {
-  if (!Array.isArray(raw)) return [...DEFAULT_EXCLUDE];
+function cleanExclude(raw, defaults = DEFAULT_EXCLUDE) {
+  if (!Array.isArray(raw)) return [...defaults];
   const seen = new Set();
   const words = [];
   raw.forEach((w) => {
@@ -163,6 +207,7 @@ function normalizeConfig(config) {
     youtubeKey: cleanKey(c.youtubeKey),
     tmdbKey: cleanKey(c.tmdbKey),
     movieMargin: margin("movieMargin"),
+    partnerMovieMargin: margin("partnerMovieMargin"),
     episodeMargin: margin("episodeMargin"),
     typicalMargin: margin("typicalMargin"),
     playback: normalizePlayback(c.playback),
@@ -172,7 +217,9 @@ function normalizeConfig(config) {
     region: typeof c.region === "string" && COUNTRY_SET.has(c.region) ? c.region : "",
     audioLanguage: typeof c.audioLanguage === "string" && LANGUAGE_SET.has(c.audioLanguage) ? c.audioLanguage : "",
     embeddableOnly: c.embeddableOnly === true,
+    officialOnly: c.officialOnly === true,
     exclude: cleanExclude(c.exclude),
+    excludeDescription: cleanExclude(c.excludeDescription, DEFAULT_EXCLUDE_DESCRIPTION),
     movieQuery: cleanTemplate(c.movieQuery, DEFAULT_MOVIE_QUERY),
     episodeQuery: cleanTemplate(c.episodeQuery, DEFAULT_EPISODE_QUERY)
   };
@@ -196,7 +243,9 @@ function encodeConfig(config) {
   if (n.region) out.region = n.region;
   if (n.audioLanguage) out.audioLanguage = n.audioLanguage;
   if (n.embeddableOnly) out.embeddableOnly = true;
+  if (n.officialOnly) out.officialOnly = true;
   if (!sameList(n.exclude, DEFAULT_EXCLUDE)) out.exclude = n.exclude;
+  if (!sameList(n.excludeDescription, DEFAULT_EXCLUDE_DESCRIPTION)) out.excludeDescription = n.excludeDescription;
   if (n.movieQuery !== DEFAULT_MOVIE_QUERY) out.movieQuery = n.movieQuery;
   if (n.episodeQuery !== DEFAULT_EPISODE_QUERY) out.episodeQuery = n.episodeQuery;
   return encodeURIComponent(JSON.stringify(out));
@@ -250,6 +299,7 @@ module.exports = {
   MARGIN_UNITS,
   DEFAULT_MARGINS,
   DEFAULT_EXCLUDE,
+  DEFAULT_EXCLUDE_DESCRIPTION,
   DEFAULT_MOVIE_QUERY,
   DEFAULT_EPISODE_QUERY,
   DEFAULT_MAX_RESULTS,

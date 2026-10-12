@@ -18,11 +18,18 @@ async function fetchMeta(type, imdbId) {
   return meta && typeof meta === "object" && typeof meta.name === "string" && meta.name ? meta : null;
 }
 
+/** The credited people Cinemeta lists: its top-billed cast and the directors. */
+function peopleOf(meta) {
+  const names = [...(Array.isArray(meta.cast) ? meta.cast : []), ...(Array.isArray(meta.director) ? meta.director : [])];
+  return [...new Set(names.filter((n) => typeof n === "string" && n.trim()).map((n) => n.trim()))];
+}
+
 async function movie(imdbId) {
   const meta = await fetchMeta("movie", imdbId);
   if (!meta) return null;
   return {
     title: meta.name,
+    people: peopleOf(meta),
     year: yearOf(meta.year || meta.releaseInfo || meta.released),
     runtimeSeconds: runtimeSeconds(meta.runtime),
     tmdbId: Number.isInteger(meta.moviedb_id) ? String(meta.moviedb_id) : null
@@ -51,13 +58,15 @@ async function episode(imdbId, season, episodeNumber) {
   const seasons = new Set(videos.map((v) => Number(v.season)).filter((s) => s >= 1));
   return {
     title: meta.name,
+    people: peopleOf(meta),
     year: yearOf(meta.year || meta.releaseInfo || meta.released),
     typicalRuntimeSeconds: runtimeSeconds(meta.runtime),
     episodeTitle: match && typeof (match.name || match.title) === "string" ? match.name || match.title : null,
+    releaseYear: match ? yearOf(match.released || match.firstAired) : null,
     absoluteEpisode: absoluteEpisode(videos, season, episodeNumber),
     seasonCount: seasons.size || null,
     tmdbId: Number.isInteger(meta.moviedb_id) ? String(meta.moviedb_id) : null
   };
 }
 
-module.exports = { movie, episode, absoluteEpisode, BASE_URL };
+module.exports = { movie, episode, absoluteEpisode, peopleOf, BASE_URL };

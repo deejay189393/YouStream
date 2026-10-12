@@ -41,6 +41,7 @@ function video(overrides = {}) {
   return {
     id: "vid00000001",
     title: "Some Film (1994) Full Movie",
+    description: "",
     channelTitle: "A Channel",
     channelId: "UC123",
     publishedAt: "2020-01-01T00:00:00Z",
@@ -51,6 +52,7 @@ function video(overrides = {}) {
     live: null,
     embeddable: true,
     ageRestricted: false,
+    licensed: false,
     regionAllowed: null,
     regionBlocked: null,
     ...overrides

@@ -2,10 +2,18 @@ const {
   durationWindow,
   searchDuration,
   marginSeconds,
+  inWindow,
   parseEpisodeMarkers,
   markerWords,
   usableEpisodeTitle,
-  nameMatch,
+  titleWords,
+  anchoredName,
+  corroboration,
+  namesPerson,
+  linkedImdbIds,
+  namesEpisodeTitle,
+  nearlyEqual,
+  isRecent,
   numberAfterName,
   isSequel,
   yearVerdict,
@@ -26,7 +34,10 @@ const MOVIE = {
   title: "The Shawshank Redemption",
   aliases: [],
   year: 1994,
+  people: ["Tim Robbins", "Morgan Freeman", "Frank Darabont"],
+  imdbId: "tt0111161",
   runtimeSeconds: 8520,
+  otherRuntimes: [],
   runtimeKind: "exact"
 };
 
@@ -35,7 +46,10 @@ const EPISODE = {
   title: "Kota Factory",
   aliases: [],
   year: 2019,
+  people: ["Mayur More", "Jitendra Kumar"],
+  imdbId: "tt9432978",
   runtimeSeconds: 2220,
+  otherRuntimes: [],
   runtimeKind: "exact",
   season: 1,
   episode: 3,
@@ -58,24 +72,37 @@ describe("margins and the length window", () => {
     expect(22 * 60 + 40).toBeGreaterThanOrEqual(window.min);
   });
 
-  test("films use the movie margin", () => {
+  test("films use the movie margin, and a wider one for official channels", () => {
     expect(durationWindow(MOVIE, SETTINGS)).toEqual({
       min: 7920,
       max: 9120,
       target: 8520,
       tolerance: 600,
       margin: { value: 10, unit: "m" },
-      basis: "exact"
+      basis: "exact",
+      partnerMin: 6816,
+      partnerMax: 10224
     });
   });
 
+  test("the official span is never narrower than the ordinary one", () => {
+    const window = durationWindow(MOVIE, normalizeConfig({ movieMargin: "50m", partnerMovieMargin: "1%" }));
+    expect(window.partnerMin).toBe(window.min);
+  });
+
+  test("when sources disagree on a film's runtime, a video close to either counts", () => {
+    const window = durationWindow({ ...MOVIE, runtimeSeconds: 7740, otherRuntimes: [8760] }, SETTINGS);
+    expect(window).toMatchObject({ min: 7140, max: 9360, target: 7740 });
+  });
+
   test("an episode with its own runtime uses the episode margin", () => {
-    expect(durationWindow(EPISODE, SETTINGS)).toMatchObject({ min: 2175, max: 2265, basis: "exact" });
+    expect(durationWindow(EPISODE, SETTINGS)).toMatchObject({ min: 2130, max: 2310, basis: "exact" });
+    expect(durationWindow(EPISODE, SETTINGS).partnerMin).toBeUndefined();
   });
 
   test("an episode with only the show's usual length uses the wider typical margin", () => {
     const window = durationWindow({ ...EPISODE, runtimeKind: "typical", runtimeSeconds: 3000 }, SETTINGS);
-    expect(window).toMatchObject({ min: 2400, max: 3600, basis: "typical", margin: { value: 20, unit: "%" } });
+    expect(window).toMatchObject({ min: 2100, max: 3900, basis: "typical", margin: { value: 30, unit: "%" } });
   });
 
   test("no runtime anywhere falls back to wide bounds", () => {
@@ -90,8 +117,19 @@ describe("margins and the length window", () => {
   });
 
   test("a margin wider than the runtime never goes below zero", () => {
-    const window = durationWindow({ ...EPISODE, runtimeSeconds: 60 }, normalizeConfig({ episodeMargin: "5m" }));
+    const short = { ...MOVIE, runtimeSeconds: 60 };
+    const window = durationWindow(short, normalizeConfig({ movieMargin: "5m", partnerMovieMargin: "100%" }));
     expect(window.min).toBe(0);
+    expect(window.partnerMin).toBe(0);
+  });
+
+  test("inWindow: the ordinary span for everyone, the official one only for partners", () => {
+    const window = durationWindow(MOVIE, SETTINGS);
+    expect(inWindow(video({ durationSeconds: 8000 }), window)).toBe(true);
+    expect(inWindow(video({ durationSeconds: 7000 }), window)).toBe(false);
+    expect(inWindow(video({ durationSeconds: 7000, licensed: true }), window)).toBe(true);
+    expect(inWindow(video({ durationSeconds: 6000, licensed: true }), window)).toBe(false);
+    expect(inWindow(video({ durationSeconds: 2000, licensed: true }), durationWindow(EPISODE, SETTINGS))).toBe(false);
   });
 
   test.each([
@@ -158,43 +196,139 @@ describe("usableEpisodeTitle", () => {
   });
 });
 
-describe("nameMatch", () => {
-  const match = (names, hay) => nameMatch(names, fold(hay));
-
-  test("the whole name as written", () => {
-    expect(match(["Kota Factory"], "Kota Factory - S01 E03")).toMatchObject({ ok: true, phrase: true, coverage: 1 });
+describe("titleWords", () => {
+  test("splits a title into parts, marking possessives and what follows a colon", () => {
+    const words = titleWords("F.W. Murnau's Nosferatu: A Symphony | HD");
+    expect(words.map((w) => [w.t, w.seg, w.possessive, w.colon])).toEqual([
+      ["f", 0, false, false],
+      ["w", 1, false, false],
+      ["murnaus", 2, true, false],
+      ["nosferatu", 2, false, false],
+      ["a", 3, false, true],
+      ["symphony", 3, false, true],
+      ["hd", 4, false, false]
+    ]);
   });
 
-  test("a short name needs every word", () => {
-    expect(match(["TVF Pitchers"], "Pitchers Episode 3").ok).toBe(false);
-    expect(match(["TVF Aspirants"], "TVF's Aspirants | S01 E03").ok).toBe(false);
-    expect(match(["Aspirants"], "TVF's Aspirants | S01 E03").ok).toBe(true);
+  test("a lone capital I is a divider", () => {
+    expect(titleWords("Movie I Carnival of Souls I Full").map((w) => w.seg)).toEqual([0, 1, 1, 1, 2]);
+  });
+});
+
+describe("anchoredName", () => {
+  const anchored = (title, names, people = []) => anchoredName(title, names, people).ok;
+
+  test.each([
+    ["Kota Factory - S01 E03 -  Optimization", ["Kota Factory"]],
+    ["TVF's Aspirants | S01 E03 | Positive Approach", ["Aspirants"]],
+    ["F.W. Murnau's Nosferatu (1922) Fantasy", ["Nosferatu"]],
+    ["Ed Wood's Classic Plan 9 From Outer Space (1958) Full Movie", ["Plan 9 from Outer Space"]],
+    ["Howard Hawks' His Girl Friday (1940)", ["His Girl Friday"]],
+    ["Spider-Man: No Way Home - FULL Movie (2021)", ["Spider-Man: No Way Home"]],
+    ["SPY\u00d7FAMILY - Episode 03 (S1E03) [Hindi dub]", ["SPY x FAMILY"]],
+    ["Drishyam \uff5c Hindi Full Movie \uff5c Ajay Devgn", ["Drishyam"]],
+    ["Mr Bean | Mr Bean - S01 E01- Full Episode HD", ["Mr. Bean"]],
+    ["Maine Pyar Kiya Tamil Dubbed Movie | Romantic Movie", ["Maine Pyar Kiya"]],
+    ["Legendary 1960's Horror Movie I Carnival of Souls (1962) I Full Movie HD", ["Carnival of Souls"]],
+    ["Charade: Full Movie", ["Charade"]],
+    ["Kota Factory 03 [English Sub]", ["Kota Factory"]],
+    ["Watch Kota Factory", ["Kota Factory"]]
+  ])("names it: %s", (title, names) => {
+    expect(anchored(title, names)).toBe(true);
   });
 
-  test("the channel name can supply a word", () => {
-    expect(match(["TVF Pitchers"], "Pitchers Episode 3 TVF").ok).toBe(true);
+  test.each([
+    ["Yeh Meri Zindagi Episode 1", ["Yeh Meri Family"]],
+    ["CHORI CHORI CHUPKE CHUPKE FULL MOVIE", ["Chupke Chupke"]],
+    ["Cesar 911 Season 1 Episode 1", ["9-1-1"]],
+    ["The Golden Door (aka Falling Up) 2009 USA", ["Up"]],
+    ["Up in the Air Full Movie", ["Up"]],
+    ["Definitely Real Pulp Fiction", ["Pulp Fiction"]],
+    ["Pokemon Indigo League || Episode 1", ["Pok\u00e9mon"]],
+    ["JOKER: FOLIE \u00c0 DEUX (2024) FULL MOVIE", ["Joker"]],
+    ["Baahubali: The Conclusion Full Movie", ["Baahubali"]],
+    ["Kota", ["Kota Factory"]],
+    ["Anything", ["!!!"]]
+  ])("does not name it: %s", (title, names) => {
+    expect(anchored(title, names)).toBe(false);
   });
 
-  test("a long name needs 60% of its words", () => {
-    const name = ["Mission: Impossible – Dead Reckoning Part One"];
-    expect(match(name, "Mission Impossible Dead Reckoning Full Movie").ok).toBe(true);
-    expect(match(name, "Mission Impossible Full Movie").ok).toBe(false);
+  test("credits may stand beside the name, on either side", () => {
+    expect(anchored("Liam Neeson in Taken Full Movie", ["Taken"], ["Liam Neeson"])).toBe(true);
+    expect(anchored("Liam Neeson In TAKEN IDENTITY - Hollywood Movie", ["Taken"], ["Liam Neeson"])).toBe(false);
+    expect(anchored("Metropolis 1927 Fritz Lang Full Movie", ["Metropolis"], ["Fritz Lang"])).toBe(true);
   });
 
-  test("another name can carry the match", () => {
-    const names = ["Harry Potter and the Philosopher's Stone", "Harry Potter and the Sorcerer's Stone"];
-    expect(match(names, "Harry Potter and the Sorcerers Stone full movie")).toMatchObject({ ok: true, phrase: true });
-    expect(match(names, "Harry Potter and the Chamber of Secrets").ok).toBe(false);
+  test("returns the name that matched", () => {
+    expect(anchoredName("Nosferatu (1922)", ["Nosferatu: A Symphony of Horror", "Nosferatu"], [])).toEqual({
+      ok: true,
+      name: "Nosferatu"
+    });
+  });
+});
+
+describe("evidence", () => {
+  test("namesPerson: a full name, or a distinctive surname", () => {
+    expect(namesPerson(fold("Starring Amitabh Bachchan"), "Amitabh Bachchan")).toBe(true);
+    expect(namesPerson(fold("A Bachchan classic"), "Amitabh Bachchan")).toBe(true);
+    expect(namesPerson(fold("Salman Khan"), "Shah Rukh Khan")).toBe(false);
+    expect(namesPerson(fold("Mr Wood"), "Ed Wood")).toBe(false);
+    expect(namesPerson(fold("Edward D. Wood Jr presents"), "Edward D. Wood Jr.")).toBe(true);
+    expect(namesPerson(fold("Bachchan"), "Bachchan")).toBe(true);
+    expect(namesPerson(fold("anything"), "!!!")).toBe(false);
   });
 
-  test("a name that folds to nothing is skipped", () => {
-    expect(match(["!!!", "Kota Factory"], "Kota Factory").ok).toBe(true);
+  test("linkedImdbIds", () => {
+    expect(linkedImdbIds("Rate us on IMDb - https://www.imdb.com/title/tt28227737/ and imdb.com/title/TT0111161")).toEqual([
+      "tt28227737",
+      "tt0111161"
+    ]);
+    expect(linkedImdbIds(undefined)).toEqual([]);
   });
 
-  test("prefers a phrase match, then better coverage, then the first name", () => {
-    expect(match(["Kota Season Factory", "Kota Factory"], "kota factory season 1").name).toBe("Kota Factory");
-    expect(match(["Alpha Beta Gamma Delta Epsilon", "Alpha Beta Gamma"], "alpha x beta gamma").name).toBe("Alpha Beta Gamma");
-    expect(match(["Kota", "Kota Factory"], "kota factory").name).toBe("Kota");
+  test("nearlyEqual allows one letter's difference", () => {
+    expect(nearlyEqual("swamy", "swami")).toBe(true);
+    expect(nearlyEqual("swami", "swamis")).toBe(true);
+    expect(nearlyEqual("swamis", "swami")).toBe(true);
+    expect(nearlyEqual("swami", "swami")).toBe(true);
+    expect(nearlyEqual("swami", "sweet")).toBe(false);
+    expect(nearlyEqual("swami", "swamiji")).toBe(false);
+  });
+
+  test("namesEpisodeTitle tolerates respelling and a trailing part number", () => {
+    expect(namesEpisodeTitle(fold("Malgudi Days - Episode 1 - Swami And Friends"), "Swamy And Friends I")).toBe(true);
+    expect(namesEpisodeTitle(fold("Kota Factory - Optimization"), "Optimization")).toBe(true);
+    expect(namesEpisodeTitle(fold("Kota Factory - Optimisation 2"), "Optimization 2")).toBe(true);
+    expect(namesEpisodeTitle(fold("Kota Factory"), "Shutdown")).toBe(false);
+    expect(namesEpisodeTitle(fold("Kota Factory"), "Episode 3")).toBe(false);
+    expect(namesEpisodeTitle(fold("Kota Factory - Shutdown"), "Optimization 2")).toBe(false);
+    expect(namesEpisodeTitle(fold("Kota Factory - Optimisation 2"), "Optimization II")).toBe(true);
+  });
+
+  test("corroboration collects every kind there is", () => {
+    const v = video({
+      title: "The Shawshank Redemption (1994)",
+      description: "Starring Morgan Freeman. https://www.imdb.com/title/tt0111161/"
+    });
+    expect(corroboration(v, MOVIE)).toEqual(["year", "credits", "imdb link"]);
+    expect(corroboration(video({ title: "Kota Factory - S01 E03 - Optimization", description: undefined }), EPISODE)).toEqual([
+      "episode title"
+    ]);
+    expect(corroboration(video({ title: "Nothing here" }), { ...MOVIE, year: null, people: undefined, imdbId: null })).toEqual([]);
+  });
+
+  test("a year counts for a film, give or take one, but not for an episode", () => {
+    expect(corroboration(video({ title: "Shawshank 1995" }), MOVIE)).toEqual(["year"]);
+    expect(corroboration(video({ title: "Kota Factory 2019" }), EPISODE)).toEqual([]);
+  });
+
+  test("isRecent: within five calendar years, by the episode's own year when known", () => {
+    const now = new Date("2026-10-12");
+    expect(isRecent({ isEpisode: false, year: 2022 }, now)).toBe(true);
+    expect(isRecent({ isEpisode: false, year: 2021 }, now)).toBe(false);
+    expect(isRecent({ isEpisode: true, year: 2019, releaseYear: 2024 }, now)).toBe(true);
+    expect(isRecent({ isEpisode: true, year: 2024 }, now)).toBe(false);
+    expect(isRecent({ isEpisode: false, year: null })).toBe(false);
   });
 });
 
@@ -307,12 +441,17 @@ describe("regionBlocked", () => {
 describe("evaluate: films", () => {
   const window = durationWindow(MOVIE, SETTINGS);
   const judge = (overrides, settings = SETTINGS, title = MOVIE) =>
-    evaluate(video({ title: "The Shawshank Redemption (1994) Full Movie", ...overrides }), title, window, settings);
+    evaluate(video({ title: "The Shawshank Redemption (1994) Full Movie", ...overrides }), title, durationWindow(title, settings), settings);
 
-  test("a full upload of the right length matches, scored", () => {
+  test("a full upload of the right length that names the film and its year matches, scored", () => {
     const result = judge({ durationSeconds: 8500 });
-    expect(result).toMatchObject({ ok: true, offsetSeconds: -20, how: null });
+    expect(result).toMatchObject({ ok: true, offsetSeconds: -20, how: null, evidence: ["year"], language: null });
     expect(result.score).toBeGreaterThan(100);
+  });
+
+  test("a title built by hand, without credits or other runtimes, is judged on what it has", () => {
+    const { people, otherRuntimes, ...bare } = MOVIE;
+    expect(judge({ durationSeconds: 8500 }, SETTINGS, bare)).toMatchObject({ ok: true, evidence: ["year"] });
   });
 
   test.each([
@@ -322,11 +461,45 @@ describe("evaluate: films", () => {
     [{ durationSeconds: 150 }, "wrong length"],
     [{ durationSeconds: 99999 }, "wrong length"],
     [{ title: "The Shawshank Redemption Trailer" }, 'says "trailer"'],
+    [{ description: "Thank you for watching our new full fan movie!" }, 'description says "fan movie"'],
     [{ title: "Totally Different Film (1994)" }, "does not name the title"],
+    [{ description: "Rate it: https://www.imdb.com/title/tt9999999/" }, "links another title on IMDb"],
     [{ title: "The Shawshank Redemption (2004) Full Movie" }, "names another year"],
-    [{ title: "The Shawshank Redemption 2 Full Movie" }, "a sequel"]
+    [{ title: "The Shawshank Redemption 2 Full Movie" }, "a sequel"],
+    [{ title: "The Shawshank Redemption Full Movie" }, "no year, credits or episode title"]
   ])("%p is turned away: %s", (overrides, reason) => {
     expect(judge(overrides)).toMatchObject({ ok: false, reason });
+  });
+
+  test("evidence from the description is as good as from the title", () => {
+    expect(judge({ title: "The Shawshank Redemption Full Movie", description: "Directed by Frank Darabont" })).toMatchObject({
+      ok: true,
+      evidence: ["credits"]
+    });
+  });
+
+  test("its own IMDb page linked is evidence, and is not 'another title'", () => {
+    expect(
+      judge({ title: "The Shawshank Redemption Full Movie", description: "https://www.imdb.com/title/tt0111161/" })
+    ).toMatchObject({ ok: true, evidence: ["imdb link"] });
+  });
+
+  test("an official channel's upload may sit further from the runtime", () => {
+    expect(judge({ durationSeconds: 7200 })).toMatchObject({ ok: false, reason: "wrong length" });
+    expect(judge({ durationSeconds: 7200, licensed: true }).ok).toBe(true);
+  });
+
+  test("a recent film counts only from an official channel", () => {
+    const recent = { ...MOVIE, year: new Date().getUTCFullYear() - 1 };
+    const title = `The Shawshank Redemption (${recent.year}) Full Movie`;
+    expect(judge({ title }, SETTINGS, recent)).toMatchObject({ ok: false, reason: "recent release, not an official channel" });
+    expect(judge({ title, licensed: true }, SETTINGS, recent).ok).toBe(true);
+  });
+
+  test("the official-only setting keeps out every unofficial upload", () => {
+    const settings = normalizeConfig({ officialOnly: true });
+    expect(judge({}, settings)).toMatchObject({ ok: false, reason: "not an official channel" });
+    expect(judge({ licensed: true }, settings).ok).toBe(true);
   });
 
   test("too few views, unless the count is hidden or the floor is off", () => {
@@ -367,12 +540,13 @@ describe("evaluate: films", () => {
     expect(judge({ language: "ta" })).toMatchObject({ ok: true, language: "ta" });
   });
 
-  test("the right year, the whole name, HD and views all rank higher", () => {
-    const plain = judge({ title: "Shawshank Redemption full movie", definition: "sd", views: null });
-    expect(judge({ title: "Shawshank Redemption 1994 full movie", definition: "sd", views: null }).score).toBeGreaterThan(plain.score);
-    expect(judge({ title: "The Shawshank Redemption full movie", definition: "sd", views: null }).score).toBeGreaterThan(plain.score);
-    expect(judge({ title: "Shawshank Redemption full movie", definition: "hd", views: null }).score).toBeGreaterThan(plain.score);
-    expect(judge({ title: "Shawshank Redemption full movie", definition: "sd", views: 1e6 }).score).toBeGreaterThan(plain.score);
+  test("credits, an official channel, HD and views all rank higher", () => {
+    const base = { definition: "sd", views: null };
+    const plain = judge(base).score;
+    expect(judge({ ...base, description: "with Morgan Freeman" }).score).toBeGreaterThan(plain);
+    expect(judge({ ...base, licensed: true }).score).toBeGreaterThan(plain);
+    expect(judge({ ...base, definition: "hd" }).score).toBeGreaterThan(plain);
+    expect(judge({ ...base, views: 1e6 }).score).toBeGreaterThan(plain);
   });
 
   test("closer to the runtime ranks higher", () => {
@@ -388,14 +562,16 @@ describe("evaluate: films", () => {
 
   test("with no runtime known, any length inside the wide bounds counts, with no offset", () => {
     const title = { ...MOVIE, runtimeSeconds: null };
-    const result = evaluate(video({ title: "The Shawshank Redemption", durationSeconds: 5000 }), title, durationWindow(title, SETTINGS), SETTINGS);
-    expect(result).toMatchObject({ ok: true, offsetSeconds: null });
+    expect(judge({ durationSeconds: 5000 }, SETTINGS, title)).toMatchObject({ ok: true, offsetSeconds: null });
   });
 
   test("a zero margin still scores an exact match", () => {
     const settings = normalizeConfig({ movieMargin: "0s" });
-    const exact = evaluate(video({ durationSeconds: 8520, title: "The Shawshank Redemption" }), MOVIE, durationWindow(MOVIE, settings), settings);
-    expect(exact.ok).toBe(true);
+    expect(judge({ durationSeconds: 8520 }, settings).ok).toBe(true);
+  });
+
+  test("the window is taken as given", () => {
+    expect(evaluate(video({ title: "The Shawshank Redemption (1994)", durationSeconds: 8520 }), MOVIE, window, SETTINGS).ok).toBe(true);
   });
 });
 
@@ -403,17 +579,41 @@ describe("evaluate: episodes", () => {
   const window = durationWindow(EPISODE, SETTINGS);
   const judge = (title, overrides = {}, t = EPISODE) =>
     evaluate(video({ title, durationSeconds: 2211, channelTitle: "The Viral Fever", ...overrides }), t, window, SETTINGS);
+  const CREDITED = { description: "With Jitendra Kumar" };
 
-  test("season and episode", () => {
-    expect(judge("Kota Factory - S01 E03 - Optimization")).toMatchObject({ ok: true, how: "season and episode" });
+  test("season and episode, with the episode's name as evidence", () => {
+    expect(judge("Kota Factory - S01 E03 - Optimization")).toMatchObject({
+      ok: true,
+      how: "season and episode",
+      evidence: ["episode title"]
+    });
+  });
+
+  test("an episode with nothing to show it is this show's is turned away", () => {
+    expect(judge("Kota Factory - S01 E03")).toMatchObject({ ok: false, reason: "no year, credits or episode title" });
+    expect(judge("Kota Factory - S01 E03", CREDITED)).toMatchObject({ ok: true, evidence: ["credits"] });
   });
 
   test("naming the episode as well ranks higher", () => {
-    expect(judge("Kota Factory - S01 E03 - Optimization").score).toBeGreaterThan(judge("Kota Factory - S01 E03").score);
+    expect(judge("Kota Factory - S01 E03 - Optimization", CREDITED).score).toBeGreaterThan(judge("Kota Factory - S01 E03", CREDITED).score);
+  });
+
+  test("an official channel's own numbering, at the episode's own length, is evidence", () => {
+    expect(judge("Kota Factory - S01 E03", { licensed: true })).toMatchObject({ ok: true, evidence: ["official numbering"] });
+    // Not on the show's usual length, nor without the season, for a show with several.
+    const typical = { ...EPISODE, runtimeKind: "typical" };
+    const w = durationWindow(typical, SETTINGS);
+    expect(evaluate(video({ title: "Kota Factory - S01 E03", durationSeconds: 2211, licensed: true }), typical, w, SETTINGS).ok).toBe(false);
+    expect(judge("Kota Factory Episode 3", { licensed: true }).ok).toBe(false);
+  });
+
+  test("a single-season show's official numbering needs no season", () => {
+    const anime = { ...EPISODE, seasonCount: 1, people: [] };
+    expect(judge("Kota Factory - Episode 03", { licensed: true }, anime)).toMatchObject({ ok: true, evidence: ["official numbering"] });
   });
 
   test("an episode number alone, for the first season", () => {
-    expect(judge("Kota Factory Episode 3", {}, { ...EPISODE, seasonCount: 3 })).toMatchObject({ ok: true, how: "episode" });
+    expect(judge("Kota Factory Episode 3", CREDITED)).toMatchObject({ ok: true, how: "episode" });
   });
 
   test("the episode's name alone", () => {
@@ -426,32 +626,32 @@ describe("evaluate: episodes", () => {
     ["Kota Factory Episodes 1-5", "covers several episodes"],
     ["Kota Factory full series", "names no episode"]
   ])("%s is turned away: %s", (title, reason) => {
-    expect(judge(title)).toMatchObject({ ok: false, reason });
+    expect(judge(title, CREDITED)).toMatchObject({ ok: false, reason });
   });
 
   test("a number straight after the show's name is the episode when nothing else is", () => {
-    expect(judge("Kota Factory 03 [English Sub]")).toMatchObject({ ok: true, how: "episode" });
-    expect(judge("Kota Factory 04 [English Sub]")).toMatchObject({ ok: false, reason: "episode 4" });
+    expect(judge("Kota Factory 03 [English Sub]", CREDITED)).toMatchObject({ ok: true, how: "episode" });
+    expect(judge("Kota Factory 04 [English Sub]", CREDITED)).toMatchObject({ ok: false, reason: "episode 4" });
   });
 
   test("and the season when the title numbers the episode too", () => {
-    expect(judge("Kota Factory 2 | Episode 3")).toMatchObject({ ok: false, reason: "season 2" });
-    expect(judge("Kota Factory 1 | Episode 3").ok).toBe(true);
+    expect(judge("Kota Factory 2 | Episode 3", CREDITED)).toMatchObject({ ok: false, reason: "season 2" });
+    expect(judge("Kota Factory 1 | Episode 3", CREDITED).ok).toBe(true);
   });
 
   test("a three-digit number after the name is not a season", () => {
-    expect(judge("Kota Factory 150 | Episode 3")).toMatchObject({ ok: true, how: "episode" });
+    expect(judge("Kota Factory 150 | Episode 3", CREDITED)).toMatchObject({ ok: true, how: "episode" });
   });
 
   test("a year or a large number after the name is neither", () => {
-    expect(judge("Kota Factory 2019 | Episode 3").ok).toBe(true);
-    expect(judge("Kota Factory 2019")).toMatchObject({ ok: false, reason: "names no episode" });
+    expect(judge("Kota Factory 2019 | Episode 3", CREDITED).ok).toBe(true);
+    expect(judge("Kota Factory 2019", CREDITED)).toMatchObject({ ok: false, reason: "names no episode" });
   });
 
   describe("a later season", () => {
     const S2 = { ...EPISODE, season: 2, episode: 1, absoluteEpisode: 6, episodeTitle: "The Valley", seasonCount: 2 };
     const w = durationWindow(S2, SETTINGS);
-    const judge2 = (title, t = S2) => evaluate(video({ title, durationSeconds: 2211 }), t, w, SETTINGS);
+    const judge2 = (title, t = S2) => evaluate(video({ title, durationSeconds: 2211, ...CREDITED }), t, w, SETTINGS);
 
     test("with its season stated", () => {
       expect(judge2("Kota Factory S2 E1")).toMatchObject({ ok: true, how: "season and episode" });

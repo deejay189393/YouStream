@@ -34,10 +34,15 @@ describe("a new setup", () => {
     expect(html).toContain("Without it, episodes are matched against the show");
   });
 
-  test("shows the requested default margins: 10 minutes for films, 45 seconds for episodes", () => {
+  test("shows the default margins", () => {
     expect(html).toMatch(/data-margin="movieMargin"[\s\S]*?value="10"[\s\S]*?<option value="m" selected>/);
-    expect(html).toMatch(/data-margin="episodeMargin"[\s\S]*?value="45"[\s\S]*?<option value="s" selected>/);
-    expect(html).toMatch(/data-margin="typicalMargin"[\s\S]*?value="20"[\s\S]*?<option value="%" selected>/);
+    expect(html).toMatch(/data-margin="partnerMovieMargin"[\s\S]*?value="20"[\s\S]*?<option value="%" selected>/);
+    expect(html).toMatch(/data-margin="episodeMargin"[\s\S]*?value="90"[\s\S]*?<option value="s" selected>/);
+    expect(html).toMatch(/data-margin="typicalMargin"[\s\S]*?value="30"[\s\S]*?<option value="%" selected>/);
+  });
+
+  test("offers the official-channels switch, off", () => {
+    expect(html).toContain('id="official-only" />');
   });
 
   test("lists the ways to watch, in-app first", () => {
@@ -60,7 +65,9 @@ describe("reconfiguring", () => {
     region: "IN",
     audioLanguage: "hi",
     embeddableOnly: true,
+    officialOnly: true,
     exclude: ["trailer", "reaction"],
+    excludeDescription: ["fan movie"],
     movieQuery: "{title} movie"
   });
   const html = page(existing);
@@ -74,6 +81,8 @@ describe("reconfiguring", () => {
     expect(html).toContain('<option value="IN" selected>India</option>');
     expect(html).toContain('<option value="hi" selected>Hindi</option>');
     expect(html).toContain('id="embeddable-only" checked');
+    expect(html).toContain('id="official-only" checked');
+    expect(html).toContain(">fan movie</textarea>");
     expect(html).toContain(">trailer, reaction</textarea>");
     expect(html).toContain('value="{title} movie"');
     expect(html).toContain("Editing your current setup");

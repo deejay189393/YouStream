@@ -25,6 +25,8 @@ function fold(text) {
     // Before normalising: NFKD splits the acute-accent apostrophe into a
     // space and an accent, which would then split the word in two.
     .replace(APOSTROPHES, "")
+    // "SPY\u00d7FAMILY" is written "SPY x FAMILY" just as often.
+    .replace(/\u00d7/g, " x ")
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()

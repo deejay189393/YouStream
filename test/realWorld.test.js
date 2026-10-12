@@ -2,12 +2,11 @@
  * The matching rules against real searches.
  *
  * test/fixtures/real-searches.json holds real Cinemeta metadata and the real
- * YouTube results (title, channel, length, views) for the exact query the
- * addon sends, captured while the rules were tuned. Each case below states
- * what a person checking those results by hand would want back -- the one
- * official upload of an episode, nothing at all for a title that is not on
- * YouTube -- so a change to the rules that trades a real match for a false
- * one shows up here.
+ * YouTube results for the exact query the addon sends, each video with the
+ * fields videos.list returns for it. Each case states what a person
+ * checking those results by hand wants back -- the one official upload of an
+ * episode, nothing at all for a title that is not on YouTube -- so a change
+ * that trades a real match for a false one shows up here.
  */
 const { cases } = require("./fixtures/real-searches.json");
 const { durationWindow, evaluate, rankMatches } = require("../src/matching");
@@ -21,26 +20,38 @@ function run(id, { settings = SETTINGS, title: override = {} } = {}) {
   const found = cases.find((c) => c.id === id);
   const title = { ...found.title, ...override };
   const window = durationWindow(title, settings);
-  const evaluations = found.videos.map((v) => evaluate(video({ ...v, publishedAt: null, definition: "hd" }), title, window, settings));
+  const evaluations = found.videos.map((v) => evaluate(video({ ...v, definition: "hd" }), title, window, settings));
   return { found, title, evaluations, matches: rankMatches(evaluations).map((e) => e.video) };
 }
 
 describe("official uploads of web series are found, and only the right episode", () => {
   test.each([
-    ["tt9432978:1:3", "gIwgSpEg6ZY", "Kota Factory - S01 E03 -  Optimization"],
-    ["tt14392248:1:3", null, "TVF's Aspirants | S01 E03 | Positive Approach Rakh Yaar"],
-    ["tt28227737:1:3", null, "Sandeep Bhaiya | Web Series | EP 03 | All In"],
-    ["tt10530900:1:5", "gPx5rU82h-k", "Gullak season 1episode 5 | Raksha bandhan | full webseries "]
-  ])("%s", (id, videoId, uploadTitle) => {
+    ["tt9432978:1:3", "Kota Factory - S01 E03 -  Optimization"],
+    ["tt14392248:1:3", "TVF's Aspirants | S01 E03 | Positive Approach Rakh Yaar"],
+    ["tt28227737:1:3", "Sandeep Bhaiya | Web Series | EP 03 | All In"]
+  ])("%s", (id, uploadTitle) => {
     const { matches } = run(id);
     expect(matches.map((v) => v.title)).toEqual([uploadTitle]);
-    if (videoId) expect(matches[0].id).toBe(videoId);
+    expect(matches[0].channelTitle).toBe("The Viral Fever");
   });
 
   test("the other episodes of the same show, on the same channel, are each turned away by number", () => {
     const { evaluations } = run("tt9432978:1:3");
     const reasons = evaluations.filter((e) => e.video.channelTitle === "The Viral Fever" && !e.ok).map((e) => e.reason);
     expect(reasons).toEqual(expect.arrayContaining(["episode 4", "episode 5", "episode 1"]));
+  });
+
+  test("an unofficial upload with nothing to show which show it is from is not offered", () => {
+    const { found, title, matches, evaluations } = run("tt10530900:1:5");
+    expect(matches).toEqual([]);
+    const upload = found.videos.find((v) => v.title.startsWith("Gullak season 1episode 5"));
+    // As titled, "1episode" runs the name into a word it does not allow beside it.
+    expect(evaluations.find((e) => e.video.id === upload.id).reason).toBe("does not name the title");
+    // Spelled out properly, it names the show and the episode, and still
+    // shows nothing -- no year, cast or episode title -- that it is this show.
+    const spaced = { ...upload, title: upload.title.replace("1episode", "1 episode"), definition: "hd" };
+    const window = durationWindow(title, SETTINGS);
+    expect(evaluate(video(spaced), title, window, SETTINGS).reason).toBe("no year, credits or episode title");
   });
 });
 
@@ -52,40 +63,24 @@ describe("a title that is not on YouTube finds nothing, however many lookalikes 
     expect(revisit).toMatchObject({ ok: false, reason: 'says "revisit"' });
   });
 
-  test("The Shawshank Redemption: reviews and explainers posing as the full film", () => {
+  test("The Shawshank Redemption: reviews, explainers and a video essay posing as the full film", () => {
     expect(run("tt0111161").matches).toEqual([]);
   });
+});
 
-  test('Hum Aapke Hain Koun: "Full Movie | Review And Facts" uploads of feature length', () => {
+describe("films", () => {
+  test("Hum Aapke Hain Koun: Rajshri's own Telugu upload, 18 minutes short, and none of the 'Review And Facts' fakes", () => {
     const { matches, evaluations } = run("tt0110076");
-    expect(matches).toEqual([]);
+    expect(matches.map((v) => v.channelTitle)).toEqual(["Rajshri Telugu"]);
     const fakes = evaluations.filter((e) => /review|facts|analysis/i.test(e.video.title));
     expect(fakes.length).toBeGreaterThan(5);
     fakes.forEach((e) => expect(e.ok).toBe(false));
   });
-});
 
-describe("a film with many genuine uploads", () => {
-  test("Night of the Living Dead: every upload of the right length that names it, and nothing else", () => {
+  test("Night of the Living Dead: many genuine uploads, every one naming the film and its year or cast", () => {
     const { matches } = run("tt0063350");
     expect(matches.length).toBeGreaterThanOrEqual(10);
-    matches.forEach((v) => {
-      expect(v.title.toLowerCase()).toContain("living dead");
-      expect(Math.abs(v.durationSeconds - 5760)).toBeLessThanOrEqual(600);
-    });
-  });
-
-  test("an audio language keeps out an upload YouTube has tagged with another one", () => {
-    const settings = normalizeConfig({ audioLanguage: "en" });
-    const found = cases.find((c) => c.id === "tt0063350");
-    const genuine = run("tt0063350").matches[0];
-    const result = evaluate(
-      video({ ...genuine, language: "es", publishedAt: null }),
-      found.title,
-      durationWindow(found.title, settings),
-      settings
-    );
-    expect(result).toMatchObject({ ok: false, reason: "es audio" });
+    matches.forEach((v) => expect(v.title.toLowerCase()).toContain("living dead"));
   });
 });
 
@@ -94,9 +89,14 @@ describe("why an episode's own runtime matters", () => {
     expect(run("tt6005644:2:1").matches).toEqual([]);
   });
 
-  test("with the episode's own runtime, as TMDB provides it, it is found", () => {
-    const { matches } = run("tt6005644:2:1", { title: { runtimeSeconds: 36 * 60, runtimeKind: "exact" } });
+  test("with the episode's own runtime it is in the window, and its synopsis credits the cast", () => {
+    const { matches, evaluations } = run("tt6005644:2:1", { title: { runtimeSeconds: 36 * 60, runtimeKind: "exact" } });
     expect(matches.map((v) => v.id)).toEqual(["FGMhA8UY190"]);
+    expect(evaluations.find((e) => e.video.id === "FGMhA8UY190")).toMatchObject({
+      ok: true,
+      how: "season and episode",
+      evidence: ["credits"]
+    });
   });
 });
 

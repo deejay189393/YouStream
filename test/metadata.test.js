@@ -3,6 +3,7 @@ const { getJson, yearOf, runtimeSeconds } = require("../src/metadata/http");
 const cinemeta = require("../src/metadata/cinemeta");
 const tmdb = require("../src/metadata/tmdb");
 const kitsu = require("../src/metadata/kitsu");
+const tvmaze = require("../src/metadata/tvmaze");
 const { resolveTitle, uniqueAliases } = require("../src/metadata");
 const { parseStreamId } = require("../src/ids");
 const { response, routeFetch } = require("./helpers");
@@ -16,7 +17,14 @@ beforeEach(() => {
 // --- Fixtures, trimmed from real responses ----------------------------------
 
 const CINEMETA_MOVIE = {
-  meta: { name: "The Shawshank Redemption", year: "1994", runtime: "142 min", moviedb_id: 278 }
+  meta: {
+    name: "The Shawshank Redemption",
+    year: "1994",
+    runtime: "142 min",
+    moviedb_id: 278,
+    cast: ["Tim Robbins", "Morgan Freeman", " ", 5],
+    director: ["Frank Darabont"]
+  }
 };
 
 const CINEMETA_SERIES = {
@@ -25,11 +33,12 @@ const CINEMETA_SERIES = {
     year: "2015–2022",
     runtime: "51 min",
     moviedb_id: 63180,
+    cast: ["Naveen Kasturia", "Arunabh Kumar"],
     videos: [
       { season: 0, episode: 1, name: "Special" },
       { season: 1, episode: 1, name: "Tu Beer Hai" },
       { season: 1, episode: 2, name: "And Then There Were Four" },
-      { season: 1, episode: 3, name: "The Jury Room" },
+      { season: 1, episode: 3, name: "The Jury Room", released: "2015-07-20T00:00:00.000Z" },
       { season: 2, number: 1, title: "The Valley" },
       { season: 2, episode: 2, name: "Second" },
       null
@@ -51,7 +60,11 @@ const TMDB_MOVIE = {
       null
     ]
   },
-  external_ids: { imdb_id: "tt0111161" }
+  external_ids: { imdb_id: "tt0111161" },
+  credits: {
+    cast: [{ name: "Tim Robbins" }, { name: "Morgan Freeman" }, { name: "Bob Gunton" }, null],
+    crew: [{ name: "Frank Darabont", job: "Director" }, { name: "Roger Deakins", job: "Director of Photography" }, null]
+  }
 };
 
 const TMDB_SHOW = {
@@ -66,15 +79,35 @@ const TMDB_SHOW = {
     { season_number: "x" }
   ],
   alternative_titles: { results: [{ iso_3166_1: "IN", title: "TVF Pitchers" }] },
-  external_ids: { imdb_id: "tt4742876" }
+  external_ids: { imdb_id: "tt4742876" },
+  credits: { cast: [{ name: "Naveen Kasturia" }, { name: "Jitendra Kumar" }] }
 };
 
 const TMDB_SEASON = {
   episodes: [
-    { episode_number: 1, name: "Tu Beer Hai", runtime: 41 },
-    { episode_number: 3, name: "The Jury Room", runtime: 38 }
+    { episode_number: 1, name: "Tu Beer Hai", runtime: 41, air_date: "2015-06-03" },
+    { episode_number: 3, name: "The Jury Room", runtime: 38, air_date: "2015-07-20" },
+    null
   ]
 };
+
+/** A season whose every episode lists the same runtime: the slot, not the episode. */
+const TMDB_UNIFORM_SEASON = {
+  episodes: [
+    { episode_number: 1, name: "One", runtime: 60 },
+    { episode_number: 2, name: "Two", runtime: 60 }
+  ]
+};
+
+const TVMAZE_SHOW = { id: 7329, name: "TVF Pitchers" };
+const TVMAZE_EPISODES = [
+  { season: 1, number: 1, runtime: 45 },
+  { season: 1, number: 2, runtime: 45 },
+  { season: 1, number: 3, runtime: 45 },
+  { season: 2, number: 1, runtime: 60 },
+  { season: 2, number: 2, runtime: 64 },
+  null
+];
 
 const KITSU_ANIME = {
   data: {
@@ -172,19 +205,20 @@ describe("yearOf and runtimeSeconds", () => {
 // --- Cinemeta --------------------------------------------------------------
 
 describe("cinemeta", () => {
-  test("reads a film", async () => {
+  test("reads a film, with its credits", async () => {
     routeFetch([["/meta/movie/tt0111161.json", CINEMETA_MOVIE]]);
     expect(await cinemeta.movie("tt0111161")).toEqual({
       title: "The Shawshank Redemption",
+      people: ["Tim Robbins", "Morgan Freeman", "Frank Darabont"],
       year: 1994,
       runtimeSeconds: 8520,
       tmdbId: "278"
     });
   });
 
-  test("falls back from year to releaseInfo, and goes without a TMDB id", async () => {
-    routeFetch([["/meta/movie/", { meta: { name: "X", releaseInfo: "2001" } }]]);
-    expect(await cinemeta.movie("tt1")).toEqual({ title: "X", year: 2001, runtimeSeconds: null, tmdbId: null });
+  test("falls back from year to releaseInfo, and goes without a TMDB id or credits", async () => {
+    routeFetch([["/meta/movie/", { meta: { name: "X", releaseInfo: "2001", cast: "nope" } }]]);
+    expect(await cinemeta.movie("tt1")).toEqual({ title: "X", people: [], year: 2001, runtimeSeconds: null, tmdbId: null });
   });
 
   test("a missing or nameless title is null", async () => {
@@ -194,26 +228,31 @@ describe("cinemeta", () => {
     expect(await cinemeta.movie("tt3")).toBeNull();
   });
 
-  test("reads an episode, its name and its number across the show", async () => {
+  test("reads an episode, its name, its air year and its number across the show", async () => {
     routeFetch([["/meta/series/tt4742876.json", CINEMETA_SERIES]]);
-    expect(await cinemeta.episode("tt4742876", 2, 1)).toEqual({
+    expect(await cinemeta.episode("tt4742876", 1, 3)).toEqual({
       title: "TVF Pitchers",
+      people: ["Naveen Kasturia", "Arunabh Kumar"],
       year: 2015,
       typicalRuntimeSeconds: 3060,
-      episodeTitle: "The Valley",
-      absoluteEpisode: 4,
+      episodeTitle: "The Jury Room",
+      releaseYear: 2015,
+      absoluteEpisode: 3,
       seasonCount: 2,
       tmdbId: "63180"
     });
+    expect(await cinemeta.episode("tt4742876", 2, 1)).toMatchObject({ episodeTitle: "The Valley", absoluteEpisode: 4, releaseYear: null });
   });
 
   test("an episode it does not list still resolves the show", async () => {
     routeFetch([["/meta/series/", { meta: { name: "Show", videos: "nope" } }]]);
     expect(await cinemeta.episode("tt9", 1, 9)).toEqual({
       title: "Show",
+      people: [],
       year: null,
       typicalRuntimeSeconds: null,
       episodeTitle: null,
+      releaseYear: null,
       absoluteEpisode: 9,
       seasonCount: null,
       tmdbId: null
@@ -243,6 +282,7 @@ describe("tmdb", () => {
     await tmdb.movie("v3key", "278", "");
     const url = new URL(fetch.mock.calls[0][0]);
     expect(url.searchParams.get("api_key")).toBe("v3key");
+    expect(url.searchParams.get("append_to_response")).toBe("alternative_titles,external_ids,credits");
     expect(fetch.mock.calls[0][1].headers.authorization).toBeUndefined();
     expect([...metadataCache.store.keys()].join()).not.toContain("v3key");
   });
@@ -254,7 +294,7 @@ describe("tmdb", () => {
     expect(fetch.mock.calls[0][1].headers.authorization).toBe("Bearer eyJtoken");
   });
 
-  test("reads a film with its other names, the reader's country first", async () => {
+  test("reads a film with its other names, the reader's country first, and its credits", async () => {
     routeFetch([["/movie/278", TMDB_MOVIE]]);
     expect(await tmdb.movie("k", "278", "IN")).toEqual({
       title: "The Shawshank Redemption",
@@ -262,6 +302,7 @@ describe("tmdb", () => {
       year: 1994,
       runtimeSeconds: 8520,
       aliases: ["Shawshank Redemption", "Shawshank"],
+      people: ["Tim Robbins", "Morgan Freeman", "Bob Gunton", "Frank Darabont"],
       imdbId: "tt0111161"
     });
   });
@@ -274,6 +315,7 @@ describe("tmdb", () => {
       year: null,
       runtimeSeconds: null,
       aliases: [],
+      people: [],
       imdbId: null
     });
   });
@@ -302,6 +344,7 @@ describe("tmdb", () => {
       year: 2015,
       typicalRuntimeSeconds: 2700,
       aliases: [],
+      people: ["Naveen Kasturia", "Jitendra Kumar"],
       seasons: [
         { season: 0, episodes: 2 },
         { season: 1, episodes: 5 },
@@ -319,6 +362,7 @@ describe("tmdb", () => {
       year: null,
       typicalRuntimeSeconds: null,
       aliases: [],
+      people: [],
       seasons: [],
       imdbId: null
     });
@@ -331,8 +375,13 @@ describe("tmdb", () => {
 
   test("reads one episode from its season", async () => {
     routeFetch([["/tv/63180/season/1", TMDB_SEASON]]);
-    expect(await tmdb.episode("k", "63180", 1, 3)).toEqual({ episodeTitle: "The Jury Room", runtimeSeconds: 2280 });
+    expect(await tmdb.episode("k", "63180", 1, 3)).toEqual({ episodeTitle: "The Jury Room", releaseYear: 2015, runtimeSeconds: 2280 });
     expect(await tmdb.episode("k", "63180", 1, 2)).toBeNull();
+  });
+
+  test("a runtime copied onto every episode of the season is dropped", async () => {
+    routeFetch([["/season/1", TMDB_UNIFORM_SEASON]]);
+    expect(await tmdb.episode("k", "9", 1, 1)).toEqual({ episodeTitle: "One", releaseYear: null, runtimeSeconds: null });
   });
 
   test("an episode with no name, or a season with no list", async () => {
@@ -340,7 +389,7 @@ describe("tmdb", () => {
       ["/season/1", { episodes: [{ episode_number: 1, name: "" }] }],
       ["/season/2", {}]
     ]);
-    expect(await tmdb.episode("k", "9", 1, 1)).toEqual({ episodeTitle: null, runtimeSeconds: null });
+    expect(await tmdb.episode("k", "9", 1, 1)).toEqual({ episodeTitle: null, releaseYear: null, runtimeSeconds: null });
     expect(await tmdb.episode("k", "9", 2, 1)).toBeNull();
   });
 
@@ -361,6 +410,12 @@ describe("tmdb", () => {
   test("aliases are capped", () => {
     const list = Array.from({ length: 20 }, (_, i) => ({ iso_3166_1: "US", title: `Name ${i}` }));
     expect(tmdb.aliasesFrom(list, "")).toHaveLength(8);
+  });
+
+  test("credits keep eight billed cast members and the directors", () => {
+    const cast = Array.from({ length: 12 }, (_, i) => ({ name: `Actor ${i}` }));
+    expect(tmdb.peopleOf({ credits: { cast, crew: "x" } })).toHaveLength(8);
+    expect(tmdb.peopleOf(null)).toEqual([]);
   });
 
   describe("checkKey", () => {
@@ -387,6 +442,43 @@ describe("tmdb", () => {
       routeFetch([["/configuration", new Error("down")]]);
       expect(await tmdb.checkKey("k")).toBe("unreachable");
     });
+  });
+});
+
+// --- TVmaze ----------------------------------------------------------------
+
+describe("tvmaze", () => {
+  test("an episode's own runtime, where its season's runtimes vary", async () => {
+    const fetch = routeFetch([
+      ["/lookup/shows?imdb=tt4742876", TVMAZE_SHOW],
+      ["/shows/7329/episodes", TVMAZE_EPISODES]
+    ]);
+    expect(await tvmaze.episodeRuntime("tt4742876", 2, 2)).toBe(3840);
+    expect(fetch.mock.calls[0][0]).toBe("https://api.tvmaze.com/lookup/shows?imdb=tt4742876");
+  });
+
+  test("nothing where every episode of the season lists the same runtime: that is the slot", async () => {
+    routeFetch([
+      ["/lookup/shows", TVMAZE_SHOW],
+      ["/episodes", TVMAZE_EPISODES]
+    ]);
+    expect(await tvmaze.episodeRuntime("tt4742876", 1, 3)).toBeNull();
+  });
+
+  test("nothing for an episode, a show or an episode list it does not have", async () => {
+    routeFetch([
+      ["/lookup/shows?imdb=tt1", TVMAZE_SHOW],
+      ["/shows/7329/episodes", "nope"],
+      ["/lookup/shows?imdb=tt2", { id: "x" }]
+    ]);
+    expect(await tvmaze.episodeRuntime("tt1", 2, 9)).toBeNull();
+    expect(await tvmaze.episodeRuntime("tt2", 1, 1)).toBeNull();
+    expect(await tvmaze.episodeRuntime("tt3", 1, 1)).toBeNull();
+  });
+
+  test("variesWithinSeason ignores missing runtimes", () => {
+    expect(tvmaze.variesWithinSeason([{ runtime: 30 }, { runtime: null }, { runtime: 0 }])).toBe(false);
+    expect(tvmaze.variesWithinSeason([{ runtime: 30 }, { runtime: 31 }])).toBe(true);
   });
 });
 
@@ -452,19 +544,25 @@ describe("resolveTitle", () => {
       title: "The Shawshank Redemption",
       aliases: [],
       year: 1994,
+      people: ["Tim Robbins", "Morgan Freeman", "Frank Darabont"],
+      imdbId: "tt0111161",
       runtimeSeconds: 8520,
       runtimeKind: "exact",
+      otherRuntimes: [],
       sources: ["cinemeta"]
     });
   });
 
-  test("an IMDb film with TMDB's other names, by the id Cinemeta gave", async () => {
+  test("an IMDb film with TMDB's other names, credits and differing runtime, by the id Cinemeta gave", async () => {
     const fetch = routeFetch([
       ["/meta/movie/tt0111161.json", CINEMETA_MOVIE],
-      ["/movie/278", TMDB_MOVIE]
+      ["/movie/278", { ...TMDB_MOVIE, runtime: 144 }]
     ]);
     const title = await resolve("tt0111161", { tmdbKey: "k", region: "IN" });
     expect(title.aliases).toEqual(["Shawshank Redemption", "Shawshank"]);
+    expect(title.people).toEqual(["Tim Robbins", "Morgan Freeman", "Frank Darabont", "Bob Gunton"]);
+    expect(title.runtimeSeconds).toBe(8520);
+    expect(title.otherRuntimes).toEqual([8640]);
     expect(title.sources).toEqual(["cinemeta", "tmdb"]);
     expect(fetch.mock.calls.some(([url]) => url.includes("/find/"))).toBe(false);
   });
@@ -476,7 +574,7 @@ describe("resolveTitle", () => {
       ["/movie/278", TMDB_MOVIE]
     ]);
     const title = await resolve("tt0111161", { tmdbKey: "k" });
-    expect(title).toMatchObject({ title: "The Shawshank Redemption", year: 1994, runtimeSeconds: 8520, sources: ["tmdb"] });
+    expect(title).toMatchObject({ title: "The Shawshank Redemption", year: 1994, runtimeSeconds: 8520, otherRuntimes: [], sources: ["tmdb"] });
     expect(console.warn).toHaveBeenCalled();
   });
 
@@ -496,7 +594,12 @@ describe("resolveTitle", () => {
 
   test("an IMDb film with no runtime anywhere", async () => {
     routeFetch([["/meta/movie/", { meta: { name: "Untimed" } }]]);
-    expect(await resolve("tt1234567")).toMatchObject({ runtimeSeconds: null, runtimeKind: null, year: null });
+    expect(await resolve("tt1234567")).toMatchObject({ runtimeSeconds: null, runtimeKind: null, year: null, otherRuntimes: [] });
+  });
+
+  test("a name with a subtitle also counts by its main title", async () => {
+    routeFetch([["/meta/movie/", { meta: { name: "Nosferatu: A Symphony of Horror", runtime: "94 min" } }]]);
+    expect((await resolve("tt0013442")).aliases).toEqual(["Nosferatu"]);
   });
 
   test("an IMDb episode from Cinemeta alone has only the typical length", async () => {
@@ -506,25 +609,45 @@ describe("resolveTitle", () => {
       title: "TVF Pitchers",
       aliases: [],
       year: 2015,
+      people: ["Naveen Kasturia", "Arunabh Kumar"],
+      imdbId: "tt4742876",
       runtimeSeconds: 3060,
       runtimeKind: "typical",
+      otherRuntimes: [],
       season: 1,
       episode: 3,
       absoluteEpisode: 3,
       episodeTitle: "The Jury Room",
+      releaseYear: 2015,
       seasonCount: 2,
       sources: ["cinemeta"]
     });
   });
 
-  test("with TMDB, the episode's own length", async () => {
+  test("TVmaze, keyless, gives the episode's own length where its season's lengths vary", async () => {
+    routeFetch([
+      ["/meta/series/tt4742876.json", CINEMETA_SERIES],
+      ["/lookup/shows?imdb=tt4742876", TVMAZE_SHOW],
+      ["/shows/7329/episodes", TVMAZE_EPISODES]
+    ]);
+    expect(await resolve("tt4742876:2:1")).toMatchObject({ runtimeSeconds: 3600, runtimeKind: "exact", sources: ["cinemeta", "tvmaze"] });
+    expect(await resolve("tt4742876:1:3")).toMatchObject({ runtimeSeconds: 3060, runtimeKind: "typical", sources: ["cinemeta"] });
+  });
+
+  test("with TMDB, the episode's own length, merged credits and other names", async () => {
     routeFetch([
       ["/meta/series/tt4742876.json", CINEMETA_SERIES],
       ["/tv/63180/season/1", TMDB_SEASON],
       ["/tv/63180?", TMDB_SHOW]
     ]);
     const title = await resolve("tt4742876:1:3", { tmdbKey: "k" });
-    expect(title).toMatchObject({ runtimeSeconds: 2280, runtimeKind: "exact", aliases: ["Pitchers"], sources: ["cinemeta", "tmdb"] });
+    expect(title).toMatchObject({
+      runtimeSeconds: 2280,
+      runtimeKind: "exact",
+      aliases: ["Pitchers"],
+      people: ["Naveen Kasturia", "Arunabh Kumar", "Jitendra Kumar"],
+      sources: ["cinemeta", "tmdb"]
+    });
   });
 
   test("an IMDb episode Cinemeta cannot answer for comes from TMDB", async () => {
@@ -539,12 +662,16 @@ describe("resolveTitle", () => {
       title: "Pitchers",
       aliases: ["TVF Pitchers"],
       year: 2015,
+      people: ["Naveen Kasturia", "Jitendra Kumar"],
+      imdbId: "tt4742876",
       runtimeSeconds: 2700,
       runtimeKind: "typical",
+      otherRuntimes: [],
       season: 2,
       episode: 1,
       absoluteEpisode: 6,
       episodeTitle: null,
+      releaseYear: null,
       seasonCount: 2,
       sources: ["tmdb"]
     });
@@ -558,6 +685,7 @@ describe("resolveTitle", () => {
     ]);
     expect(await resolve("tt4742876:1:3", { tmdbKey: "k" })).toMatchObject({
       episodeTitle: "The Jury Room",
+      releaseYear: 2015,
       seasonCount: 2,
       absoluteEpisode: 3
     });
@@ -589,30 +717,36 @@ describe("resolveTitle", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  test("a tmdb: film", async () => {
-    routeFetch([["/movie/278", TMDB_MOVIE]]);
+  test("a tmdb: film, with IMDb's runtime and credits alongside", async () => {
+    routeFetch([
+      ["/movie/278", { ...TMDB_MOVIE, runtime: 144 }],
+      ["/meta/movie/tt0111161.json", CINEMETA_MOVIE]
+    ]);
     expect(await resolve("tmdb:278", { tmdbKey: "k", region: "IN" })).toEqual({
       isEpisode: false,
       title: "The Shawshank Redemption",
       aliases: ["Shawshank Redemption", "Shawshank"],
       year: 1994,
-      runtimeSeconds: 8520,
+      people: ["Tim Robbins", "Morgan Freeman", "Bob Gunton", "Frank Darabont"],
+      imdbId: "tt0111161",
+      runtimeSeconds: 8640,
       runtimeKind: "exact",
-      sources: ["tmdb"]
+      otherRuntimes: [8520],
+      sources: ["tmdb", "cinemeta"]
     });
   });
 
-  test("a tmdb: film with no runtime borrows IMDb's through Cinemeta", async () => {
+  test("a tmdb: film with no runtime borrows IMDb's", async () => {
     routeFetch([
       ["/movie/278", { ...TMDB_MOVIE, runtime: 0 }],
       ["/meta/movie/tt0111161.json", CINEMETA_MOVIE]
     ]);
-    expect(await resolve("tmdb:278", { tmdbKey: "k" })).toMatchObject({ runtimeSeconds: 8520, sources: ["tmdb", "cinemeta"] });
+    expect(await resolve("tmdb:278", { tmdbKey: "k" })).toMatchObject({ runtimeSeconds: 8520, otherRuntimes: [] });
   });
 
   test("a tmdb: film with no runtime and no IMDb id", async () => {
     routeFetch([["/movie/9", { title: "Short" }]]);
-    expect(await resolve("tmdb:9", { tmdbKey: "k" })).toMatchObject({ runtimeSeconds: null, sources: ["tmdb"] });
+    expect(await resolve("tmdb:9", { tmdbKey: "k" })).toMatchObject({ runtimeSeconds: null, imdbId: null, sources: ["tmdb"] });
   });
 
   test("a missing tmdb: film is null", async () => {
@@ -630,18 +764,36 @@ describe("resolveTitle", () => {
       title: "Pitchers",
       aliases: ["TVF Pitchers"],
       year: 2015,
+      people: ["Naveen Kasturia", "Jitendra Kumar"],
+      imdbId: "tt4742876",
       runtimeSeconds: 2280,
       runtimeKind: "exact",
+      otherRuntimes: [],
       season: 1,
       episode: 3,
       absoluteEpisode: 3,
       episodeTitle: "The Jury Room",
+      releaseYear: 2015,
       seasonCount: 2,
       sources: ["tmdb"]
     });
   });
 
-  test("a tmdb: episode TMDB does not list falls back to the show's length", async () => {
+  test("a tmdb: episode TMDB has no length for takes TVmaze's, through the show's IMDb id", async () => {
+    routeFetch([
+      ["/tv/63180/season/2", { episodes: [{ episode_number: 1, name: "The Valley" }] }],
+      ["/tv/63180?", TMDB_SHOW],
+      ["/lookup/shows?imdb=tt4742876", TVMAZE_SHOW],
+      ["/shows/7329/episodes", TVMAZE_EPISODES]
+    ]);
+    expect(await resolve("tmdb:63180:2:1", { tmdbKey: "k" })).toMatchObject({
+      runtimeSeconds: 3600,
+      runtimeKind: "exact",
+      sources: ["tmdb", "tvmaze"]
+    });
+  });
+
+  test("a tmdb: episode with no length anywhere falls back to the show's", async () => {
     routeFetch([
       ["/tv/5/season/", new Error("down")],
       ["/tv/5?", { name: "Bare", episode_run_time: [30] }]
@@ -650,6 +802,7 @@ describe("resolveTitle", () => {
       runtimeSeconds: 1800,
       runtimeKind: "typical",
       episodeTitle: null,
+      releaseYear: null,
       seasonCount: null
     });
   });
@@ -669,6 +822,9 @@ describe("resolveTitle", () => {
       title: "SPY x FAMILY",
       aliases: ["SPY×FAMILY", "SxF"],
       year: 2022,
+      people: [],
+      imdbId: null,
+      otherRuntimes: [],
       runtimeSeconds: 1380,
       runtimeKind: "exact",
       season: 1,
@@ -692,6 +848,9 @@ describe("resolveTitle", () => {
       title: "Your Name",
       aliases: [],
       year: null,
+      people: [],
+      imdbId: null,
+      otherRuntimes: [],
       runtimeSeconds: 6360,
       runtimeKind: "exact",
       sources: ["kitsu"]
@@ -710,5 +869,10 @@ describe("uniqueAliases", () => {
       "TVF Pitchers",
       "Other"
     ]);
+  });
+
+  test("adds the main title of a name with a subtitle, unless it is too short to mean anything", () => {
+    expect(uniqueAliases("Baahubali: The Beginning", [])).toEqual(["Baahubali"]);
+    expect(uniqueAliases("Up: A Story", ["It: Chapter Two"])).toEqual(["It: Chapter Two"]);
   });
 });

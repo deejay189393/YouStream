@@ -14,7 +14,8 @@ describe("fold", () => {
   });
 
   test("reads the typeset forms of a name the same way", () => {
-    expect(fold("SPY×FAMILY")).toBe("spy family");
+    expect(fold("SPY×FAMILY")).toBe("spy x family");
+    expect(fold("SPY x FAMILY")).toBe("spy x family");
     expect(fold("Spy-Family")).toBe("spy family");
   });
 

@@ -178,10 +178,11 @@ describe("toVideo", () => {
   test("keeps what matching and the stream list use", () => {
     const v = youtube.toVideo(
       apiVideo("abc", {
-        snippet: { title: "T", channelTitle: "C", channelId: "UC1", defaultAudioLanguage: "hi-IN" },
+        snippet: { title: "T", description: "D".repeat(2000), channelTitle: "C", channelId: "UC1", defaultAudioLanguage: "hi-IN" },
         contentDetails: {
           duration: "PT36M51S",
           definition: "sd",
+          licensedContent: true,
           contentRating: { ytRating: "ytAgeRestricted" },
           regionRestriction: { blocked: ["US"] }
         },
@@ -192,6 +193,7 @@ describe("toVideo", () => {
     expect(v).toEqual({
       id: "abc",
       title: "T",
+      description: "D".repeat(1500),
       channelTitle: "C",
       channelId: "UC1",
       publishedAt: "2021-05-01T00:00:00Z",
@@ -202,6 +204,7 @@ describe("toVideo", () => {
       live: null,
       embeddable: false,
       ageRestricted: true,
+      licensed: true,
       regionAllowed: null,
       regionBlocked: ["US"]
     });
@@ -211,6 +214,7 @@ describe("toVideo", () => {
     expect(youtube.toVideo({ id: "x" })).toEqual({
       id: "x",
       title: "",
+      description: "",
       channelTitle: "",
       channelId: "",
       publishedAt: null,
@@ -221,6 +225,7 @@ describe("toVideo", () => {
       live: null,
       embeddable: true,
       ageRestricted: false,
+      licensed: false,
       regionAllowed: null,
       regionBlocked: null
     });

@@ -60,8 +60,19 @@ function aliasesFrom(list, region) {
   return [...new Set(names)].slice(0, MAX_ALIASES);
 }
 
+/** How many billed cast members are kept as credits. */
+const MAX_CAST = 8;
+
+/** The cast, in billing order, and the directors. */
+function peopleOf(body) {
+  const credits = (body && body.credits) || {};
+  const cast = (Array.isArray(credits.cast) ? credits.cast : []).slice(0, MAX_CAST).map((c) => c && c.name);
+  const directors = (Array.isArray(credits.crew) ? credits.crew : []).filter((c) => c && c.job === "Director").map((c) => c.name);
+  return [...new Set([...cast, ...directors].filter((n) => typeof n === "string" && n.trim()))];
+}
+
 async function movie(key, tmdbId, region) {
-  const body = await request(key, `/movie/${tmdbId}`, { append_to_response: "alternative_titles,external_ids" });
+  const body = await request(key, `/movie/${tmdbId}`, { append_to_response: "alternative_titles,external_ids,credits" });
   if (!body || typeof body.title !== "string" || !body.title) return null;
   const alternative = body.alternative_titles && body.alternative_titles.titles;
   return {
@@ -70,12 +81,13 @@ async function movie(key, tmdbId, region) {
     year: yearOf(body.release_date),
     runtimeSeconds: runtimeSeconds(body.runtime),
     aliases: aliasesFrom(alternative, region),
+    people: peopleOf(body),
     imdbId: body.external_ids && typeof body.external_ids.imdb_id === "string" ? body.external_ids.imdb_id : null
   };
 }
 
 async function show(key, tvId, region) {
-  const body = await request(key, `/tv/${tvId}`, { append_to_response: "alternative_titles,external_ids" });
+  const body = await request(key, `/tv/${tvId}`, { append_to_response: "alternative_titles,external_ids,credits" });
   if (!body || typeof body.name !== "string" || !body.name) return null;
   const alternative = body.alternative_titles && body.alternative_titles.results;
   const runTimes = Array.isArray(body.episode_run_time) ? body.episode_run_time : [];
@@ -90,6 +102,7 @@ async function show(key, tvId, region) {
     year: yearOf(body.first_air_date),
     typicalRuntimeSeconds: runtimeSeconds(runTimes[0]),
     aliases: aliasesFrom(alternative, region),
+    people: peopleOf(body),
     seasons,
     imdbId: body.external_ids && typeof body.external_ids.imdb_id === "string" ? body.external_ids.imdb_id : null
   };
@@ -97,16 +110,20 @@ async function show(key, tvId, region) {
 
 /**
  * One episode's own name and length. Fetched as the whole season, so the
- * next episode someone watches is already cached.
+ * next episode someone watches is already cached. A runtime copied onto
+ * every episode of the season is the slot, not the episode, and is dropped
+ * -- the same rule TVmaze's data needs (see tvmaze.js).
  */
 async function episode(key, tvId, season, episodeNumber) {
   const body = await request(key, `/tv/${tvId}/season/${season}`);
-  const episodes = body && Array.isArray(body.episodes) ? body.episodes : [];
-  const match = episodes.find((e) => e && e.episode_number === episodeNumber);
+  const episodes = body && Array.isArray(body.episodes) ? body.episodes.filter((e) => e && typeof e === "object") : [];
+  const match = episodes.find((e) => e.episode_number === episodeNumber);
   if (!match) return null;
+  const varies = new Set(episodes.map((e) => e.runtime).filter((r) => Number.isFinite(r) && r > 0)).size >= 2;
   return {
     episodeTitle: typeof match.name === "string" && match.name ? match.name : null,
-    runtimeSeconds: runtimeSeconds(match.runtime)
+    releaseYear: yearOf(match.air_date),
+    runtimeSeconds: varies ? runtimeSeconds(match.runtime) : null
   };
 }
 
@@ -132,4 +149,15 @@ async function checkKey(key) {
   return response.status === 401 ? "invalid" : "unreachable";
 }
 
-module.exports = { findByImdb, movie, show, episode, absoluteEpisode, aliasesFrom, checkKey, isBearerToken, BASE_URL };
+module.exports = {
+  findByImdb,
+  movie,
+  show,
+  episode,
+  absoluteEpisode,
+  aliasesFrom,
+  peopleOf,
+  checkKey,
+  isBearerToken,
+  BASE_URL
+};

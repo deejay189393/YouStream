@@ -6,6 +6,7 @@ const {
   MARGIN_UNITS,
   DEFAULT_MARGINS,
   DEFAULT_EXCLUDE,
+  DEFAULT_EXCLUDE_DESCRIPTION,
   DEFAULT_MOVIE_QUERY,
   DEFAULT_EPISODE_QUERY,
   DEFAULT_MAX_RESULTS,
@@ -67,6 +68,11 @@ const MARGIN_ROWS = [
     name: "movieMargin",
     label: "Movies",
     note: "Around the film's runtime."
+  },
+  {
+    name: "partnerMovieMargin",
+    label: "Movies, official channels",
+    note: "Studios' own uploads are often cut differently: Indian films run 10 to 25 minutes short."
   },
   {
     name: "episodeMargin",
@@ -322,9 +328,11 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
     <div class="card">
       <h2>Runtime matching</h2>
       <p class="lead">
-        A video only counts when its length is close to the listed runtime. This is what keeps trailers,
-        clips and reviews out. A margin can be in seconds, minutes, or a percentage of the runtime.
-        For example, a 23-minute episode with a 25-second margin accepts anything from 22m 35s to 23m 25s.
+        A video only counts when its length is close to the listed runtime. This is what keeps trailers
+        and clips out. A margin can be in seconds, minutes, or a percentage of the runtime. For example,
+        a 23-minute episode with a 25-second margin accepts anything from 22m 35s to 23m 25s. The defaults
+        come from measuring real uploads against their listings; the episode number, not the length, is
+        what keeps the wrong episode out.
       </p>
       ${MARGIN_ROWS.map((row) => marginRow(row, s[row.name])).join("")}
     </div>
@@ -366,6 +374,10 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
         0 turns it off.
       </div>
       <div class="row-box">
+        <label class="check"><input type="checkbox" id="official-only"${s.officialOnly ? " checked" : ""} />
+          <span><strong>Only official channels</strong><em>Only uploads from YouTube content partners: studios, TV networks and the channels they license. Leaves out every unofficial copy, and with it some public-domain classics.</em></span></label>
+      </div>
+      <div class="row-box">
         <label class="check"><input type="checkbox" id="embeddable-only"${s.embeddableOnly ? " checked" : ""} />
           <span><strong>Only videos that allow embedding</strong><em>Turn on if you use Stremio Web, which plays YouTube in an embedded player. Nuvio and the YouTube app do not need it.</em></span></label>
       </div>
@@ -393,7 +405,13 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
           <textarea id="exclude" spellcheck="false">${escapeHtml(s.exclude.join(", "))}</textarea>
           <button type="button" class="reset" data-reset="exclude">Reset to default</button>
         </label>
-        <div class="hint">A word that is part of the title's own name is ignored for that title, so &ldquo;trailer&rdquo; never hides Trailer Park Boys.</div>
+        <div class="hint" style="margin-bottom:14px">A word that is part of the title's own name is ignored for that title, so &ldquo;trailer&rdquo; never hides Trailer Park Boys.</div>
+        <label class="field">
+          <span class="label-text">Skip videos whose description says (comma separated)</span>
+          <textarea id="exclude-description" spellcheck="false">${escapeHtml(s.excludeDescription.join(", "))}</textarea>
+          <button type="button" class="reset" data-reset="exclude-description">Reset to default</button>
+        </label>
+        <div class="hint">How fan films, explainers, video essays and unofficial copies describe themselves: &ldquo;fan movie&rdquo;, &ldquo;in this video&rdquo;, &ldquo;video essay&rdquo;, &ldquo;fair use&rdquo;.</div>
       </details>
     </div>
 
@@ -433,13 +451,30 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
   var MARGIN_UNITS = ${jsonForScript(MARGIN_UNITS)};
   var DEFAULT_MARGINS = ${jsonForScript(DEFAULT_MARGINS)};
   var DEFAULT_EXCLUDE = ${jsonForScript(DEFAULT_EXCLUDE)};
+  var DEFAULT_EXCLUDE_DESCRIPTION = ${jsonForScript(DEFAULT_EXCLUDE_DESCRIPTION)};
   var DEFAULT_MOVIE_QUERY = ${jsonForScript(DEFAULT_MOVIE_QUERY)};
   var DEFAULT_EPISODE_QUERY = ${jsonForScript(DEFAULT_EPISODE_QUERY)};
   var DEFAULT_MAX_RESULTS = ${DEFAULT_MAX_RESULTS};
   var MAX_RESULTS_LIMIT = ${MAX_RESULTS_LIMIT};
   var DEFAULT_MIN_VIEWS = ${DEFAULT_MIN_VIEWS};
   var MAX_MIN_VIEWS = ${MAX_MIN_VIEWS};
-  var DEFAULTS = { "movie-query": DEFAULT_MOVIE_QUERY, "episode-query": DEFAULT_EPISODE_QUERY, exclude: DEFAULT_EXCLUDE.join(", ") };
+  var DEFAULTS = {
+    "movie-query": DEFAULT_MOVIE_QUERY,
+    "episode-query": DEFAULT_EPISODE_QUERY,
+    exclude: DEFAULT_EXCLUDE.join(", "),
+    "exclude-description": DEFAULT_EXCLUDE_DESCRIPTION.join(", ")
+  };
+
+  // A comma-separated list as the server stores it: lower case, trimmed,
+  // without blanks or repeats.
+  function readList(id) {
+    var out = [];
+    document.getElementById(id).value.split(",").forEach(function (word) {
+      var w = word.trim().toLowerCase();
+      if (w && out.indexOf(w) === -1) out.push(w);
+    });
+    return out;
+  }
   var KEY_PROBLEMS = {
     missing: "Enter your YouTube API key.",
     invalid: "YouTube says this key is not valid. Copy it again from the Google Cloud console.",
@@ -610,6 +645,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
     var audioLanguage = document.getElementById("audio-language").value;
     if (audioLanguage) config.audioLanguage = audioLanguage;
     if (document.getElementById("embeddable-only").checked) config.embeddableOnly = true;
+    if (document.getElementById("official-only").checked) config.officialOnly = true;
 
     var movieQuery = document.getElementById("movie-query").value.trim();
     var episodeQuery = document.getElementById("episode-query").value.trim();
@@ -619,12 +655,10 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
     if (movieQuery !== DEFAULT_MOVIE_QUERY) config.movieQuery = movieQuery;
     if (episodeQuery !== DEFAULT_EPISODE_QUERY) config.episodeQuery = episodeQuery;
 
-    var exclude = [];
-    document.getElementById("exclude").value.split(",").forEach(function (word) {
-      var w = word.trim().toLowerCase();
-      if (w && exclude.indexOf(w) === -1) exclude.push(w);
-    });
+    var exclude = readList("exclude");
     if (exclude.join(",") !== DEFAULT_EXCLUDE.join(",")) config.exclude = exclude;
+    var excludeDescription = readList("exclude-description");
+    if (excludeDescription.join(",") !== DEFAULT_EXCLUDE_DESCRIPTION.join(",")) config.excludeDescription = excludeDescription;
 
     return config;
   }

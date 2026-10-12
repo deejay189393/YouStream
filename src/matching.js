@@ -1,4 +1,4 @@
-const { fold, tokens, hasPhrase, significantTokens } = require("./text");
+const { fold, tokens, hasPhrase, STOPWORDS } = require("./text");
 const { LANGUAGE_BY_NAME } = require("./regions");
 
 /**
@@ -50,12 +50,24 @@ function marginSeconds(margin, runtimeSeconds) {
  *   an episode's own runtime                     the episode margin
  *   only the show's usual episode length         the typical margin, wider,
  *                                                since a show's episodes vary
+ *
+ * When two sources list different runtimes for a film (Cinemeta has Chupke
+ * Chupke at 129 minutes; it runs 146), a video close to either counts.
+ *
+ * A film also gets a second, wider span for official channels -- uploads
+ * YouTube marks as a content partner's. Measured: the studios' own uploads
+ * of Indian films run 10 to 25 minutes off the listed runtime (songs trimmed,
+ * TV cuts), and every partner upload in that band was the right film, while
+ * the unofficial uploads there included fakes.
  */
 function durationWindow(title, settings) {
   if (!title.runtimeSeconds) {
     const bounds = title.isEpisode ? UNKNOWN_RUNTIME.episode : UNKNOWN_RUNTIME.movie;
     return { ...bounds, target: null, tolerance: null, margin: null, basis: "unknown" };
   }
+  const runtimes = [title.runtimeSeconds, ...(title.otherRuntimes || [])];
+  const shortest = Math.min(...runtimes);
+  const longest = Math.max(...runtimes);
   const basis = title.isEpisode ? title.runtimeKind : "exact";
   const margin = !title.isEpisode
     ? settings.movieMargin
@@ -63,14 +75,27 @@ function durationWindow(title, settings) {
       ? settings.episodeMargin
       : settings.typicalMargin;
   const tolerance = marginSeconds(margin, title.runtimeSeconds);
-  return {
-    min: Math.max(0, title.runtimeSeconds - tolerance),
-    max: title.runtimeSeconds + tolerance,
+  const window = {
+    min: Math.max(0, shortest - tolerance),
+    max: longest + tolerance,
     target: title.runtimeSeconds,
     tolerance,
     margin,
     basis
   };
+  if (!title.isEpisode) {
+    const partner = Math.max(tolerance, marginSeconds(settings.partnerMovieMargin, title.runtimeSeconds));
+    window.partnerMin = Math.max(0, shortest - partner);
+    window.partnerMax = longest + partner;
+  }
+  return window;
+}
+
+/** Whether a video's length is inside the window, the official one included. */
+function inWindow(video, window) {
+  const d = video.durationSeconds;
+  if (d >= window.min && d <= window.max) return true;
+  return Boolean(video.licensed && window.partnerMin !== undefined && d >= window.partnerMin && d <= window.partnerMax);
 }
 
 /**
@@ -176,35 +201,209 @@ function usableEpisodeTitle(episodeTitle) {
 // --- Names ---------------------------------------------------------------
 
 /**
- * How well a video names the title: the share of a name's significant words
- * present in the video's title or channel name, and whether the whole name
- * appears as written.
- *
- * Short names need every word ("TVF Pitchers"); longer ones need 60% of them,
- * because uploaders shorten long titles -- "Mission Impossible Dead
- * Reckoning" for "Mission: Impossible -- Dead Reckoning Part One" -- and a
- * film's other names (from TMDB) catch the rest: "Harry Potter and the
- * Sorcerer's Stone" for "... Philosopher's Stone".
+ * Words that may stand beside a title's name without changing which title it
+ * is: "Don (1978) Full Hindi Movie HD", "Kota Factory | Web Series | S01 E03",
+ * "Maine Pyar Kiya Tamil Dubbed Movie". Language names, years and episode
+ * markers are allowed too, and so are the names of the title's own cast and
+ * director ("Buster Keaton in The General").
  */
-function nameMatch(names, haystack) {
-  const hayTokens = new Set(haystack.split(" "));
-  let best = { ok: false, phrase: false, coverage: 0, name: null };
-  names.forEach((name) => {
-    const significant = significantTokens(name);
-    if (!significant.length) return;
-    const present = significant.filter((t) => hayTokens.has(t)).length;
-    const required = significant.length <= 2 ? significant.length : Math.ceil(significant.length * 0.6);
-    const phrase = hasPhrase(haystack, fold(name));
-    const candidate = { ok: phrase || present >= required, phrase, coverage: present / significant.length, name };
-    const better =
-      candidate.ok !== best.ok
-        ? candidate.ok
-        : candidate.phrase !== best.phrase
-          ? candidate.phrase
-          : candidate.coverage > best.coverage;
-    if (better) best = candidate;
+const GENERIC_WORDS = new Set(
+  (
+    "full movie movies film films picture complete feature length watch online free exclusive official original " +
+    "hd fhd uhd sd hq 2k 4k 8k 1080p 720p 480p 360p 2160p 1080 720 bluray blu ray brrip bdrip webrip web dl webdl " +
+    "hdrip dvdrip dvd rip x264 x265 hevc remastered remaster restored colorized colourized colorised colour color " +
+    "uncut uncensored extended version edition directors cut new latest released release superhit super hit hits " +
+    "blockbuster classic classics cult premiere special dubbed dub dubbing dual audio multi subtitle subtitles " +
+    "subtitled sub subs subbed esub esubs eng cc with in series webseries show tv serial season seasons episode " +
+    "episodes ep eps epi e s part pilot finale mini miniseries anime cartoon animated animation kids drama comedy " +
+    "action thriller horror romance romantic family crime mystery suspense adventure fantasy scifi sci fi musical " +
+    "war western documentary biopic sports emotional epic silent noir bollywood hollywood tollywood kollywood " +
+    "mollywood sandalwood south indian"
+  ).split(" ")
+);
+
+const YEAR = /^(?:19|20)\d{2}$/;
+const MARKER = /^(?:s\d{1,2}|e\d{1,4}|ep\d{1,4}|s\d{1,2}e(?:p)?\d{1,4}|\d{1,2}x\d{1,4}|season\d{1,2}|episode\d{1,4})$/;
+const POSSESSIVE = /(?:['\u2019]s|s['\u2019])$/i;
+
+/**
+ * Characters that divide a video title into parts: "Don (1978) | Full Movie |
+ * Amitabh Bachchan" is four parts. A name may span parts ("Spider-Man: No Way
+ * Home" is three), but what stands beside it inside its own part says
+ * whether it is this title or another one that contains its words.
+ */
+const SEPARATORS = /[|\u2016\u2022\u00b7:;\/\\()[\]{}"\u201c\u201d\u201e\u00ab\u00bb!?#,*~=+<>\u3010\u3011\u300c\u300d\u300e\u300f\-\u2013\u2014_.]+/u;
+
+/**
+ * The title's words, each with the part it is in, whether it is possessive,
+ * and whether its part follows a colon. A capital "I" standing alone is read
+ * as a divider, the way some channels type a bar: "Horror Movie I Carnival
+ * of Souls (1962) I Full Movie".
+ */
+function titleWords(rawTitle) {
+  const words = [];
+  const text = String(rawTitle).normalize("NFKC").replace(/\s+I\s+/g, " | ");
+  const parts = text.split(new RegExp(`(${SEPARATORS.source})`, "u"));
+  let seg = 0;
+  let colon = false;
+  parts.forEach((part, k) => {
+    if (k % 2 === 1) {
+      seg++;
+      colon = part.includes(":");
+      return;
+    }
+    part.split(/\s+/).forEach((raw) => {
+      const folded = tokens(raw);
+      folded.forEach((t, i) => words.push({ t, seg, colon, possessive: i === folded.length - 1 && POSSESSIVE.test(raw) }));
+    });
   });
-  return best;
+  return words;
+}
+
+/** Every word of the cast's and director's names, for allowing credits. */
+function peopleWords(people) {
+  return new Set((people || []).flatMap((p) => tokens(p)));
+}
+
+function allowedBeside(word, people) {
+  return GENERIC_WORDS.has(word) || LANGUAGE_BY_NAME.has(word) || YEAR.test(word) || MARKER.test(word) || people.has(word);
+}
+
+/**
+ * Whether a video's title names the title as a title, not as words inside
+ * another one.
+ *
+ * Measured over 79 real searches, the coverage of a name's words was the
+ * largest source of wrong matches: "Yeh Meri Zindagi" for Yeh Meri Family,
+ * "Chori Chori Chupke Chupke" for Chupke Chupke, "Liam Neeson in TAKEN
+ * IDENTITY" for Taken, "Everything About Her" for Her, "Cesar 911" for 9-1-1.
+ * So the name must appear whole, and within its part of the title:
+ *
+ *   before it   only generic words, years, the cast's or director's names, or
+ *               a possessive credit ("F.W. Murnau's Nosferatu", "TVF's
+ *               Aspirants", "Ed Wood's Classic Plan 9 ...")
+ *   after it    the first two words must be generic words, years, numbers or
+ *               credits: "Kota Factory 03", "Andhadhun Superhit Thriller", but
+ *               not "Taken Identity", "Pokemon Indigo League", "Up in the Air"
+ *               -- nor, after a colon, "Joker: Folie a Deux"
+ */
+function anchoredName(rawTitle, names, people) {
+  const words = titleWords(rawTitle);
+  const credits = peopleWords(people);
+  for (const name of names) {
+    const own = tokens(name);
+    if (!own.length) continue;
+    for (let i = 0; i + own.length <= words.length; i++) {
+      if (!own.every((w, k) => words[i + k].t === w)) continue;
+      const end = i + own.length;
+      const before = [];
+      for (let j = i - 1; j >= 0 && words[j].seg === words[i].seg; j--) before.unshift(words[j]);
+      const lastCredit = before.map((w) => w.possessive).lastIndexOf(true);
+      const leftOk = before.slice(lastCredit + 1).every((w) => allowedBeside(w.t, credits));
+      // What follows a colon still belongs to the name: "Joker: Folie a Deux"
+      // is another film, "Baahubali: The Conclusion" another part.
+      const lastSeg = words[end - 1].seg;
+      const after = [];
+      for (let j = end; j < words.length && after.length < 2; j++) {
+        if (words[j].seg !== lastSeg && !(words[j].seg === lastSeg + 1 && words[j].colon)) break;
+        after.push(words[j]);
+      }
+      const rightOk = after.every((w) => allowedBeside(w.t, credits) || NUMBER.test(w.t));
+      if (leftOk && rightOk) return { ok: true, name };
+    }
+  }
+  return { ok: false, name: null };
+}
+
+// --- Corroboration -------------------------------------------------------
+
+/**
+ * Surnames too common to identify a film by: "Khan" is in the credits of
+ * half of Bollywood. A person is recognised by their full name, or by a
+ * surname of five letters or more that is not on this list.
+ */
+const COMMON_SURNAMES = new Set(
+  (
+    "khan kumar singh sharma kapoor gupta patel shah reddy verma joshi mehta jain yadav chopra malhotra das " +
+    "smith johnson williams brown jones miller davis wilson taylor anderson thomas jackson white harris martin " +
+    "thompson moore clark lewis walker allen young wright scott green baker adams nelson carter mitchell " +
+    "roberts turner phillips campbell parker evans edwards collins stewart morris murphy cooper bailey kelly " +
+    "howard watson brooks james bennett hughes price myers foster garcia rodriguez martinez hernandez lopez"
+  ).split(" ")
+);
+
+const NAME_SUFFIXES = new Set(["jr", "sr", "ii", "iii", "iv"]);
+
+function namesPerson(text, person) {
+  const parts = tokens(person);
+  while (parts.length > 1 && NAME_SUFFIXES.has(parts[parts.length - 1])) parts.pop();
+  const full = parts.join(" ");
+  if (!full) return false;
+  if (hasPhrase(text, full)) return true;
+  const surname = parts[parts.length - 1];
+  return parts.length > 1 && surname.length >= 5 && !COMMON_SURNAMES.has(surname) && hasPhrase(text, surname);
+}
+
+/** Whether two words differ by at most one letter (an edit, insertion or deletion). */
+function nearlyEqual(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+
+/**
+ * Whether a text names the episode, allowing for how titles get respelt:
+ * "Swamy And Friends I" is "Swami And Friends" on Malgudi Days' own upload.
+ * Every significant word must be present, a word of five letters or more
+ * may differ by one letter, and a trailing part number is ignored.
+ */
+function namesEpisodeTitle(text, episodeTitle) {
+  const folded = usableEpisodeTitle(episodeTitle);
+  if (!folded) return false;
+  if (hasPhrase(text, folded)) return true;
+  const words = folded.split(" ").filter((w) => !STOPWORDS.has(w));
+  while (words.length > 1 && (ROMAN_PARTS.has(words[words.length - 1]) || NUMBER.test(words[words.length - 1]))) words.pop();
+  const present = text.split(" ");
+  return words.length > 0 && words.every((w) => present.some((p) => p === w || (w.length >= 5 && nearlyEqual(p, w))));
+}
+
+const ROMAN_PARTS = new Set(["i", "ii", "iii", "iv", "v"]);
+
+/** IMDb ids a description links to: "imdb.com/title/tt28227737". */
+function linkedImdbIds(description) {
+  return [...String(description || "").matchAll(/imdb\.com\/title\/(tt\d{5,10})/gi)].map((m) => m[1].toLowerCase());
+}
+
+/**
+ * Independent evidence that a video is this title, from its title and
+ * description:
+ *
+ *   year              a film's year, give or take one
+ *   credits           a credited person: "Amitabh Bachchan", "Directed by
+ *                     Sriram Raghavan" -- what genuine uploads write
+ *   episode title     the episode's own name
+ *   imdb link         the description links this title's IMDb page, as TVF's
+ *                     do ("Rate us on IMDb")
+ *
+ * Measured over 79 real searches, 87% of genuine uploads carry one of these
+ * and 68% of wrong matches carry none -- requiring one is what took the wrong
+ * matches from 22% of everything returned to none. (A fifth, official
+ * numbering, depends on the episode check and is added there.)
+ */
+function corroboration(video, title) {
+  const text = fold(`${video.title} ${video.description || ""}`);
+  const words = new Set(text.split(" "));
+  const evidence = [];
+  if (!title.isEpisode && title.year && [title.year - 1, title.year, title.year + 1].some((y) => words.has(String(y)))) {
+    evidence.push("year");
+  }
+  if ((title.people || []).some((p) => namesPerson(text, p))) evidence.push("credits");
+  if (title.isEpisode && namesEpisodeTitle(text, title.episodeTitle)) evidence.push("episode title");
+  if (title.imdbId && linkedImdbIds(video.description).includes(title.imdbId)) evidence.push("imdb link");
+  return evidence;
 }
 
 const ROMAN_NUMERALS = { ii: 2, iii: 3, iv: 4 };
@@ -283,6 +482,14 @@ function excludedWord(videoTitle, words, names) {
 }
 
 // --- The verdict ---------------------------------------------------------
+
+/** How many calendar years back a release counts as recent. */
+const RECENT_YEARS = 5;
+
+function isRecent(title, now = new Date()) {
+  const year = title.releaseYear || (!title.isEpisode && title.year);
+  return Boolean(year && now.getUTCFullYear() - year < RECENT_YEARS);
+}
 
 /** What a show's episode is called in uploads, best first. */
 function episodeVerdict(video, title, foldedTitle, names) {
@@ -371,6 +578,9 @@ function regionBlocked(video, region) {
 /**
  * Judge one video. Returns `{ ok: true, score, ... }` or `{ ok: false,
  * reason }`, where the reason is the first check that failed.
+ *
+ * Every match must also carry independent evidence that it is this title
+ * (see corroboration).
  */
 function evaluate(video, title, window, settings) {
   const base = { video };
@@ -378,7 +588,7 @@ function evaluate(video, title, window, settings) {
 
   if (video.live) return fail(video.live === "upcoming" ? "not aired yet" : "live stream");
   if (!video.durationSeconds) return fail("no length");
-  if (video.durationSeconds < window.min || video.durationSeconds > window.max) return fail("wrong length");
+  if (!inWindow(video, window)) return fail("wrong length");
   if (regionBlocked(video, settings.region)) return fail(`blocked in ${settings.region}`);
   const languages = audioLanguages(video);
   if (settings.audioLanguage && languages.size && !languages.has(settings.audioLanguage)) {
@@ -389,12 +599,16 @@ function evaluate(video, title, window, settings) {
   if (video.views !== null && video.views < settings.minViews) return fail("too few views");
 
   const names = [title.title, ...title.aliases];
+  const ownWords = [...names, title.episodeTitle || ""];
   const foldedTitle = fold(video.title);
-  const excluded = excludedWord(foldedTitle, settings.exclude, [...names, title.episodeTitle || ""]);
+  const excluded = excludedWord(foldedTitle, settings.exclude, ownWords);
   if (excluded) return fail(`says "${excluded}"`);
+  const excludedInDescription = excludedWord(fold(video.description || ""), settings.excludeDescription, ownWords);
+  if (excludedInDescription) return fail(`description says "${excludedInDescription}"`);
 
-  const named = nameMatch(names, fold(`${video.title} ${video.channelTitle}`));
-  if (!named.ok) return fail("does not name the title");
+  if (!anchoredName(video.title, names, title.people).ok) return fail("does not name the title");
+  const links = linkedImdbIds(video.description);
+  if (title.imdbId && links.length && !links.includes(title.imdbId)) return fail("links another title on IMDb");
 
   let score = 100;
   let how = null;
@@ -414,6 +628,28 @@ function evaluate(video, title, window, settings) {
     if (year === "match") score += 10;
   }
 
+  const evidence = corroboration(video, title);
+  // An official channel numbering the episode exactly as listed, at the
+  // length listed for that very episode: how anime publishers such as Muse
+  // India title their uploads, with nothing else in the description to go on.
+  if (video.licensed && window.basis === "exact" && (how === "season and episode" || (how === "episode" && title.seasonCount === 1))) {
+    evidence.push("official numbering");
+  }
+  if (!evidence.length) return fail("no year, credits or episode title");
+
+  // Recent films and episodes are not free on YouTube except from their own
+  // studios and networks, all of them partner channels. An unofficial "full
+  // movie" of a release from the last few years -- "Oppenheimer (2023) | HD
+  // Full Movie" -- is a fake or a copy, so only partner uploads count.
+  if (!video.licensed && (settings.officialOnly || isRecent(title))) {
+    return fail(settings.officialOnly ? "not an official channel" : "recent release, not an official channel");
+  }
+  if (evidence.includes("credits")) score += 10;
+  // Uploaded by a channel linked to a YouTube content partner: true of every
+  // official channel measured (studios, TV networks, TVF, Dice Media) and of
+  // few unofficial uploads.
+  if (video.licensed) score += 10;
+
   // Inside the window, closeness counts for less than how widely a video
   // has been watched. Measured: the studios' own uploads of Indian films run
   // 10 to 25 minutes under the listed runtime, songs trimmed, so the closest
@@ -421,12 +657,19 @@ function evaluate(video, title, window, settings) {
   // millions of views, sits further away.
   const offsetSeconds = window.target ? video.durationSeconds - window.target : null;
   if (window.target) score -= Math.min(15, (Math.abs(offsetSeconds) / Math.max(window.tolerance, 1)) * 15);
-  if (named.phrase) score += 10;
   if (settings.audioLanguage && languages.has(settings.audioLanguage)) score += 10;
   if (video.definition === "hd") score += 5;
   if (video.views) score += Math.min(25, Math.log10(video.views + 1) * 3);
 
-  return { ...base, ok: true, score: Math.round(score * 10) / 10, offsetSeconds, how, language: [...languages][0] || null };
+  return {
+    ...base,
+    ok: true,
+    score: Math.round(score * 10) / 10,
+    offsetSeconds,
+    how,
+    evidence,
+    language: [...languages][0] || null
+  };
 }
 
 /** The matches, best first. */
@@ -441,7 +684,15 @@ module.exports = {
   parseEpisodeMarkers,
   markerWords,
   usableEpisodeTitle,
-  nameMatch,
+  titleWords,
+  anchoredName,
+  corroboration,
+  linkedImdbIds,
+  namesEpisodeTitle,
+  nearlyEqual,
+  isRecent,
+  inWindow,
+  namesPerson,
   numberAfterName,
   isSequel,
   yearVerdict,

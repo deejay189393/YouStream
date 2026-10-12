@@ -10,7 +10,7 @@
  */
 const { JSDOM, VirtualConsole } = require("jsdom");
 const { renderConfigurePage } = require("../src/configurePage");
-const { decodeConfig, normalizeConfig, DEFAULT_EXCLUDE } = require("../src/config");
+const { decodeConfig, normalizeConfig, DEFAULT_EXCLUDE, DEFAULT_EXCLUDE_DESCRIPTION } = require("../src/config");
 
 const BASE = "https://youstream.up.railway.app";
 
@@ -104,12 +104,14 @@ describe("building the install link", () => {
     const movie = p.$('[data-margin="movieMargin"]');
     movie.querySelector(".margin-value").value = "12.5";
     movie.querySelector(".margin-unit").value = "%";
-    p.$('[data-margin="episodeMargin"] .margin-value').value = "90";
+    p.$('[data-margin="episodeMargin"] .margin-value').value = "60";
     p.set("max-results", "8");
     p.set("min-views", "0");
     p.set("region", "IN");
     p.set("audio-language", "hi");
     p.check("embeddable-only", true);
+    p.check("official-only", true);
+    p.set("exclude-description", "Fan Movie, , fan movie");
     p.set("movie-query", "{title} film");
     p.set("episode-query", "{title} {s00e00}");
     p.set("exclude", "Trailer, reaction, , trailer");
@@ -119,7 +121,7 @@ describe("building the install link", () => {
       youtubeKey: "AIzaKey",
       tmdbKey: "eyJtoken.part-2",
       movieMargin: "12.5%",
-      episodeMargin: "90s",
+      episodeMargin: "60s",
       playback: ["app", "youtube"],
       playbackVersion: 1,
       types: ["series"],
@@ -128,9 +130,11 @@ describe("building the install link", () => {
       region: "IN",
       audioLanguage: "hi",
       embeddableOnly: true,
+      officialOnly: true,
       movieQuery: "{title} film",
       episodeQuery: "{title} {s00e00}",
-      exclude: ["trailer", "reaction"]
+      exclude: ["trailer", "reaction"],
+      excludeDescription: ["fan movie"]
     });
     expect(p.generated()).toMatchObject({ movieMargin: { value: 12.5, unit: "%" }, types: ["series"] });
   });
@@ -166,10 +170,12 @@ describe("building the install link", () => {
     p.set("movie-query", "x");
     p.set("episode-query", "y");
     p.set("exclude", "z");
+    p.set("exclude-description", "w");
     p.document.querySelectorAll(".reset").forEach((b) => p.click(b));
     expect(p.$("#movie-query").value).toBe("{title} {year} full movie {language}");
     expect(p.$("#episode-query").value).toBe("{title} season {season} episode {episode}");
     expect(p.$("#exclude").value).toBe(DEFAULT_EXCLUDE.join(", "));
+    expect(p.$("#exclude-description").value).toBe(DEFAULT_EXCLUDE_DESCRIPTION.join(", "));
   });
 });
 

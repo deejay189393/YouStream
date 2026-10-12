@@ -9,6 +9,7 @@ const {
   cleanKey,
   DEFAULT_MARGINS,
   DEFAULT_EXCLUDE,
+  DEFAULT_EXCLUDE_DESCRIPTION,
   DEFAULT_MOVIE_QUERY,
   DEFAULT_EPISODE_QUERY,
   DEFAULT_MAX_RESULTS,
@@ -75,6 +76,7 @@ describe("normalizeConfig", () => {
       youtubeKey: "",
       tmdbKey: "",
       movieMargin: DEFAULT_MARGINS.movieMargin,
+      partnerMovieMargin: DEFAULT_MARGINS.partnerMovieMargin,
       episodeMargin: DEFAULT_MARGINS.episodeMargin,
       typicalMargin: DEFAULT_MARGINS.typicalMargin,
       playback: ["app", "youtube"],
@@ -84,7 +86,9 @@ describe("normalizeConfig", () => {
       region: "",
       audioLanguage: "",
       embeddableOnly: false,
+      officialOnly: false,
       exclude: DEFAULT_EXCLUDE,
+      excludeDescription: DEFAULT_EXCLUDE_DESCRIPTION,
       movieQuery: DEFAULT_MOVIE_QUERY,
       episodeQuery: DEFAULT_EPISODE_QUERY
     });
@@ -100,9 +104,13 @@ describe("normalizeConfig", () => {
     expect(normalizeConfig({ minViews: " " }).minViews).toBe(DEFAULT_MIN_VIEWS);
   });
 
-  test("the defaults are what was asked for: 10 minutes for films, 45 seconds for episodes", () => {
-    expect(DEFAULT_MARGINS.movieMargin).toEqual({ value: 10, unit: "m" });
-    expect(DEFAULT_MARGINS.episodeMargin).toEqual({ value: 45, unit: "s" });
+  test("the defaults: 10 minutes for films (20% from official channels), 90 seconds for episodes, 30% for usual lengths", () => {
+    expect(DEFAULT_MARGINS).toEqual({
+      movieMargin: { value: 10, unit: "m" },
+      partnerMovieMargin: { value: 20, unit: "%" },
+      episodeMargin: { value: 90, unit: "s" },
+      typicalMargin: { value: 30, unit: "%" }
+    });
   });
 
   test.each([[null], [undefined], [false], [[1, 2]], ["text"]])("is safe on %p", (raw) => {
@@ -183,8 +191,8 @@ describe("normalizeConfig", () => {
   });
 
   test("bounds the excluded words", () => {
-    const many = Array.from({ length: 100 }, (_, i) => `word${i}`);
-    expect(normalizeConfig({ exclude: many }).exclude).toHaveLength(80);
+    const many = Array.from({ length: 250 }, (_, i) => `word${i}`);
+    expect(normalizeConfig({ exclude: many }).exclude).toHaveLength(200);
     expect(normalizeConfig({ exclude: ["x".repeat(60)] }).exclude[0]).toHaveLength(40);
   });
 
@@ -210,6 +218,7 @@ describe("encodeConfig", () => {
         movieMargin: "12%",
         episodeMargin: { value: 60, unit: "s" },
         typicalMargin: "3m",
+        partnerMovieMargin: "25%",
         playback: ["smarttube"],
         types: ["movie"],
         maxResults: 3,
@@ -217,7 +226,9 @@ describe("encodeConfig", () => {
         region: "IN",
         audioLanguage: "hi",
         embeddableOnly: true,
+        officialOnly: true,
         exclude: ["trailer"],
+        excludeDescription: ["fan movie"],
         movieQuery: "{title} movie",
         episodeQuery: "{title} {s00e00}"
       })
@@ -227,6 +238,7 @@ describe("encodeConfig", () => {
       movieMargin: "12%",
       episodeMargin: "60s",
       typicalMargin: "3m",
+      partnerMovieMargin: "25%",
       playback: ["smarttube"],
       playbackVersion: PLAYBACK_VERSION,
       types: ["movie"],
@@ -235,7 +247,9 @@ describe("encodeConfig", () => {
       region: "IN",
       audioLanguage: "hi",
       embeddableOnly: true,
+      officialOnly: true,
       exclude: ["trailer"],
+      excludeDescription: ["fan movie"],
       movieQuery: "{title} movie",
       episodeQuery: "{title} {s00e00}"
     });
