@@ -2,6 +2,7 @@ const {
   durationWindow,
   searchDuration,
   marginSeconds,
+  offsetFrom,
   inWindow,
   parseEpisodeMarkers,
   markerWords,
@@ -76,12 +77,15 @@ describe("margins and the length window", () => {
     expect(durationWindow(MOVIE, SETTINGS)).toEqual({
       min: 7920,
       max: 9120,
+      spans: [[7920, 9120]],
+      runtimes: [8520],
       target: 8520,
       tolerance: 600,
       margin: { value: 10, unit: "m" },
       basis: "exact",
       partnerMin: 6816,
-      partnerMax: 10224
+      partnerMax: 10224,
+      partnerSpans: [[6816, 10224]]
     });
   });
 
@@ -91,8 +95,28 @@ describe("margins and the length window", () => {
   });
 
   test("when sources disagree on a film's runtime, a video close to either counts", () => {
-    const window = durationWindow({ ...MOVIE, runtimeSeconds: 7740, otherRuntimes: [8760] }, SETTINGS);
-    expect(window).toMatchObject({ min: 7140, max: 9360, target: 7740 });
+    const window = durationWindow({ ...MOVIE, runtimeSeconds: 7740, otherRuntimes: [8760, 7740] }, SETTINGS);
+    expect(window).toMatchObject({ min: 7140, max: 9360, spans: [[7140, 9360]], runtimes: [7740, 8760], target: 7740 });
+  });
+
+  test("but only close to one or the other, not anywhere between", () => {
+    // Sholay is listed at 162 minutes (IMDb) and 208 (Cinemeta).
+    const window = durationWindow({ ...MOVIE, runtimeSeconds: 162 * 60, otherRuntimes: [208 * 60] }, SETTINGS);
+    expect(window.spans).toEqual([
+      [152 * 60, 172 * 60],
+      [198 * 60, 218 * 60]
+    ]);
+    expect(inWindow(video({ durationSeconds: 158 * 60 }), window)).toBe(true);
+    expect(inWindow(video({ durationSeconds: 185 * 60 }), window)).toBe(false);
+    expect(inWindow(video({ durationSeconds: 205 * 60 }), window)).toBe(true);
+    // An official channel's wider span around each of them still applies.
+    expect(inWindow(video({ durationSeconds: 185 * 60, licensed: true }), window)).toBe(true);
+  });
+
+  test("an offset is measured from the listed runtime a video is closest to", () => {
+    const window = durationWindow({ ...MOVIE, runtimeSeconds: 162 * 60, otherRuntimes: [208 * 60] }, SETTINGS);
+    expect(offsetFrom(205 * 60, window)).toBe(-180);
+    expect(offsetFrom(160 * 60, window)).toBe(-120);
   });
 
   test("an episode with its own runtime uses the episode margin", () => {
@@ -108,6 +132,8 @@ describe("margins and the length window", () => {
   test("no runtime anywhere falls back to wide bounds", () => {
     expect(durationWindow({ ...MOVIE, runtimeSeconds: null }, SETTINGS)).toEqual({
       ...UNKNOWN_RUNTIME.movie,
+      spans: [[UNKNOWN_RUNTIME.movie.min, UNKNOWN_RUNTIME.movie.max]],
+      runtimes: [],
       target: null,
       tolerance: null,
       margin: null,

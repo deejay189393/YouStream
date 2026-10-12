@@ -20,7 +20,7 @@ describe("server startup", () => {
     child = spawn(process.execPath, [path.join(__dirname, "..", "server.js")], {
       // The cache settings this machine happens to have are left out, and one
       // is mistyped on purpose.
-      env: { ...process.env, PORT: String(PORT), REDIS_URL: "", CACHE_STORE: "", CACHE_SEARCH_TTL: "a day" },
+      env: { ...process.env, PORT: String(PORT), REDIS_URL: "", CACHE_STORE: "", CACHE_SEARCH_TTL: "a day", IMDB_DATASETS: "off" },
       stdio: ["ignore", "pipe", "pipe"]
     });
 

@@ -144,14 +144,17 @@ function options(list, selected, anyLabel) {
  * @param {string} p.baseUrl
  * @param {object|null} p.existing   a decoded config, or null for a new setup
  * @param {boolean} [p.serverTmdb]   whether this server has its own TMDB key
+ * @param {Array<{ text: string, href: string }>} [p.credits]
+ *                                   the data sources' attribution, shown in
+ *                                   the footer as their terms ask
  */
-function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
+function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = [] }) {
   const isReconfigure = Boolean(existing);
   const s = normalizeConfig(existing);
 
   const tmdbNote = serverTmdb
     ? "This server already has a TMDB key that everyone shares, so you can leave this blank. Add your own only if you prefer to."
-    : "Optional. Without it, episodes are matched against the show's usual episode length, which is looser, and tmdb: ids are not looked up.";
+    : "Optional. Lets YouStream read the tmdb: ids Nuvio uses for some titles, and adds TMDB's cast lists and other names to the evidence a match needs.";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -270,6 +273,8 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
   footer { margin: 26px 0 8px; text-align: center; }
   footer a { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; text-decoration: none; }
   footer a:hover { color: var(--text); text-decoration: underline; }
+  footer .credits { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+  footer .credits a { display: inline; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -435,7 +440,14 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
     <a href="${REPO_URL}" target="_blank" rel="noopener">
       <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
       Source code on GitHub
-    </a>
+    </a>${
+      credits.length
+        ? `
+    <p class="credits">${credits
+      .map((c) => `<a href="${escapeHtml(c.href)}" target="_blank" rel="noopener">${escapeHtml(c.text)}</a>`)
+      .join("<br />")}</p>`
+        : ""
+    }
   </footer>
 </div>
 

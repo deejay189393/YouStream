@@ -25,8 +25,12 @@ const { uniqueAliases } = require("../src/metadata");
 const { variesWithinSeason } = require("../src/metadata/tvmaze");
 const { video } = require("./helpers");
 
-/** The title as the resolver builds it today, from what was captured. */
-function titleOf(c) {
+/**
+ * The title as the resolver builds it today, from what was captured: with
+ * IMDb's own runtime for a film when IMDb's data is loaded, and Cinemeta's
+ * alongside where it differs; with Cinemeta's alone before then.
+ */
+function titleOf(c, { imdb }) {
   const title = {
     ...c.title,
     aliases: uniqueAliases(c.title.title, c.title.aliases || []),
@@ -34,6 +38,11 @@ function titleOf(c) {
     imdbId: c.streamId.split(":")[0],
     otherRuntimes: []
   };
+  if (imdb && !title.isEpisode && c.imdbRuntimeMinutes) {
+    const listed = c.imdbRuntimeMinutes * 60;
+    const cinemeta = title.runtimeSeconds;
+    Object.assign(title, { runtimeSeconds: listed, otherRuntimes: cinemeta && cinemeta !== listed ? [cinemeta] : [] });
+  }
   if (title.isEpisode && c.tvmaze) {
     const season = c.tvmaze.episodes;
     const ep = season.find((e) => e.number === title.episode);
@@ -42,9 +51,9 @@ function titleOf(c) {
   return title;
 }
 
-function matchesFor(settings) {
+function matchesFor(settings, sources) {
   return cases.map((c) => {
-    const title = titleOf(c);
+    const title = titleOf(c, sources);
     const s = normalizeConfig({ youtubeKey: "k", ...settings });
     const window = durationWindow(title, s);
     const evaluations = c.videos.map((v) => evaluate(video({ ...v, definition: "hd" }), title, window, s));
@@ -58,8 +67,11 @@ function tally(results) {
   return counts;
 }
 
-describe("with the default settings", () => {
-  const results = matchesFor({});
+describe.each([
+  ["Cinemeta's runtimes alone", { imdb: false }],
+  ["IMDb's runtimes for films", { imdb: true }]
+])("with the default settings, %s", (_, sources) => {
+  const results = matchesFor({}, sources);
   const counts = tally(results);
 
   test("not one match is the wrong content", () => {
@@ -113,8 +125,11 @@ describe("with the default settings", () => {
   });
 });
 
-describe("with only official channels", () => {
-  const results = matchesFor({ officialOnly: true });
+describe.each([
+  ["Cinemeta's runtimes alone", { imdb: false }],
+  ["IMDb's runtimes for films", { imdb: true }]
+])("with only official channels, %s", (_, sources) => {
+  const results = matchesFor({ officialOnly: true }, sources);
   const counts = tally(results);
 
   // The one unsure match is a restored Metropolis (1927), public domain since

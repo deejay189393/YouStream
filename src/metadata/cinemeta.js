@@ -18,6 +18,11 @@ async function fetchMeta(type, imdbId) {
   return meta && typeof meta === "object" && typeof meta.name === "string" && meta.name ? meta : null;
 }
 
+/** A numeric id as Cinemeta gives it (a number, or digits), as a string. */
+function idOf(value) {
+  return /^\d+$/.test(String(value)) ? String(value) : null;
+}
+
 /** The credited people Cinemeta lists: its top-billed cast and the directors. */
 function peopleOf(meta) {
   const names = [...(Array.isArray(meta.cast) ? meta.cast : []), ...(Array.isArray(meta.director) ? meta.director : [])];
@@ -66,7 +71,10 @@ async function episode(imdbId, season, episodeNumber) {
     released: match ? dateOf(match.released || match.firstAired) : null,
     absoluteEpisode: absoluteEpisode(videos, season, episodeNumber),
     seasonCount: seasons.size || null,
-    tmdbId: Number.isInteger(meta.moviedb_id) ? String(meta.moviedb_id) : null
+    tmdbId: Number.isInteger(meta.moviedb_id) ? String(meta.moviedb_id) : null,
+    // Cinemeta's episodes are TheTVDB's, each with its TheTVDB id.
+    tvdbId: idOf(meta.tvdb_id),
+    tvdbEpisodeId: match ? idOf(match.tvdb_id) : null
   };
 }
 

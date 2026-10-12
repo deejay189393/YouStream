@@ -23,6 +23,7 @@ describe("readHostConfig", () => {
         adminToken: null
       },
       streams: { maxAgeSeconds: 6 * 3600, emptyMaxAgeSeconds: 3600, failedMaxAgeSeconds: 60 },
+      metadata: { imdbDatasets: true, tvdbKey: null, tvdbPin: null },
       warnings: []
     });
   });
@@ -108,6 +109,13 @@ describe("readHostConfig", () => {
       store: "memory",
       dir: ".cache"
     });
+  });
+
+  test("metadata sources: IMDb's data unless turned off, TheTVDB with a key", () => {
+    expect(readHostConfig({ IMDB_DATASETS: "OFF" }).metadata.imdbDatasets).toBe(false);
+    expect(readHostConfig({ IMDB_DATASETS: "0" }).metadata.imdbDatasets).toBe(false);
+    expect(readHostConfig({ IMDB_DATASETS: "on" }).metadata.imdbDatasets).toBe(true);
+    expect(readHostConfig({ TVDB_API_KEY: " key ", TVDB_PIN: " 1234 " }).metadata).toMatchObject({ tvdbKey: "key", tvdbPin: "1234" });
   });
 
   test("reads the process environment by default", () => {

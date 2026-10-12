@@ -41,6 +41,13 @@
  *                               than CACHE_SEARCH_RECENT_TTL for a recent
  *                               release)
  *
+ *   IMDB_DATASETS               off to match films on Cinemeta's runtimes
+ *                               alone instead of loading IMDb's own data
+ *                               daily (see metadata/imdb.js)
+ *   TVDB_API_KEY, TVDB_PIN      TheTVDB's API, for episodes' own runtimes
+ *                               and air dates (see metadata/tvdb.js). The
+ *                               PIN only for a subscriber-supported key
+ *
  * Durations are seconds, or a number with s, m, h or d: 90, 90s, 15m, 6h, 7d.
  * Zero turns that cache off.
  */
@@ -53,6 +60,7 @@ const DAY_MS = UNIT_MS.d;
 const MAX_YOUTUBE_DATA_MS = 30 * DAY_MS;
 
 const STORES = ["memory", "redis", "file"];
+const OFF = ["off", "false", "0", "no"];
 
 const DEFAULTS = {
   CACHE_DIR: ".cache",
@@ -157,6 +165,11 @@ function readHostConfig(env = process.env) {
       maxAgeSeconds: Math.round(duration("STREAM_CACHE_MAX_AGE") / SECOND_MS),
       emptyMaxAgeSeconds: Math.round(duration("STREAM_CACHE_MAX_AGE_EMPTY") / SECOND_MS),
       failedMaxAgeSeconds: 60
+    },
+    metadata: {
+      imdbDatasets: !(given("IMDB_DATASETS") && OFF.includes(env.IMDB_DATASETS.trim().toLowerCase())),
+      tvdbKey: given("TVDB_API_KEY") ? env.TVDB_API_KEY.trim() : null,
+      tvdbPin: given("TVDB_PIN") ? env.TVDB_PIN.trim() : null
     },
     warnings
   };

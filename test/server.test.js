@@ -1,7 +1,7 @@
 const request = require("supertest");
 const youtube = require("../src/youtube");
 const { encodeConfig } = require("../src/config");
-const { app, getBaseUrl } = require("../server");
+const { app, getBaseUrl, credits } = require("../server");
 const { searchCache, metadataCache } = require("../src/cache");
 const { response, routeFetch, apiVideo, freshCache } = require("./helpers");
 
@@ -38,7 +38,29 @@ describe("basic routes", () => {
   test("/health", async () => {
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, cache: "memory" });
+    expect(res.body).toEqual({ ok: true, cache: "memory", imdb: { loaded: false } });
+  });
+
+  test("/health says when IMDb's data is turned off", async () => {
+    const { hostConfig } = require("../src/hostConfig");
+    hostConfig.metadata.imdbDatasets = false;
+    try {
+      expect((await request(app).get("/health")).body.imdb).toBe("off");
+    } finally {
+      hostConfig.metadata.imdbDatasets = true;
+    }
+  });
+
+  test("/configure credits the data sources whose terms ask for it", async () => {
+    const html = (await request(app).get("/configure")).text;
+    expect(html).toContain("Information courtesy of IMDb (https://www.imdb.com). Used with permission.");
+    expect(html).not.toContain("TheTVDB");
+  });
+
+  test("credits follow the sources in use", () => {
+    expect(credits({ imdbDatasets: false, tvdbKey: null })).toEqual([]);
+    expect(credits({ imdbDatasets: false, tvdbKey: "k" })).toEqual([{ text: "Episode data from TheTVDB.com", href: "https://thetvdb.com" }]);
+    expect(credits().map((c) => c.href)).toEqual(["https://www.imdb.com"]);
   });
 
   test("serves the artwork", async () => {
@@ -165,6 +187,26 @@ describe("GET /:config/explain/:type/:id.json", () => {
     routeFetch([...nightOfTheLivingDead, ["/search?", response({ error: { errors: [{ reason: "quotaExceeded" }] } }, { status: 403 })]]);
     const res = await request(app).get(`/${CFG()}/explain/movie/tt0063350.json`);
     expect(res.body).toMatchObject({ status: "ok", cached: true, stale: "quota", matches: [{ id: "full0000001" }] });
+  });
+
+  test("a film whose sources disagree shows the lengths close to each", async () => {
+    const imdb = require("../src/metadata/imdb");
+    async function* lines() {
+      yield "tconst\ttitleType\tprimaryTitle\toriginalTitle\tisAdult\tstartYear\tendYear\truntimeMinutes\tgenres";
+      yield ["tt0073707", "movie", "Sholay", "Sholay", "0", "1975", "\\N", "162", "Action"].join("\t");
+    }
+    imdb.useIndex(await imdb.buildIndex(lines()));
+    try {
+      routeFetch([
+        ["/meta/movie/", { meta: { name: "Sholay", year: "1975", runtime: "208 min" } }],
+        ["/search?", { items: [] }]
+      ]);
+      const res = await request(app).get(`/${CFG()}/explain/movie/tt0073707.json`);
+      expect(res.body.length).toMatchObject({ runtime: "2h 42m 00s", spans: ["2h 32m 00s to 2h 52m 00s", "3h 18m 00s to 3h 38m 00s"] });
+      expect(res.body.title.sources).toEqual(["imdb", "cinemeta"]);
+    } finally {
+      imdb.useIndex(null);
+    }
   });
 
   test("a lookup with no runtime known", async () => {

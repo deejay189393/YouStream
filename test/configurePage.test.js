@@ -31,7 +31,13 @@ describe("a new setup", () => {
 
   test("offers the TMDB key as optional, and says what it is for", () => {
     expect(html).toContain('id="tmdb-key"');
-    expect(html).toContain("Without it, episodes are matched against the show");
+    expect(html).toContain("Lets YouStream read the tmdb: ids Nuvio uses");
+  });
+
+  test("the footer credits data sources, escaped, and has no credits line without them", () => {
+    const html = page(null, { credits: [{ text: "Data <b>courtesy</b> of X", href: "https://x.example/?a=1&b=2" }] });
+    expect(html).toContain('<p class="credits"><a href="https://x.example/?a=1&amp;b=2" target="_blank" rel="noopener">Data &lt;b&gt;courtesy&lt;/b&gt; of X</a></p>');
+    expect(page()).not.toContain('class="credits"');
   });
 
   test("shows the default margins", () => {

@@ -12,6 +12,7 @@ const youtube = require("./src/youtube");
 const tmdb = require("./src/metadata/tmdb");
 const { hostConfig, describeCache } = require("./src/hostConfig");
 const { NAMESPACES, cacheSettings, cacheStats, clearAllCaches } = require("./src/cache");
+const imdb = require("./src/metadata/imdb");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,16 +34,26 @@ function invalidConfig(res) {
 
 const serverHasTmdbKey = () => Boolean(cleanKey(process.env.TMDB_API_KEY));
 
+/** The data sources this server uses that ask to be credited where their data is used. */
+function credits(metadata = hostConfig.metadata) {
+  const out = [];
+  if (metadata.imdbDatasets) out.push({ text: imdb.ATTRIBUTION, href: "https://www.imdb.com" });
+  if (metadata.tvdbKey) out.push({ text: "Episode data from TheTVDB.com", href: "https://thetvdb.com" });
+  return out;
+}
+
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => res.redirect("/configure"));
 
 app.get("/configure", (req, res) => {
   res.set("Content-Type", "text/html; charset=utf-8");
-  res.send(renderConfigurePage({ baseUrl: getBaseUrl(req), existing: null, serverTmdb: serverHasTmdbKey() }));
+  res.send(renderConfigurePage({ baseUrl: getBaseUrl(req), existing: null, serverTmdb: serverHasTmdbKey(), credits: credits() }));
 });
 
-app.get("/health", (req, res) => res.json({ ok: true, cache: cacheSettings().store }));
+app.get("/health", (req, res) =>
+  res.json({ ok: true, cache: cacheSettings().store, imdb: hostConfig.metadata.imdbDatasets ? imdb.status() : "off" })
+);
 
 /**
  * The cache, for whoever runs the server: GET for what it holds, DELETE to
@@ -130,7 +141,7 @@ app.get("/:config/configure", (req, res) => {
   const decoded = decodeConfig(req.params.config);
   if (!decoded) return invalidConfig(res);
   res.set("Content-Type", "text/html; charset=utf-8");
-  res.send(renderConfigurePage({ baseUrl: getBaseUrl(req), existing: decoded, serverTmdb: serverHasTmdbKey() }));
+  res.send(renderConfigurePage({ baseUrl: getBaseUrl(req), existing: decoded, serverTmdb: serverHasTmdbKey(), credits: credits() }));
 });
 
 /** A video as the explain endpoint shows it. */
@@ -163,6 +174,8 @@ function describeWindow(window) {
     margin: window.margin ? formatMargin(window.margin) : null,
     from: formatDuration(window.min),
     to: formatDuration(window.max),
+    // When sources disagree, the lengths close to each one, not all between.
+    ...(window.spans.length > 1 ? { spans: window.spans.map(([from, to]) => `${formatDuration(from)} to ${formatDuration(to)}`) } : {}),
     youtubeLengthFilter: searchDuration(window) || "any"
   };
 }
@@ -194,7 +207,7 @@ app.get("/:config/explain/:type/:id.json", async (req, res) => {
 // --- Streams, handled by the real stremio-addon-sdk router.
 app.use(createResourceRouter());
 
-module.exports = { app, getBaseUrl };
+module.exports = { app, getBaseUrl, credits };
 
 /* istanbul ignore next -- exercised for real by test/startup.test.js, which
    boots this file as a child process; coverage instrumentation does not span
@@ -202,6 +215,7 @@ module.exports = { app, getBaseUrl };
 if (require.main === module) {
   hostConfig.warnings.forEach((w) => console.warn(`[config] ${w}`));
   console.log(`[cache] ${describeCache(cacheSettings())}`);
+  if (hostConfig.metadata.imdbDatasets) imdb.start();
   app.listen(PORT, () => {
     console.log(`YouStream addon listening on port ${PORT}`);
   });

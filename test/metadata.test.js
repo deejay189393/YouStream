@@ -5,6 +5,9 @@ const tmdb = require("../src/metadata/tmdb");
 const kitsu = require("../src/metadata/kitsu");
 const tvmaze = require("../src/metadata/tvmaze");
 const { resolveTitle, uniqueAliases } = require("../src/metadata");
+const imdb = require("../src/metadata/imdb");
+const tvdbClient = require("../src/metadata/tvdb");
+const { hostConfig } = require("../src/hostConfig");
 const { parseStreamId } = require("../src/ids");
 const { response, routeFetch, freshCache, TEST_CACHE } = require("./helpers");
 
@@ -34,12 +37,13 @@ const CINEMETA_SERIES = {
     year: "2015–2022",
     runtime: "51 min",
     moviedb_id: 63180,
+    tvdb_id: 297358,
     cast: ["Naveen Kasturia", "Arunabh Kumar"],
     videos: [
       { season: 0, episode: 1, name: "Special" },
       { season: 1, episode: 1, name: "Tu Beer Hai" },
       { season: 1, episode: 2, name: "And Then There Were Four" },
-      { season: 1, episode: 3, name: "The Jury Room", released: "2015-07-20T00:00:00.000Z" },
+      { season: 1, episode: 3, name: "The Jury Room", released: "2015-07-20T00:00:00.000Z", tvdb_id: 5245433 },
       { season: 2, number: 1, title: "The Valley" },
       { season: 2, episode: 2, name: "Second" },
       null
@@ -285,9 +289,16 @@ describe("cinemeta", () => {
       released: "2015-07-20",
       absoluteEpisode: 3,
       seasonCount: 2,
-      tmdbId: "63180"
+      tmdbId: "63180",
+      tvdbId: "297358",
+      tvdbEpisodeId: "5245433"
     });
-    expect(await cinemeta.episode("tt4742876", 2, 1)).toMatchObject({ episodeTitle: "The Valley", absoluteEpisode: 4, released: null });
+    expect(await cinemeta.episode("tt4742876", 2, 1)).toMatchObject({
+      episodeTitle: "The Valley",
+      absoluteEpisode: 4,
+      released: null,
+      tvdbEpisodeId: null
+    });
   });
 
   test("an episode it does not list still resolves the show", async () => {
@@ -301,7 +312,9 @@ describe("cinemeta", () => {
       released: null,
       absoluteEpisode: 9,
       seasonCount: null,
-      tmdbId: null
+      tmdbId: null,
+      tvdbId: null,
+      tvdbEpisodeId: null
     });
   });
 
@@ -644,6 +657,40 @@ describe("resolveTitle", () => {
     expect(await resolve("tt1234567", { tmdbKey: "k" })).toMatchObject({ title: "No TMDB id", sources: ["cinemeta"] });
   });
 
+  describe("with IMDb's own data loaded", () => {
+    const HEADER = "tconst\ttitleType\tprimaryTitle\toriginalTitle\tisAdult\tstartYear\tendYear\truntimeMinutes\tgenres";
+    beforeEach(async () => {
+      async function* lines() {
+        yield HEADER;
+        yield ["tt0111161", "movie", "The Shawshank Redemption", "x", "0", "1994", "\\N", "144", "Drama"].join("\t");
+      }
+      imdb.useIndex(await imdb.buildIndex(lines()));
+    });
+    afterEach(() => imdb.useIndex(null));
+
+    test("a film is matched on IMDb's runtime, with Cinemeta's alongside where it differs", async () => {
+      routeFetch([["/meta/movie/tt0111161.json", CINEMETA_MOVIE]]);
+      expect(await resolve("tt0111161")).toMatchObject({ runtimeSeconds: 8640, otherRuntimes: [8520], sources: ["imdb", "cinemeta"] });
+    });
+
+    test("and IMDb's runtime is enough when Cinemeta has none", async () => {
+      routeFetch([["/meta/movie/tt0111161.json", { meta: { ...CINEMETA_MOVIE.meta, runtime: undefined } }]]);
+      expect(await resolve("tt0111161")).toMatchObject({ runtimeSeconds: 8640, otherRuntimes: [], runtimeKind: "exact" });
+    });
+
+    test("a tmdb: film too, through the IMDb id TMDB gives", async () => {
+      routeFetch([
+        ["/movie/278", TMDB_MOVIE],
+        ["/meta/movie/tt0111161.json", CINEMETA_MOVIE]
+      ]);
+      expect(await resolve("tmdb:278", { tmdbKey: "k" })).toMatchObject({
+        runtimeSeconds: 8640,
+        otherRuntimes: [8520],
+        sources: ["tmdb", "imdb", "cinemeta"]
+      });
+    });
+  });
+
   test("an IMDb film with no runtime anywhere", async () => {
     routeFetch([["/meta/movie/", { meta: { name: "Untimed" } }]]);
     expect(await resolve("tt1234567")).toMatchObject({ runtimeSeconds: null, runtimeKind: null, year: null, otherRuntimes: [] });
@@ -652,6 +699,101 @@ describe("resolveTitle", () => {
   test("a name with a subtitle also counts by its main title", async () => {
     routeFetch([["/meta/movie/", { meta: { name: "Nosferatu: A Symphony of Horror", runtime: "94 min" } }]]);
     expect((await resolve("tt0013442")).aliases).toEqual(["Nosferatu"]);
+  });
+
+  describe("with a TheTVDB key", () => {
+    const TVDB_SEASON = (runtimes) => ({
+      data: {
+        episodes: [
+          { id: 5245431, seasonNumber: 1, number: 1, runtime: runtimes[0], aired: "2015-06-03" },
+          { id: 5245433, seasonNumber: 1, number: 3, runtime: runtimes[1], aired: "2015-07-21", absoluteNumber: 3, name: "Jury" }
+        ]
+      }
+    });
+    const LOGIN = [/thetvdb\.com\/v4\/login$/, { data: { token: "t" } }];
+    beforeEach(() => {
+      hostConfig.metadata.tvdbKey = "k";
+      tvdbClient.resetSession();
+    });
+    afterEach(() => {
+      hostConfig.metadata.tvdbKey = null;
+    });
+
+    test("an episode's own runtime from TheTVDB, for the very episode Cinemeta lists", async () => {
+      const fetch = routeFetch([
+        ["/meta/series/tt4742876.json", CINEMETA_SERIES],
+        LOGIN,
+        ["/series/297358/episodes/default?page=0&season=1", TVDB_SEASON([41, 38])]
+      ]);
+      expect(await resolve("tt4742876:1:3")).toMatchObject({
+        runtimeSeconds: 2280,
+        runtimeKind: "exact",
+        otherRuntimes: [],
+        episodeTitle: "The Jury Room",
+        released: "2015-07-20",
+        sources: ["cinemeta", "tvdb"]
+      });
+      expect(fetch.mock.calls.some(([url]) => url.includes("/episodes/5245433"))).toBe(false);
+    });
+
+    test("TMDB's own runtime counts alongside where the two differ", async () => {
+      routeFetch([
+        ["/meta/series/tt4742876.json", CINEMETA_SERIES],
+        LOGIN,
+        ["/series/297358/episodes/default", TVDB_SEASON([41, 40])],
+        ["/tv/63180/season/1", TMDB_SEASON],
+        ["/tv/63180?", TMDB_SHOW]
+      ]);
+      expect(await resolve("tt4742876:1:3", { tmdbKey: "k" })).toMatchObject({
+        runtimeSeconds: 2400,
+        otherRuntimes: [2280],
+        sources: ["cinemeta", "tvdb", "tmdb"]
+      });
+    });
+
+    test("a runtime TheTVDB copies onto the whole season is the usual length, after Cinemeta's", async () => {
+      routeFetch([["/meta/series/tt4742876.json", CINEMETA_SERIES], LOGIN, ["/series/297358/", TVDB_SEASON([60, 60])]]);
+      expect(await resolve("tt4742876:1:3")).toMatchObject({ runtimeSeconds: 3060, runtimeKind: "typical" });
+      freshCache();
+      routeFetch([
+        ["/meta/series/tt4742876.json", { meta: { ...CINEMETA_SERIES.meta, runtime: undefined } }],
+        LOGIN,
+        ["/series/297358/", TVDB_SEASON([60, 60])]
+      ]);
+      expect(await resolve("tt4742876:1:3")).toMatchObject({ runtimeSeconds: 3600, runtimeKind: "typical" });
+    });
+
+    test("an episode beyond the season's first page, by its own id", async () => {
+      routeFetch([
+        ["/meta/series/tt4742876.json", CINEMETA_SERIES],
+        LOGIN,
+        ["/series/297358/", { data: { episodes: [] } }],
+        ["/episodes/5245433", { data: { id: 5245433, runtime: 38, absoluteNumber: 3 } }]
+      ]);
+      expect(await resolve("tt4742876:1:3")).toMatchObject({ runtimeSeconds: 3060, runtimeKind: "typical", absoluteEpisode: 3 });
+    });
+
+    test("what TheTVDB fills in when Cinemeta has no date or name for the episode", async () => {
+      const bare = { meta: { name: "Show", tvdb_id: 9, videos: [{ season: 1, episode: 3, tvdb_id: 5245433 }] } };
+      routeFetch([["/meta/series/tt9000009.json", bare], LOGIN, ["/series/9/", TVDB_SEASON([41, 38])]]);
+      expect(await resolve("tt9000009:1:3")).toMatchObject({ released: "2015-07-21", episodeTitle: "Jury" });
+    });
+
+    test("without TheTVDB ids, or with TheTVDB down, the other sources stand", async () => {
+      routeFetch([["/meta/series/", { meta: { name: "Show", videos: [] } }]]);
+      expect(await resolve("tt9000009:1:1")).toMatchObject({ sources: ["cinemeta"] });
+      routeFetch([["/meta/series/tt4742876.json", CINEMETA_SERIES], [/\/login$/, response({}, { status: 401 })]]);
+      expect(await resolve("tt4742876:1:3")).toMatchObject({ runtimeSeconds: 3060, sources: ["cinemeta"] });
+      const onlyEpisodeId = { meta: { name: "Show", videos: [{ season: 1, episode: 1, tvdb_id: 77 }] } };
+      routeFetch([["/meta/series/tt8000008.json", onlyEpisodeId], LOGIN, ["/episodes/77", { data: { id: 77, runtime: 22 } }]]);
+      expect(await resolve("tt8000008:1:1")).toMatchObject({ runtimeSeconds: 1320, runtimeKind: "typical", sources: ["cinemeta", "tvdb"] });
+    });
+
+    test("Cinemeta down, TheTVDB is not asked", async () => {
+      const fetch = routeFetch([["/meta/series/", response({}, { status: 500 })]]);
+      expect(await resolve("tt4742876:1:3")).toBeNull();
+      expect(fetch.mock.calls.some(([url]) => url.includes("thetvdb"))).toBe(false);
+    });
   });
 
   test("an IMDb episode from Cinemeta alone has only the typical length", async () => {

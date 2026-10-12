@@ -51,8 +51,10 @@ function marginSeconds(margin, runtimeSeconds) {
  *   only the show's usual episode length         the typical margin, wider,
  *                                                since a show's episodes vary
  *
- * When two sources list different runtimes for a film (Cinemeta has Chupke
- * Chupke at 129 minutes; it runs 146), a video close to either counts.
+ * When sources list different runtimes (Cinemeta has Chupke Chupke at 129
+ * minutes, IMDb at 146; it runs 146), a video close to any of them counts --
+ * close to one or the other, not anywhere between: Sholay is listed at 162
+ * and 208 minutes, and a 3-hour upload is neither.
  *
  * A film also gets a second, wider span for official channels -- uploads
  * YouTube marks as a content partner's. Measured: the studios' own uploads
@@ -63,11 +65,9 @@ function marginSeconds(margin, runtimeSeconds) {
 function durationWindow(title, settings) {
   if (!title.runtimeSeconds) {
     const bounds = title.isEpisode ? UNKNOWN_RUNTIME.episode : UNKNOWN_RUNTIME.movie;
-    return { ...bounds, target: null, tolerance: null, margin: null, basis: "unknown" };
+    return { ...bounds, spans: [[bounds.min, bounds.max]], runtimes: [], target: null, tolerance: null, margin: null, basis: "unknown" };
   }
-  const runtimes = [title.runtimeSeconds, ...(title.otherRuntimes || [])];
-  const shortest = Math.min(...runtimes);
-  const longest = Math.max(...runtimes);
+  const runtimes = [...new Set([title.runtimeSeconds, ...(title.otherRuntimes || [])])];
   const basis = title.isEpisode ? title.runtimeKind : "exact";
   const margin = !title.isEpisode
     ? settings.movieMargin
@@ -75,27 +75,56 @@ function durationWindow(title, settings) {
       ? settings.episodeMargin
       : settings.typicalMargin;
   const tolerance = marginSeconds(margin, title.runtimeSeconds);
+  const spans = spansAround(runtimes, (r) => marginSeconds(margin, r));
   const window = {
-    min: Math.max(0, shortest - tolerance),
-    max: longest + tolerance,
+    min: spans[0][0],
+    max: spans[spans.length - 1][1],
+    spans,
+    runtimes,
     target: title.runtimeSeconds,
     tolerance,
     margin,
     basis
   };
   if (!title.isEpisode) {
-    const partner = Math.max(tolerance, marginSeconds(settings.partnerMovieMargin, title.runtimeSeconds));
-    window.partnerMin = Math.max(0, shortest - partner);
-    window.partnerMax = longest + partner;
+    const partnerSpans = spansAround(runtimes, (r) =>
+      Math.max(marginSeconds(margin, r), marginSeconds(settings.partnerMovieMargin, r))
+    );
+    window.partnerMin = partnerSpans[0][0];
+    window.partnerMax = partnerSpans[partnerSpans.length - 1][1];
+    window.partnerSpans = partnerSpans;
   }
   return window;
 }
 
+/** [from, to] around each runtime, in order, overlapping ones merged. */
+function spansAround(runtimes, toleranceOf) {
+  const spans = runtimes
+    .map((r) => [Math.max(0, r - toleranceOf(r)), r + toleranceOf(r)])
+    .sort((a, b) => a[0] - b[0]);
+  return spans.reduce((merged, span) => {
+    const last = merged[merged.length - 1];
+    if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else merged.push([...span]);
+    return merged;
+  }, []);
+}
+
+const inSpans = (d, spans) => spans.some(([from, to]) => d >= from && d <= to);
+
 /** Whether a video's length is inside the window, the official one included. */
 function inWindow(video, window) {
   const d = video.durationSeconds;
-  if (d >= window.min && d <= window.max) return true;
-  return Boolean(video.licensed && window.partnerMin !== undefined && d >= window.partnerMin && d <= window.partnerMax);
+  if (inSpans(d, window.spans)) return true;
+  return Boolean(video.licensed && window.partnerSpans && inSpans(d, window.partnerSpans));
+}
+
+/** How far a length is from the listed runtime it is closest to. */
+function offsetFrom(durationSeconds, window) {
+  return window.runtimes.reduce((best, r) => {
+    const offset = durationSeconds - r;
+    return Math.abs(offset) < Math.abs(best) ? offset : best;
+  }, Infinity);
 }
 
 /**
@@ -655,7 +684,7 @@ function evaluate(video, title, window, settings) {
   // 10 to 25 minutes under the listed runtime, songs trimmed, so the closest
   // upload is often a re-upload while the canonical one, with tens of
   // millions of views, sits further away.
-  const offsetSeconds = window.target ? video.durationSeconds - window.target : null;
+  const offsetSeconds = window.target ? offsetFrom(video.durationSeconds, window) : null;
   if (window.target) score -= Math.min(15, (Math.abs(offsetSeconds) / Math.max(window.tolerance, 1)) * 15);
   if (settings.audioLanguage && languages.has(settings.audioLanguage)) score += 10;
   if (video.definition === "hd") score += 5;
@@ -681,6 +710,7 @@ module.exports = {
   durationWindow,
   searchDuration,
   marginSeconds,
+  offsetFrom,
   parseEpisodeMarkers,
   markerWords,
   usableEpisodeTitle,
