@@ -57,10 +57,34 @@ describe("basic routes", () => {
     expect(html).not.toContain("TheTVDB");
   });
 
-  test("credits follow the sources in use", () => {
-    expect(credits({ imdbDatasets: false, tvdbKey: null })).toEqual([]);
-    expect(credits({ imdbDatasets: false, tvdbKey: "k" })).toEqual([{ text: "Episode data from TheTVDB.com", href: "https://thetvdb.com" }]);
-    expect(credits().map((c) => c.href)).toEqual(["https://www.imdb.com"]);
+  test("credits follow the sources in use; TMDB's and TVmaze's always, since a reader may use either", () => {
+    const always = ["https://www.themoviedb.org", "https://www.tvmaze.com"];
+    expect(credits({ imdbDatasets: false, tvdbKey: null }).map((c) => c.href)).toEqual(always);
+    expect(credits({ imdbDatasets: false, tvdbKey: "k" })[0]).toEqual({ text: "Episode data from TheTVDB.com", href: "https://thetvdb.com" });
+    expect(credits().map((c) => c.href)).toEqual(["https://www.imdb.com", ...always]);
+    expect(credits()[1]).toMatchObject({
+      text: "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+      image: "/tmdb.svg"
+    });
+  });
+
+  test("/configure says what YouStream is not, and links the terms", async () => {
+    const html = (await request(app).get("/configure")).text;
+    expect(html).toContain("YouTube is a trademark of Google LLC. YouStream is not affiliated with or endorsed by YouTube, Google, Stremio or Nuvio.");
+    expect(html).toContain('<a href="/terms">Terms of use and privacy</a>');
+    expect(html).toContain('<img src="/tmdb.svg" alt="TMDB" height="11" />');
+  });
+
+  test("/terms: YouTube's terms, Google's privacy policy, the disclaimer, a contact and the credits", async () => {
+    const res = await request(app).get("/terms");
+    expect(res.headers["content-type"]).toMatch(/text\/html/);
+    expect(res.text).toContain("By using YouStream you agree to be bound by the");
+    expect(res.text).toContain('href="https://www.youtube.com/t/terms"');
+    expect(res.text).toContain('href="https://policies.google.com/privacy"');
+    expect(res.text).toContain("does not host, store, download, copy, proxy or modify any video");
+    expect(res.text).toContain('<a href="https://github.com/deejay189393/YouStream/issues">');
+    expect(res.text).toContain("This product uses the TMDB API but is not endorsed or certified by TMDB.");
+    expect((await request(app).get("/tmdb.svg")).status).toBe(200);
   });
 
   test("serves the artwork", async () => {

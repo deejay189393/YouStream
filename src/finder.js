@@ -2,6 +2,7 @@ const { parseStreamId, contentKind } = require("./ids");
 const { resolveTitle } = require("./metadata");
 const { searchVideos } = require("./youtube");
 const { searchMsFor } = require("./cache");
+const { hostConfig } = require("./hostConfig");
 const { durationWindow, searchDuration, evaluate, rankMatches } = require("./matching");
 const { effectiveTmdbKey } = require("./config");
 const { languageName } = require("./regions");
@@ -55,6 +56,14 @@ function buildQuery(title, settings) {
  *   matches?: object[], error? }>}
  *   `stale` names the failure an out-of-date cached search stood in for.
  */
+/**
+ * A video the host has been asked not to offer (BLOCKED_VIDEOS,
+ * BLOCKED_CHANNELS): never a match, whatever it is.
+ */
+function isBlocked(video, legal = hostConfig.legal) {
+  return legal.blockedVideos.includes(video.id) || legal.blockedChannels.includes(video.channelId);
+}
+
 async function findVideos(rawId, settings) {
   const parsed = parseStreamId(rawId);
   if (!parsed) return { status: "unsupported id" };
@@ -81,11 +90,13 @@ async function findVideos(rawId, settings) {
     return { status: "search failed", parsed, title, window, query, error: { kind: err.kind, message: err.message } };
   }
 
-  const evaluations = search.videos.map((video) => evaluate(video, title, window, settings));
+  const evaluations = search.videos.map((video) =>
+    isBlocked(video) ? { video, ok: false, reason: "blocked on this server" } : evaluate(video, title, window, settings)
+  );
   const matches = rankMatches(evaluations).slice(0, settings.maxResults);
   const result = { status: "ok", parsed, title, window, query, cached: search.cached, evaluations, matches };
   if (search.stale) result.stale = search.stale;
   return result;
 }
 
-module.exports = { findVideos, buildQuery };
+module.exports = { findVideos, buildQuery, isBlocked };

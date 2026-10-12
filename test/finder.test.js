@@ -1,5 +1,6 @@
 const youtube = require("../src/youtube");
-const { findVideos, buildQuery } = require("../src/finder");
+const { findVideos, buildQuery, isBlocked } = require("../src/finder");
+const { hostConfig } = require("../src/hostConfig");
 const { normalizeConfig } = require("../src/config");
 const { response, routeFetch, apiVideo, freshCache } = require("./helpers");
 
@@ -63,6 +64,33 @@ const CINEMETA = {
     ]
   }
 };
+
+describe("blocked videos and channels", () => {
+  const legal = { blockedVideos: ["e3xxxxxxxxx"], blockedChannels: ["UC1234567890123456789012"] };
+
+  test("by video or by channel", () => {
+    expect(isBlocked({ id: "e3xxxxxxxxx", channelId: "UCother" }, legal)).toBe(true);
+    expect(isBlocked({ id: "other000000", channelId: "UC1234567890123456789012" }, legal)).toBe(true);
+    expect(isBlocked({ id: "other000000", channelId: "UCother" }, legal)).toBe(false);
+    expect(isBlocked({ id: "e3xxxxxxxxx", channelId: "UCother" })).toBe(false);
+  });
+
+  test("a blocked video is never a match, and says why", async () => {
+    routeFetch([
+      ["/meta/series/tt9432978.json", CINEMETA],
+      ["/search?", { items: [{ id: { videoId: "e3" } }] }],
+      ["/videos?", { items: [apiVideo("e3", { snippet: { title: "Kota Factory - S01 E03 - Optimization" }, contentDetails: { duration: "PT36M51S" } })] }]
+    ]);
+    hostConfig.legal.blockedVideos = ["e3"];
+    try {
+      const result = await findVideos("tt9432978:1:3", SETTINGS);
+      expect(result.matches).toEqual([]);
+      expect(result.evaluations[0]).toMatchObject({ ok: false, reason: "blocked on this server" });
+    } finally {
+      hostConfig.legal.blockedVideos = [];
+    }
+  });
+});
 
 describe("findVideos", () => {
   test("an id it cannot read", async () => {

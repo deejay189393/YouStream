@@ -153,6 +153,11 @@ function useIndex(built) {
   index = built;
 }
 
+/** For tests: settles once no build is running. */
+async function idle() {
+  await building;
+}
+
 module.exports = {
   buildIndex,
   downloadLines,
@@ -162,6 +167,7 @@ module.exports = {
   filmRuntimeSeconds,
   status,
   useIndex,
+  idle,
   ATTRIBUTION,
   DATASET_URL,
   FILM_TYPES

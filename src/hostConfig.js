@@ -48,6 +48,15 @@
  *                               and air dates (see metadata/tvdb.js). The
  *                               PIN only for a subscriber-supported key
  *
+ *   BLOCKED_VIDEOS              videos this server never offers, for a rights
+ *                               holder who asks: ids or YouTube links,
+ *                               separated by commas or spaces
+ *   BLOCKED_CHANNELS            the same for whole channels: UC... ids or
+ *                               youtube.com/channel/ links
+ *   CONTACT                     an email address or a URL, shown on the terms
+ *                               page for questions and removal requests
+ *                               (default: the project's GitHub issues)
+ *
  * Durations are seconds, or a number with s, m, h or d: 90, 90s, 15m, 6h, 7d.
  * Zero turns that cache off.
  */
@@ -60,6 +69,23 @@ const DAY_MS = UNIT_MS.d;
 const MAX_YOUTUBE_DATA_MS = 30 * DAY_MS;
 
 const STORES = ["memory", "redis", "file"];
+const DEFAULT_CONTACT = "https://github.com/deejay189393/YouStream/issues";
+const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+const CHANNEL_ID = /^UC[A-Za-z0-9_-]{22}$/;
+
+/** A video id from an id or a YouTube link (watch, youtu.be, shorts, embed, live). */
+function videoIdOf(entry) {
+  if (VIDEO_ID.test(entry)) return entry;
+  const match = /(?:[?&]v=|youtu\.be\/|\/(?:shorts|embed|live)\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/.exec(entry);
+  return match ? match[1] : null;
+}
+
+/** A channel id from an id or a youtube.com/channel/ link. */
+function channelIdOf(entry) {
+  if (CHANNEL_ID.test(entry)) return entry;
+  const match = /\/channel\/(UC[A-Za-z0-9_-]{22})(?![A-Za-z0-9_-])/.exec(entry);
+  return match ? match[1] : null;
+}
 const OFF = ["off", "false", "0", "no"];
 
 const DEFAULTS = {
@@ -146,6 +172,20 @@ function readHostConfig(env = process.env) {
     if (ms > MAX_YOUTUBE_DATA_MS) warnings.push(`${name} is capped at 30 days, the most YouTube's API policies allow`);
   });
 
+  function idList(name, idOf, what) {
+    if (!given(name)) return [];
+    const ids = [];
+    env[name]
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .forEach((entry) => {
+        const id = idOf(entry);
+        if (id) ids.push(id);
+        else warnings.push(`${name}: "${entry}" is not a ${what}; ignored`);
+      });
+    return [...new Set(ids)];
+  }
+
   return {
     cache: {
       store,
@@ -165,6 +205,11 @@ function readHostConfig(env = process.env) {
       maxAgeSeconds: Math.round(duration("STREAM_CACHE_MAX_AGE") / SECOND_MS),
       emptyMaxAgeSeconds: Math.round(duration("STREAM_CACHE_MAX_AGE_EMPTY") / SECOND_MS),
       failedMaxAgeSeconds: 60
+    },
+    legal: {
+      blockedVideos: idList("BLOCKED_VIDEOS", videoIdOf, "YouTube video id or link"),
+      blockedChannels: idList("BLOCKED_CHANNELS", channelIdOf, "YouTube channel id (UC...) or channel link"),
+      contact: given("CONTACT") ? env.CONTACT.trim() : DEFAULT_CONTACT
     },
     metadata: {
       imdbDatasets: !(given("IMDB_DATASETS") && OFF.includes(env.IMDB_DATASETS.trim().toLowerCase())),
@@ -199,4 +244,15 @@ function describeCache(cache) {
 
 const hostConfig = readHostConfig();
 
-module.exports = { hostConfig, readHostConfig, describeCache, parseDuration, redactUrl, MAX_YOUTUBE_DATA_MS, DAY_MS };
+module.exports = {
+  hostConfig,
+  readHostConfig,
+  describeCache,
+  parseDuration,
+  redactUrl,
+  videoIdOf,
+  channelIdOf,
+  MAX_YOUTUBE_DATA_MS,
+  DAY_MS,
+  DEFAULT_CONTACT
+};

@@ -28,8 +28,11 @@ const gz = (list) => zlib.gzipSync(Buffer.from(list.join("\n") + "\n"));
 const download = (list) => new Response(gz(list), { status: 200 });
 
 let warn;
-beforeEach(() => {
+beforeEach(async () => {
   imdb.stop();
+  // A build the last test left running would otherwise be joined by this
+  // test's first refresh, and answer with the last test's download.
+  await imdb.idle();
   imdb.useIndex(null);
   jest.restoreAllMocks();
   warn = jest.spyOn(console, "warn").mockImplementation(() => {});

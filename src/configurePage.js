@@ -273,8 +273,12 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   footer { margin: 26px 0 8px; text-align: center; }
   footer a { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; text-decoration: none; }
   footer a:hover { color: var(--text); text-decoration: underline; }
-  footer .credits { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
-  footer .credits a { display: inline; font-size: 12px; }
+  footer .credits, footer .disclaimer { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+  footer .credits a, footer .disclaimer a { display: inline; font-size: 12px; }
+  footer .credits img { vertical-align: middle; margin-right: 4px; }
+  footer .disclaimer a { text-decoration: underline; }
+  .agree { margin: 18px 0 4px; font-size: 13px; color: var(--muted); }
+  .agree a { color: var(--accent-2); }
 </style>
 </head>
 <body>
@@ -420,6 +424,9 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       </details>
     </div>
 
+    <label class="check agree"><input type="checkbox" id="agree"${isReconfigure ? " checked" : ""} />
+      <span>I agree to the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a> and to YouStream's <a href="/terms" target="_blank" rel="noopener">terms of use and privacy policy</a>.</span></label>
+
     <button type="submit" class="submit" id="submit-btn">Generate install link</button>
     <div class="error" id="error" style="display:none" role="alert"></div>
   </form>
@@ -444,10 +451,16 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       credits.length
         ? `
     <p class="credits">${credits
-      .map((c) => `<a href="${escapeHtml(c.href)}" target="_blank" rel="noopener">${escapeHtml(c.text)}</a>`)
+      .map(
+        (c) =>
+          `<a href="${escapeHtml(c.href)}" target="_blank" rel="noopener">${
+            c.image ? `<img src="${escapeHtml(c.image)}" alt="${escapeHtml(c.imageAlt || "")}" height="11" />` : ""
+          }${escapeHtml(c.text)}</a>`
+      )
       .join("<br />")}</p>`
         : ""
     }
+    <p class="disclaimer">YouStream links to videos hosted on YouTube; it does not host, store or download any video. YouTube is a trademark of Google LLC. YouStream is not affiliated with or endorsed by YouTube, Google, Stremio or Nuvio. <a href="/terms">Terms of use and privacy</a></p>
   </footer>
 </div>
 
@@ -672,6 +685,9 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     var excludeDescription = readList("exclude-description");
     if (excludeDescription.join(",") !== DEFAULT_EXCLUDE_DESCRIPTION.join(",")) config.excludeDescription = excludeDescription;
 
+    if (!document.getElementById("agree").checked) {
+      return "To install YouStream, agree to the YouTube Terms of Service and YouStream's terms of use and privacy policy.";
+    }
     return config;
   }
 

@@ -23,6 +23,7 @@ describe("readHostConfig", () => {
         adminToken: null
       },
       streams: { maxAgeSeconds: 6 * 3600, emptyMaxAgeSeconds: 3600, failedMaxAgeSeconds: 60 },
+      legal: { blockedVideos: [], blockedChannels: [], contact: "https://github.com/deejay189393/YouStream/issues" },
       metadata: { imdbDatasets: true, tvdbKey: null, tvdbPin: null },
       warnings: []
     });
@@ -116,6 +117,24 @@ describe("readHostConfig", () => {
     expect(readHostConfig({ IMDB_DATASETS: "0" }).metadata.imdbDatasets).toBe(false);
     expect(readHostConfig({ IMDB_DATASETS: "on" }).metadata.imdbDatasets).toBe(true);
     expect(readHostConfig({ TVDB_API_KEY: " key ", TVDB_PIN: " 1234 " }).metadata).toMatchObject({ tvdbKey: "key", tvdbPin: "1234" });
+  });
+
+  test("videos and channels a rights holder asked to be blocked, by id or link", () => {
+    const { legal, warnings } = readHostConfig({
+      BLOCKED_VIDEOS:
+        "dQw4w9WgXcQ, https://www.youtube.com/watch?v=abcdefghijk&t=3 https://youtu.be/ABCDEFGHIJK?si=x https://www.youtube.com/shorts/s0rt5_vid-0 dQw4w9WgXcQ nope",
+      BLOCKED_CHANNELS: "UC1234567890123456789012 https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos @handle"
+    });
+    expect(legal.blockedVideos).toEqual(["dQw4w9WgXcQ", "abcdefghijk", "ABCDEFGHIJK", "s0rt5_vid-0"]);
+    expect(legal.blockedChannels).toEqual(["UC1234567890123456789012", "UCabcdefghijklmnopqrstuv"]);
+    expect(warnings).toEqual([
+      'BLOCKED_VIDEOS: "nope" is not a YouTube video id or link; ignored',
+      'BLOCKED_CHANNELS: "@handle" is not a YouTube channel id (UC...) or channel link; ignored'
+    ]);
+  });
+
+  test("a contact for questions and removal requests", () => {
+    expect(readHostConfig({ CONTACT: " rights@example.com " }).legal.contact).toBe("rights@example.com");
   });
 
   test("reads the process environment by default", () => {

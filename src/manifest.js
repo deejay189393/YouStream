@@ -9,7 +9,7 @@ const { normalizeConfig, isConfigured, effectiveTmdbKey } = require("./config");
  * to play it.
  */
 const ADDON_ID = "org.deejay189393.youstream";
-const ADDON_VERSION = "0.4.0";
+const ADDON_VERSION = "0.5.0";
 const ADDON_NAME = "YouStream";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION =

@@ -19,7 +19,11 @@ afterEach(() => {
   while (openWindows.length) openWindows.pop().close();
 });
 
-function loadPage({ existing = null, language = "en-US", fetch, clipboard } = {}) {
+/**
+ * The page, loaded and run. The terms box is ticked, as a reader who goes
+ * on to install has ticked it, unless `agreed` says otherwise.
+ */
+function loadPage({ existing = null, language = "en-US", fetch, clipboard, agreed = true } = {}) {
   const errors = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", (err) => errors.push(err));
@@ -37,6 +41,7 @@ function loadPage({ existing = null, language = "en-US", fetch, clipboard } = {}
   openWindows.push(dom.window);
   const { document } = dom.window;
   const $ = (sel) => document.querySelector(sel);
+  if (agreed) $("#agree").checked = true;
 
   return {
     dom,
@@ -362,6 +367,31 @@ test("a base URL with no scheme still yields a link", () => {
   openWindows.push(dom.window);
   const { document } = dom.window;
   document.getElementById("youtube-key").value = "k";
+  document.getElementById("agree").checked = true;
   document.getElementById("config-form").dispatchEvent(new dom.window.Event("submit", { cancelable: true }));
   expect(document.getElementById("install-link").getAttribute("href")).toMatch(/^youstream\.local\/%7B/);
+});
+
+describe("agreeing to the terms", () => {
+  test("no link is built until the reader agrees to YouTube's terms and YouStream's", () => {
+    const p = loadPage({ agreed: false });
+    expect(p.$("#agree").checked).toBe(false);
+    p.set("youtube-key", "AIzaKEY");
+    p.submit();
+    expect(p.error()).toBe(
+      "To install YouStream, agree to the YouTube Terms of Service and YouStream's terms of use and privacy policy."
+    );
+    expect(p.shown()).toBe(false);
+    p.check("agree", true);
+    p.submit();
+    expect(p.error()).toBeNull();
+    expect(p.shown()).toBe(true);
+  });
+
+  test("the box links both, and someone editing a setup they installed has already agreed", () => {
+    const p = loadPage({ agreed: false });
+    const links = [...p.document.querySelectorAll(".agree a")].map((a) => a.getAttribute("href"));
+    expect(links).toEqual(["https://www.youtube.com/t/terms", "/terms"]);
+    expect(loadPage({ existing: { youtubeKey: "AIzaKEY" }, agreed: false }).$("#agree").checked).toBe(true);
+  });
 });

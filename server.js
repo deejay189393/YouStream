@@ -4,6 +4,7 @@ const express = require("express");
 const { decodeConfig, cleanKey, formatMargin } = require("./src/config");
 const { buildManifest, getUnconfiguredManifest } = require("./src/manifest");
 const { renderConfigurePage } = require("./src/configurePage");
+const { renderTermsPage } = require("./src/termsPage");
 const { createResourceRouter } = require("./src/addonInterface");
 const { findVideos } = require("./src/finder");
 const { searchDuration } = require("./src/matching");
@@ -34,11 +35,23 @@ function invalidConfig(res) {
 
 const serverHasTmdbKey = () => Boolean(cleanKey(process.env.TMDB_API_KEY));
 
-/** The data sources this server uses that ask to be credited where their data is used. */
+/**
+ * The data sources this server uses whose terms ask to be credited where
+ * their data is used: IMDb's statement, TMDB's notice with its logo (a
+ * reader may add a TMDB key even when the server has none), TheTVDB's link,
+ * and TVmaze's, whose data is CC BY-SA.
+ */
 function credits(metadata = hostConfig.metadata) {
   const out = [];
   if (metadata.imdbDatasets) out.push({ text: imdb.ATTRIBUTION, href: "https://www.imdb.com" });
   if (metadata.tvdbKey) out.push({ text: "Episode data from TheTVDB.com", href: "https://thetvdb.com" });
+  out.push({
+    text: "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+    href: "https://www.themoviedb.org",
+    image: "/tmdb.svg",
+    imageAlt: "TMDB"
+  });
+  out.push({ text: "Episode runtimes from TVmaze.com (CC BY-SA 4.0)", href: "https://www.tvmaze.com" });
   return out;
 }
 
@@ -49,6 +62,11 @@ app.get("/", (req, res) => res.redirect("/configure"));
 app.get("/configure", (req, res) => {
   res.set("Content-Type", "text/html; charset=utf-8");
   res.send(renderConfigurePage({ baseUrl: getBaseUrl(req), existing: null, serverTmdb: serverHasTmdbKey(), credits: credits() }));
+});
+
+app.get("/terms", (req, res) => {
+  res.set("Content-Type", "text/html; charset=utf-8");
+  res.send(renderTermsPage({ contact: hostConfig.legal.contact, credits: credits() }));
 });
 
 app.get("/health", (req, res) =>
