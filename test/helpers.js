@@ -2,6 +2,8 @@
  * Shared test helpers: a fetch double that answers by URL, builders for the
  * shapes the upstream APIs return, and a fresh cache for each test.
  */
+const fs = require("fs");
+const path = require("path");
 const { configureCache } = require("../src/cache");
 const { readHostConfig } = require("../src/hostConfig");
 
@@ -87,4 +89,16 @@ function apiVideo(id, overrides = {}) {
   };
 }
 
-module.exports = { response, routeFetch, video, apiVideo, freshCache, TEST_CACHE };
+/**
+ * A real-data fixture: YouTube search results and IMDb runtimes, which their
+ * owners' terms do not let this repository publish. They are kept in the
+ * private youstream-fixtures repository and checked out into
+ * test/fixtures/private/ (see the README, "Real-data tests"). Null when they
+ * are not there, and the suites that need them are then skipped.
+ */
+function privateFixture(name) {
+  const file = path.join(__dirname, "fixtures", "private", name);
+  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
+}
+
+module.exports = { response, routeFetch, video, apiVideo, freshCache, TEST_CACHE, privateFixture };

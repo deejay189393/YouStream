@@ -18,12 +18,18 @@
  * matches (22%) were the wrong content. The assertions below are the
  * standard the rules are held to now.
  */
-const { cases, labels } = require("./fixtures/corpus.json");
 const { durationWindow, evaluate, rankMatches } = require("../src/matching");
 const { normalizeConfig } = require("../src/config");
 const { uniqueAliases } = require("../src/metadata");
 const { variesWithinSeason } = require("../src/metadata/tvmaze");
-const { video } = require("./helpers");
+const { video, privateFixture } = require("./helpers");
+
+// Real search results from the private youstream-fixtures repository (see
+// the README, "Real-data tests"). Without them, this suite is skipped.
+const fixture = privateFixture("corpus.json");
+const { cases, labels } = fixture || { cases: [], labels: {} };
+const describe = fixture ? global.describe : global.describe.skip;
+const test = fixture ? global.test : global.test.skip;
 
 /**
  * The title as the resolver builds it today, from what was captured: with

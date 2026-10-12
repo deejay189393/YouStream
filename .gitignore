@@ -4,3 +4,6 @@ npm-debug.log*
 .DS_Store
 coverage/
 .cache/
+
+# Real-data test fixtures: the private youstream-fixtures repository
+test/fixtures/private/

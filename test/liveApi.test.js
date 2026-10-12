@@ -6,11 +6,17 @@
  * resolved, captured from a live run against a real key. Each case states
  * what a person checking those 50 results by hand wants back.
  */
-const { cases } = require("./fixtures/live-api-searches.json");
 const { durationWindow, evaluate, rankMatches } = require("../src/matching");
 const { normalizeConfig } = require("../src/config");
 const { toStreams } = require("../src/streams");
-const { video } = require("./helpers");
+const { video, privateFixture } = require("./helpers");
+
+// Real search results from the private youstream-fixtures repository (see
+// the README, "Real-data tests"). Without them, this suite is skipped.
+const fixture = privateFixture("live-api-searches.json");
+const { cases } = fixture || { cases: [] };
+const describe = fixture ? global.describe : global.describe.skip;
+const test = fixture ? global.test : global.test.skip;
 
 function run(id, settingsOverride = {}, which = 0) {
   const found = cases.filter((c) => c.id === id)[which];

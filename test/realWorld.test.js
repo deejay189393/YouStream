@@ -8,11 +8,17 @@
  * episode, nothing at all for a title that is not on YouTube -- so a change
  * that trades a real match for a false one shows up here.
  */
-const { cases } = require("./fixtures/real-searches.json");
 const { durationWindow, evaluate, rankMatches } = require("../src/matching");
 const { normalizeConfig } = require("../src/config");
 const { buildQuery } = require("../src/finder");
-const { video } = require("./helpers");
+const { video, privateFixture } = require("./helpers");
+
+// Real search results from the private youstream-fixtures repository (see
+// the README, "Real-data tests"). Without them, this suite is skipped.
+const fixture = privateFixture("real-searches.json");
+const { cases } = fixture || { cases: [] };
+const describe = fixture ? global.describe : global.describe.skip;
+const test = fixture ? global.test : global.test.skip;
 
 const SETTINGS = normalizeConfig({ youtubeKey: "k" });
 

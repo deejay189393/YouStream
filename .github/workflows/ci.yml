@@ -22,8 +22,15 @@ jobs:
           --health-retries 10
     env:
       REDIS_TEST_URL: redis://localhost:6379
+      # Read access to the private youstream-fixtures repository, for the
+      # real-data tests. Without it (forks, pull requests from outside),
+      # those suites are skipped and everything else still runs.
+      FIXTURES_TOKEN: ${{ secrets.FIXTURES_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the real-data fixtures
+        if: env.FIXTURES_TOKEN != ''
+        run: git clone --depth 1 "https://x-access-token:${FIXTURES_TOKEN}@github.com/deejay189393/youstream-fixtures.git" test/fixtures/private
       - uses: actions/setup-node@v4
         with:
           node-version: 20
