@@ -3,6 +3,8 @@ const { buildInterfaceManifest } = require("./manifest");
 const { normalizeConfig } = require("./config");
 const { findVideos } = require("./finder");
 const { toStreams } = require("./streams");
+const { hostConfig } = require("./hostConfig");
+const { searchMsFor } = require("./cache");
 
 /**
  * The stream handler, wired into the official stremio-addon-sdk router so
@@ -13,18 +15,20 @@ const { toStreams } = require("./streams");
  * when it was not JSON), so it is normalized here before anything reads it.
  */
 
-const HOUR = 60 * 60;
-
 /**
- * How long an app may reuse an answer. Matches are stable, so a found video
- * is kept for hours; "nothing found" is kept shorter, in case a title's
- * upload is simply newer than the search; a failure is retried soon.
+ * How long an app may reuse an answer (see hostConfig.js). Matches are
+ * stable, so a list with videos in it is kept for hours. An empty list is
+ * kept shorter, in case a title's upload is simply newer than the search --
+ * and for a recent release no longer than the server keeps its search. An
+ * answer from an out-of-date search stood in for a failure, so it is asked
+ * for again as soon as an empty one; a failure is retried in a minute.
  */
-const CACHE_SECONDS = {
-  found: 6 * HOUR,
-  none: HOUR,
-  failed: 60
-};
+function maxAgeFor(result, streams, streamsConfig = hostConfig.streams) {
+  if (result.status === "search failed") return streamsConfig.failedMaxAgeSeconds;
+  if (streams.length && !result.stale) return streamsConfig.maxAgeSeconds;
+  if (!result.title) return streamsConfig.emptyMaxAgeSeconds;
+  return Math.min(streamsConfig.emptyMaxAgeSeconds, Math.round(searchMsFor(result.title) / 1000));
+}
 
 /** One line per lookup, so the logs show what was searched and why videos lost. */
 function logResult(id, result) {
@@ -42,7 +46,9 @@ function logResult(id, result) {
     .map(([reason, n]) => `${reason} ${n}`)
     .join(", ");
   console.log(
-    `[stream] ${id} "${result.query}" ${result.evaluations.length} results${result.cached ? " (cached)" : ""} -> ${
+    `[stream] ${id} "${result.query}" ${result.evaluations.length} results${
+      result.stale ? ` (cached; YouTube failed: ${result.stale})` : result.cached ? " (cached)" : ""
+    } -> ${
       result.matches.length
     } matches${rejected ? `; rejected: ${rejected}` : ""}`
   );
@@ -55,11 +61,8 @@ async function handleStream({ id, config }) {
   const result = await findVideos(id, settings);
   logResult(id, result);
 
-  if (result.status === "search failed") return { streams: [], cacheMaxAge: CACHE_SECONDS.failed };
-  if (result.status !== "ok") return { streams: [], cacheMaxAge: CACHE_SECONDS.none };
-
-  const streams = toStreams(result.matches, settings);
-  return { streams, cacheMaxAge: streams.length ? CACHE_SECONDS.found : CACHE_SECONDS.none };
+  const streams = result.status === "ok" ? toStreams(result.matches, settings) : [];
+  return { streams, cacheMaxAge: maxAgeFor(result, streams) };
 }
 
 function createAddonInterface() {
@@ -72,4 +75,4 @@ function createResourceRouter() {
   return getRouter(createAddonInterface());
 }
 
-module.exports = { createAddonInterface, createResourceRouter, handleStream, logResult, CACHE_SECONDS };
+module.exports = { createAddonInterface, createResourceRouter, handleStream, logResult, maxAgeFor };

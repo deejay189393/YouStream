@@ -1,6 +1,7 @@
 const { parseStreamId, contentKind } = require("./ids");
 const { resolveTitle } = require("./metadata");
 const { searchVideos } = require("./youtube");
+const { searchMsFor } = require("./cache");
 const { durationWindow, searchDuration, evaluate, rankMatches } = require("./matching");
 const { effectiveTmdbKey } = require("./config");
 const { languageName } = require("./regions");
@@ -50,7 +51,9 @@ function buildQuery(title, settings) {
  * explain endpoint can show its working.
  *
  * @returns {Promise<{ status: string, parsed?, title?, window?, query?,
- *   evaluations?: object[], matches?: object[], error? }>}
+ *   cached?: boolean, stale?: string, evaluations?: object[],
+ *   matches?: object[], error? }>}
+ *   `stale` names the failure an out-of-date cached search stood in for.
  */
 async function findVideos(rawId, settings) {
   const parsed = parseStreamId(rawId);
@@ -63,24 +66,26 @@ async function findVideos(rawId, settings) {
   const window = durationWindow(title, settings);
   const query = buildQuery(title, settings);
 
-  let videos;
-  let cached;
+  let search;
   try {
-    ({ videos, cached } = await searchVideos({
+    search = await searchVideos({
       apiKey: settings.youtubeKey,
       q: query,
       regionCode: settings.region || undefined,
       relevanceLanguage: settings.audioLanguage || undefined,
       videoDuration: searchDuration(window),
-      embeddableOnly: settings.embeddableOnly
-    }));
+      embeddableOnly: settings.embeddableOnly,
+      freshMs: searchMsFor(title)
+    });
   } catch (err) {
     return { status: "search failed", parsed, title, window, query, error: { kind: err.kind, message: err.message } };
   }
 
-  const evaluations = videos.map((video) => evaluate(video, title, window, settings));
+  const evaluations = search.videos.map((video) => evaluate(video, title, window, settings));
   const matches = rankMatches(evaluations).slice(0, settings.maxResults);
-  return { status: "ok", parsed, title, window, query, cached, evaluations, matches };
+  const result = { status: "ok", parsed, title, window, query, cached: search.cached, evaluations, matches };
+  if (search.stale) result.stale = search.stale;
+  return result;
 }
 
 module.exports = { findVideos, buildQuery };

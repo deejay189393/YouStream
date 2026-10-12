@@ -1,4 +1,4 @@
-const { getJson, yearOf, runtimeSeconds } = require("./http");
+const { getJson, yearOf, dateOf, runtimeSeconds } = require("./http");
 
 /**
  * TMDB: optional, but it is what turns "about 51 minutes" into "this episode
@@ -79,6 +79,7 @@ async function movie(key, tmdbId, region) {
     title: body.title,
     originalTitle: typeof body.original_title === "string" ? body.original_title : null,
     year: yearOf(body.release_date),
+    released: dateOf(body.release_date),
     runtimeSeconds: runtimeSeconds(body.runtime),
     aliases: aliasesFrom(alternative, region),
     people: peopleOf(body),
@@ -122,7 +123,7 @@ async function episode(key, tvId, season, episodeNumber) {
   const varies = new Set(episodes.map((e) => e.runtime).filter((r) => Number.isFinite(r) && r > 0)).size >= 2;
   return {
     episodeTitle: typeof match.name === "string" && match.name ? match.name : null,
-    releaseYear: yearOf(match.air_date),
+    released: dateOf(match.air_date),
     runtimeSeconds: varies ? runtimeSeconds(match.runtime) : null
   };
 }

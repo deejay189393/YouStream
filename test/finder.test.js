@@ -1,11 +1,10 @@
-const { clearAllCaches } = require("../src/cache");
 const youtube = require("../src/youtube");
 const { findVideos, buildQuery } = require("../src/finder");
 const { normalizeConfig } = require("../src/config");
-const { response, routeFetch, apiVideo } = require("./helpers");
+const { response, routeFetch, apiVideo, freshCache } = require("./helpers");
 
 beforeEach(() => {
-  clearAllCaches();
+  freshCache();
   youtube.inFlight.clear();
   jest.restoreAllMocks();
   jest.spyOn(console, "warn").mockImplementation(() => {});

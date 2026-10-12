@@ -1,4 +1,4 @@
-const { getJson, yearOf, runtimeSeconds } = require("./http");
+const { getJson, yearOf, dateOf, runtimeSeconds } = require("./http");
 
 /**
  * Cinemeta: Stremio's own metadata addon, keyed by IMDb id and free to use.
@@ -31,6 +31,7 @@ async function movie(imdbId) {
     title: meta.name,
     people: peopleOf(meta),
     year: yearOf(meta.year || meta.releaseInfo || meta.released),
+    released: dateOf(meta.released),
     runtimeSeconds: runtimeSeconds(meta.runtime),
     tmdbId: Number.isInteger(meta.moviedb_id) ? String(meta.moviedb_id) : null
   };
@@ -62,7 +63,7 @@ async function episode(imdbId, season, episodeNumber) {
     year: yearOf(meta.year || meta.releaseInfo || meta.released),
     typicalRuntimeSeconds: runtimeSeconds(meta.runtime),
     episodeTitle: match && typeof (match.name || match.title) === "string" ? match.name || match.title : null,
-    releaseYear: match ? yearOf(match.released || match.firstAired) : null,
+    released: match ? dateOf(match.released || match.firstAired) : null,
     absoluteEpisode: absoluteEpisode(videos, season, episodeNumber),
     seasonCount: seasons.size || null,
     tmdbId: Number.isInteger(meta.moviedb_id) ? String(meta.moviedb_id) : null

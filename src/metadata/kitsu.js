@@ -1,4 +1,4 @@
-const { getJson, yearOf, runtimeSeconds } = require("./http");
+const { getJson, yearOf, dateOf, runtimeSeconds } = require("./http");
 
 /**
  * Kitsu: the anime database behind Stremio's anime addons, free and keyless.
@@ -45,6 +45,7 @@ async function anime(kitsuId) {
     title,
     aliases: names.filter((n) => n !== title),
     year: yearOf(attributes.startDate),
+    released: dateOf(attributes.startDate),
     typicalRuntimeSeconds: runtimeSeconds(attributes.episodeLength),
     isMovie: attributes.subtype === "movie"
   };
@@ -59,6 +60,7 @@ async function episode(kitsuId, episodeNumber) {
   const title = match.attributes.canonicalTitle;
   return {
     episodeTitle: typeof title === "string" && title.trim() ? title.trim() : null,
+    released: dateOf(match.attributes.airdate),
     runtimeSeconds: runtimeSeconds(match.attributes.length)
   };
 }

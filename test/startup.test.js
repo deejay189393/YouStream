@@ -18,23 +18,33 @@ describe("server startup", () => {
 
   test("listens on the PORT given in the environment and serves /health", async () => {
     child = spawn(process.execPath, [path.join(__dirname, "..", "server.js")], {
-      env: { ...process.env, PORT: String(PORT) },
+      // The cache settings this machine happens to have are left out, and one
+      // is mistyped on purpose.
+      env: { ...process.env, PORT: String(PORT), REDIS_URL: "", CACHE_STORE: "", CACHE_SEARCH_TTL: "a day" },
       stdio: ["ignore", "pipe", "pipe"]
     });
 
-    const startupLog = await new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    child.stderr.on("data", (buf) => {
+      stderr += buf.toString();
+    });
+    await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("server did not start in time")), 15000);
       child.stdout.on("data", (buf) => {
-        const line = buf.toString();
-        if (line.includes("listening")) {
+        stdout += buf.toString();
+        if (stdout.includes("listening")) {
           clearTimeout(timer);
-          resolve(line);
+          resolve();
         }
       });
       child.on("error", reject);
     });
 
-    expect(startupLog).toContain(String(PORT));
+    expect(stdout).toContain(`listening on port ${PORT}`);
+    // What the cache is, said once at startup; a setting it could not read,
+    // said plainly, with the default it used instead.
+    expect(stdout).toContain('[cache] memory (64 MB), prefix "youstream": searches 1d');
 
     const status = await new Promise((resolve, reject) => {
       const req = http.get({ host: "127.0.0.1", port: PORT, path: "/health" }, (res) => {
@@ -45,5 +55,7 @@ describe("server startup", () => {
     });
 
     expect(status).toBe(200);
+    // Read after a round trip, so the pipe has surely delivered it.
+    expect(stderr).toContain('[config] CACHE_SEARCH_TTL="a day" is not a duration such as 90s, 15m, 6h or 7d; using 24h');
   }, 20000);
 });

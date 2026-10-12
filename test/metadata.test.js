@@ -1,15 +1,15 @@
-const { clearAllCaches, metadataCache } = require("../src/cache");
-const { getJson, yearOf, runtimeSeconds } = require("../src/metadata/http");
+const { metadataCache } = require("../src/cache");
+const { getJson, yearOf, dateOf, runtimeSeconds } = require("../src/metadata/http");
 const cinemeta = require("../src/metadata/cinemeta");
 const tmdb = require("../src/metadata/tmdb");
 const kitsu = require("../src/metadata/kitsu");
 const tvmaze = require("../src/metadata/tvmaze");
 const { resolveTitle, uniqueAliases } = require("../src/metadata");
 const { parseStreamId } = require("../src/ids");
-const { response, routeFetch } = require("./helpers");
+const { response, routeFetch, freshCache, TEST_CACHE } = require("./helpers");
 
 beforeEach(() => {
-  clearAllCaches();
+  freshCache();
   jest.restoreAllMocks();
   jest.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -20,6 +20,7 @@ const CINEMETA_MOVIE = {
   meta: {
     name: "The Shawshank Redemption",
     year: "1994",
+    released: "1994-10-14T00:00:00.000Z",
     runtime: "142 min",
     moviedb_id: 278,
     cast: ["Tim Robbins", "Morgan Freeman", " ", 5],
@@ -123,7 +124,7 @@ const KITSU_ANIME = {
 };
 
 const KITSU_EPISODE = {
-  data: [{ attributes: { number: 3, canonicalTitle: "PREPARE FOR THE INTERVIEW", length: 23 } }]
+  data: [{ attributes: { number: 3, canonicalTitle: "PREPARE FOR THE INTERVIEW", length: 23, airdate: "2022-04-23" } }]
 };
 
 // --- http ------------------------------------------------------------------
@@ -134,7 +135,7 @@ describe("getJson", () => {
     expect(await getJson("https://example.com/x?key=secret", { cacheKey: "x" })).toEqual({ a: 1 });
     expect(await getJson("https://example.com/x?key=secret", { cacheKey: "x" })).toEqual({ a: 1 });
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(metadataCache.get("x")).toEqual({ body: { a: 1 } });
+    expect(await metadataCache.get("x")).toEqual({ value: { body: { a: 1 } }, fresh: true });
   });
 
   test("caches a 404 as null", async () => {
@@ -147,7 +148,7 @@ describe("getJson", () => {
   test("throws, without caching, on an error status", async () => {
     routeFetch([["example.com", response({}, { status: 503 })]]);
     await expect(getJson("https://example.com/x")).rejects.toMatchObject({ status: 503 });
-    expect(metadataCache.size).toBe(0);
+    expect(await metadataCache.count()).toBe(0);
   });
 
   test("throws on a body that is not JSON", async () => {
@@ -167,6 +168,50 @@ describe("getJson", () => {
     const fetch = routeFetch([["example.com", {}]]);
     await getJson("https://example.com/x", { headers: { authorization: "Bearer t" } });
     expect(fetch.mock.calls[0][1].headers).toEqual({ authorization: "Bearer t" });
+  });
+
+  describe("past an answer's lifetime", () => {
+    let up;
+    let fetch;
+    let clock;
+    beforeEach(async () => {
+      const start = Date.now();
+      clock = jest.spyOn(Date, "now").mockReturnValue(start);
+      up = true;
+      let version = 0;
+      fetch = routeFetch([["example.com", () => (up ? { version: ++version } : response({}, { status: 503 }))]]);
+      await getJson("https://example.com/x");
+      clock.mockReturnValue(start + TEST_CACHE.metadataMs + 1);
+    });
+
+    test("the service is asked again", async () => {
+      expect(await getJson("https://example.com/x")).toEqual({ version: 2 });
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test("the old answer stands in while the service is down", async () => {
+      up = false;
+      expect(await getJson("https://example.com/x")).toEqual({ version: 1 });
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test("and once the extra time is over too, a failure is a failure", async () => {
+      up = false;
+      clock.mockReturnValue(Date.now() + TEST_CACHE.staleMs);
+      await expect(getJson("https://example.com/x")).rejects.toMatchObject({ status: 503 });
+    });
+  });
+});
+
+describe("dateOf", () => {
+  test.each([
+    ["2015-07-20", "2015-07-20"],
+    ["2015-07-20T00:00:00.000Z", "2015-07-20"],
+    ["2015", null],
+    [20150720, null],
+    [null, null]
+  ])("dateOf(%p)", (raw, date) => {
+    expect(dateOf(raw)).toBe(date);
   });
 });
 
@@ -211,6 +256,7 @@ describe("cinemeta", () => {
       title: "The Shawshank Redemption",
       people: ["Tim Robbins", "Morgan Freeman", "Frank Darabont"],
       year: 1994,
+      released: "1994-10-14",
       runtimeSeconds: 8520,
       tmdbId: "278"
     });
@@ -218,7 +264,7 @@ describe("cinemeta", () => {
 
   test("falls back from year to releaseInfo, and goes without a TMDB id or credits", async () => {
     routeFetch([["/meta/movie/", { meta: { name: "X", releaseInfo: "2001", cast: "nope" } }]]);
-    expect(await cinemeta.movie("tt1")).toEqual({ title: "X", people: [], year: 2001, runtimeSeconds: null, tmdbId: null });
+    expect(await cinemeta.movie("tt1")).toEqual({ title: "X", people: [], year: 2001, released: null, runtimeSeconds: null, tmdbId: null });
   });
 
   test("a missing or nameless title is null", async () => {
@@ -228,7 +274,7 @@ describe("cinemeta", () => {
     expect(await cinemeta.movie("tt3")).toBeNull();
   });
 
-  test("reads an episode, its name, its air year and its number across the show", async () => {
+  test("reads an episode, its name, its air date and its number across the show", async () => {
     routeFetch([["/meta/series/tt4742876.json", CINEMETA_SERIES]]);
     expect(await cinemeta.episode("tt4742876", 1, 3)).toEqual({
       title: "TVF Pitchers",
@@ -236,12 +282,12 @@ describe("cinemeta", () => {
       year: 2015,
       typicalRuntimeSeconds: 3060,
       episodeTitle: "The Jury Room",
-      releaseYear: 2015,
+      released: "2015-07-20",
       absoluteEpisode: 3,
       seasonCount: 2,
       tmdbId: "63180"
     });
-    expect(await cinemeta.episode("tt4742876", 2, 1)).toMatchObject({ episodeTitle: "The Valley", absoluteEpisode: 4, releaseYear: null });
+    expect(await cinemeta.episode("tt4742876", 2, 1)).toMatchObject({ episodeTitle: "The Valley", absoluteEpisode: 4, released: null });
   });
 
   test("an episode it does not list still resolves the show", async () => {
@@ -252,7 +298,7 @@ describe("cinemeta", () => {
       year: null,
       typicalRuntimeSeconds: null,
       episodeTitle: null,
-      releaseYear: null,
+      released: null,
       absoluteEpisode: 9,
       seasonCount: null,
       tmdbId: null
@@ -284,7 +330,9 @@ describe("tmdb", () => {
     expect(url.searchParams.get("api_key")).toBe("v3key");
     expect(url.searchParams.get("append_to_response")).toBe("alternative_titles,external_ids,credits");
     expect(fetch.mock.calls[0][1].headers.authorization).toBeUndefined();
-    expect([...metadataCache.store.keys()].join()).not.toContain("v3key");
+    // Cached by the URL without the key, so a reader with another key shares it.
+    await tmdb.movie("otherkey", "278", "");
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   test("a v4 read access token goes in a bearer header", async () => {
@@ -300,6 +348,7 @@ describe("tmdb", () => {
       title: "The Shawshank Redemption",
       originalTitle: "The Shawshank Redemption",
       year: 1994,
+      released: "1994-09-23",
       runtimeSeconds: 8520,
       aliases: ["Shawshank Redemption", "Shawshank"],
       people: ["Tim Robbins", "Morgan Freeman", "Bob Gunton", "Frank Darabont"],
@@ -313,6 +362,7 @@ describe("tmdb", () => {
       title: "Bare",
       originalTitle: null,
       year: null,
+      released: null,
       runtimeSeconds: null,
       aliases: [],
       people: [],
@@ -375,13 +425,13 @@ describe("tmdb", () => {
 
   test("reads one episode from its season", async () => {
     routeFetch([["/tv/63180/season/1", TMDB_SEASON]]);
-    expect(await tmdb.episode("k", "63180", 1, 3)).toEqual({ episodeTitle: "The Jury Room", releaseYear: 2015, runtimeSeconds: 2280 });
+    expect(await tmdb.episode("k", "63180", 1, 3)).toEqual({ episodeTitle: "The Jury Room", released: "2015-07-20", runtimeSeconds: 2280 });
     expect(await tmdb.episode("k", "63180", 1, 2)).toBeNull();
   });
 
   test("a runtime copied onto every episode of the season is dropped", async () => {
     routeFetch([["/season/1", TMDB_UNIFORM_SEASON]]);
-    expect(await tmdb.episode("k", "9", 1, 1)).toEqual({ episodeTitle: "One", releaseYear: null, runtimeSeconds: null });
+    expect(await tmdb.episode("k", "9", 1, 1)).toEqual({ episodeTitle: "One", released: null, runtimeSeconds: null });
   });
 
   test("an episode with no name, or a season with no list", async () => {
@@ -389,7 +439,7 @@ describe("tmdb", () => {
       ["/season/1", { episodes: [{ episode_number: 1, name: "" }] }],
       ["/season/2", {}]
     ]);
-    expect(await tmdb.episode("k", "9", 1, 1)).toEqual({ episodeTitle: null, releaseYear: null, runtimeSeconds: null });
+    expect(await tmdb.episode("k", "9", 1, 1)).toEqual({ episodeTitle: null, released: null, runtimeSeconds: null });
     expect(await tmdb.episode("k", "9", 2, 1)).toBeNull();
   });
 
@@ -491,6 +541,7 @@ describe("kitsu", () => {
       title: "SPY x FAMILY",
       aliases: ["SPY×FAMILY", "SxF"],
       year: 2022,
+      released: "2022-04-09",
       typicalRuntimeSeconds: 1440,
       isMovie: false
     });
@@ -513,7 +564,7 @@ describe("kitsu", () => {
 
   test("reads an episode", async () => {
     const fetch = routeFetch([["/episodes", KITSU_EPISODE]]);
-    expect(await kitsu.episode("45398", 3)).toEqual({ episodeTitle: "PREPARE FOR THE INTERVIEW", runtimeSeconds: 1380 });
+    expect(await kitsu.episode("45398", 3)).toEqual({ episodeTitle: "PREPARE FOR THE INTERVIEW", released: "2022-04-23", runtimeSeconds: 1380 });
     expect(fetch.mock.calls[0][0]).toContain("filter%5Bnumber%5D=3");
   });
 
@@ -522,7 +573,7 @@ describe("kitsu", () => {
       ["/anime/1/episodes", { data: [{ attributes: { number: 1, canonicalTitle: " " } }, null] }],
       ["/anime/2/episodes", { data: "x" }]
     ]);
-    expect(await kitsu.episode("1", 1)).toEqual({ episodeTitle: null, runtimeSeconds: null });
+    expect(await kitsu.episode("1", 1)).toEqual({ episodeTitle: null, released: null, runtimeSeconds: null });
     expect(await kitsu.episode("1", 2)).toBeNull();
     expect(await kitsu.episode("2", 1)).toBeNull();
   });
@@ -544,6 +595,7 @@ describe("resolveTitle", () => {
       title: "The Shawshank Redemption",
       aliases: [],
       year: 1994,
+      released: "1994-10-14",
       people: ["Tim Robbins", "Morgan Freeman", "Frank Darabont"],
       imdbId: "tt0111161",
       runtimeSeconds: 8520,
@@ -618,6 +670,7 @@ describe("resolveTitle", () => {
       episode: 3,
       absoluteEpisode: 3,
       episodeTitle: "The Jury Room",
+      released: "2015-07-20",
       releaseYear: 2015,
       seasonCount: 2,
       sources: ["cinemeta"]
@@ -671,6 +724,7 @@ describe("resolveTitle", () => {
       episode: 1,
       absoluteEpisode: 6,
       episodeTitle: null,
+      released: null,
       releaseYear: null,
       seasonCount: 2,
       sources: ["tmdb"]
@@ -727,6 +781,7 @@ describe("resolveTitle", () => {
       title: "The Shawshank Redemption",
       aliases: ["Shawshank Redemption", "Shawshank"],
       year: 1994,
+      released: "1994-09-23",
       people: ["Tim Robbins", "Morgan Freeman", "Bob Gunton", "Frank Darabont"],
       imdbId: "tt0111161",
       runtimeSeconds: 8640,
@@ -736,12 +791,12 @@ describe("resolveTitle", () => {
     });
   });
 
-  test("a tmdb: film with no runtime borrows IMDb's", async () => {
+  test("a tmdb: film with no runtime or release date borrows IMDb's", async () => {
     routeFetch([
-      ["/movie/278", { ...TMDB_MOVIE, runtime: 0 }],
+      ["/movie/278", { ...TMDB_MOVIE, runtime: 0, release_date: "" }],
       ["/meta/movie/tt0111161.json", CINEMETA_MOVIE]
     ]);
-    expect(await resolve("tmdb:278", { tmdbKey: "k" })).toMatchObject({ runtimeSeconds: 8520, otherRuntimes: [] });
+    expect(await resolve("tmdb:278", { tmdbKey: "k" })).toMatchObject({ runtimeSeconds: 8520, otherRuntimes: [], released: "1994-10-14" });
   });
 
   test("a tmdb: film with no runtime and no IMDb id", async () => {
@@ -773,6 +828,7 @@ describe("resolveTitle", () => {
       episode: 3,
       absoluteEpisode: 3,
       episodeTitle: "The Jury Room",
+      released: "2015-07-20",
       releaseYear: 2015,
       seasonCount: 2,
       sources: ["tmdb"]
@@ -831,6 +887,8 @@ describe("resolveTitle", () => {
       episode: 3,
       absoluteEpisode: 3,
       episodeTitle: "PREPARE FOR THE INTERVIEW",
+      released: "2022-04-23",
+      releaseYear: 2022,
       seasonCount: 1,
       sources: ["kitsu"]
     });
@@ -848,6 +906,7 @@ describe("resolveTitle", () => {
       title: "Your Name",
       aliases: [],
       year: null,
+      released: null,
       people: [],
       imdbId: null,
       otherRuntimes: [],

@@ -1,12 +1,12 @@
 const request = require("supertest");
-const { clearAllCaches } = require("../src/cache");
 const youtube = require("../src/youtube");
 const { encodeConfig } = require("../src/config");
 const { app, getBaseUrl } = require("../server");
-const { response, routeFetch, apiVideo } = require("./helpers");
+const { searchCache, metadataCache } = require("../src/cache");
+const { response, routeFetch, apiVideo, freshCache } = require("./helpers");
 
 beforeEach(() => {
-  clearAllCaches();
+  freshCache();
   youtube.inFlight.clear();
   jest.restoreAllMocks();
   jest.spyOn(console, "log").mockImplementation(() => {});
@@ -38,7 +38,7 @@ describe("basic routes", () => {
   test("/health", async () => {
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true });
+    expect(res.body).toEqual({ ok: true, cache: "memory" });
   });
 
   test("serves the artwork", async () => {
@@ -154,6 +154,19 @@ describe("GET /:config/explain/:type/:id.json", () => {
     expect(JSON.stringify(res.body)).not.toContain("KEY");
   });
 
+  test("an answer from an out-of-date search says why it was used", async () => {
+    const nightOfTheLivingDead = [
+      ["/meta/movie/", { meta: { name: "Night of the Living Dead", year: "1968", runtime: "96 min" } }],
+      ["/videos?", { items: [apiVideo("full0000001", { snippet: { title: "Night of the Living Dead (1968)" }, contentDetails: { duration: "PT1H35M" } })] }]
+    ];
+    routeFetch([...nightOfTheLivingDead, ["/search?", { items: [{ id: { videoId: "full0000001" } }] }]]);
+    await request(app).get(`/${CFG()}/explain/movie/tt0063350.json`);
+    jest.spyOn(Date, "now").mockReturnValue(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    routeFetch([...nightOfTheLivingDead, ["/search?", response({ error: { errors: [{ reason: "quotaExceeded" }] } }, { status: 403 })]]);
+    const res = await request(app).get(`/${CFG()}/explain/movie/tt0063350.json`);
+    expect(res.body).toMatchObject({ status: "ok", cached: true, stale: "quota", matches: [{ id: "full0000001" }] });
+  });
+
   test("a lookup with no runtime known", async () => {
     routeFetch([
       ["/meta/movie/", { meta: { name: "Untimed", releaseInfo: "1990" } }],
@@ -195,5 +208,67 @@ describe("getBaseUrl", () => {
   test("falls back to the request's own protocol", () => {
     const req = { get: (h) => (h === "host" ? "localhost:3000" : undefined), protocol: "http" };
     expect(getBaseUrl(req)).toBe("http://localhost:3000");
+  });
+});
+
+describe("/admin/cache", () => {
+  const auth = (token) => ({ authorization: `Bearer ${token}` });
+
+  test("is not there without CACHE_ADMIN_TOKEN", async () => {
+    expect((await request(app).get("/admin/cache")).status).toBe(404);
+    expect((await request(app).delete("/admin/cache/all")).status).toBe(404);
+  });
+
+  describe("with a token", () => {
+    beforeEach(async () => {
+      freshCache({ adminToken: "s3cret" });
+      await searchCache.set("q1", []);
+      await searchCache.set("q2", []);
+      await metadataCache.set("url", { body: null });
+    });
+
+    test("refuses a request without it, or with another", async () => {
+      expect((await request(app).get("/admin/cache")).status).toBe(401);
+      expect((await request(app).get("/admin/cache").set(auth("wrong"))).status).toBe(401);
+      expect((await request(app).get("/admin/cache").set({ authorization: "s3cret" })).status).toBe(401);
+      expect(await searchCache.count()).toBe(2);
+    });
+
+    test("says what the cache holds", async () => {
+      const res = await request(app).get("/admin/cache").set(auth("s3cret"));
+      expect(res.body).toMatchObject({ store: "memory", prefix: "youstream", entries: { search: 2, metadata: 1, cooldown: 0 } });
+      expect(res.body.description).toContain("searches 1d");
+      expect(JSON.stringify(res.body)).not.toContain("s3cret");
+    });
+
+    test("empties one namespace", async () => {
+      const res = await request(app).delete("/admin/cache/search").set(auth("s3cret"));
+      expect(res.body).toEqual({ removed: 2 });
+      expect(await searchCache.count()).toBe(0);
+      expect(await metadataCache.count()).toBe(1);
+    });
+
+    test("or all of them", async () => {
+      expect((await request(app).delete("/admin/cache/all").set(auth("s3cret"))).body).toEqual({ removed: 3 });
+      expect(await metadataCache.count()).toBe(0);
+    });
+
+    test("a store that is down is a 503, not a crash", async () => {
+      const store = freshCache({ adminToken: "s3cret" });
+      store.count = store.clear = async () => {
+        throw new Error("ECONNREFUSED");
+      };
+      for (const call of [request(app).get("/admin/cache"), request(app).delete("/admin/cache/all")]) {
+        const res = await call.set(auth("s3cret"));
+        expect(res.status).toBe(503);
+        expect(res.body.error).toBe("The cache store did not answer: ECONNREFUSED");
+      }
+    });
+
+    test("names the namespaces when given another", async () => {
+      const res = await request(app).delete("/admin/cache/videos").set(auth("s3cret"));
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("Unknown namespace; one of search, metadata, cooldown, all");
+    });
   });
 });

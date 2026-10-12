@@ -1,10 +1,12 @@
-const { clearAllCaches } = require("../src/cache");
 const youtube = require("../src/youtube");
-const { createAddonInterface, handleStream, logResult, CACHE_SECONDS } = require("../src/addonInterface");
-const { response, routeFetch, apiVideo } = require("./helpers");
+const { createAddonInterface, handleStream, logResult, maxAgeFor } = require("../src/addonInterface");
+const { hostConfig } = require("../src/hostConfig");
+
+const AGES = hostConfig.streams;
+const { response, routeFetch, apiVideo, freshCache } = require("./helpers");
 
 beforeEach(() => {
-  clearAllCaches();
+  freshCache();
   youtube.inFlight.clear();
   jest.restoreAllMocks();
   jest.spyOn(console, "log").mockImplementation(() => {});
@@ -32,7 +34,7 @@ describe("stream handler", () => {
     ]);
     const iface = createAddonInterface();
     const res = await iface.get("stream", "movie", "tt0111161", {}, CONFIG);
-    expect(res.cacheMaxAge).toBe(CACHE_SECONDS.found);
+    expect(res.cacheMaxAge).toBe(AGES.maxAgeSeconds);
     expect(res.streams.map((s) => s.ytId || s.externalUrl)).toEqual([
       "full0000001",
       "https://www.youtube.com/watch?v=full0000001"
@@ -43,17 +45,17 @@ describe("stream handler", () => {
   test("nothing found is cached for an hour", async () => {
     routeFetch([["/meta/movie/", SHAWSHANK], ...youtubeReturns([])]);
     const res = await handleStream({ id: "tt0111161", config: CONFIG });
-    expect(res).toEqual({ streams: [], cacheMaxAge: CACHE_SECONDS.none });
+    expect(res).toEqual({ streams: [], cacheMaxAge: AGES.emptyMaxAgeSeconds });
   });
 
   test("an unknown title is cached for an hour", async () => {
     routeFetch([]);
-    expect(await handleStream({ id: "tt0000001", config: CONFIG })).toEqual({ streams: [], cacheMaxAge: CACHE_SECONDS.none });
+    expect(await handleStream({ id: "tt0000001", config: CONFIG })).toEqual({ streams: [], cacheMaxAge: AGES.emptyMaxAgeSeconds });
   });
 
   test("a failed search is retried soon", async () => {
     routeFetch([["/meta/movie/", SHAWSHANK], ["/search?", response({ error: { errors: [{ reason: "quotaExceeded" }] } }, { status: 403 })]]);
-    expect(await handleStream({ id: "tt0111161", config: CONFIG })).toEqual({ streams: [], cacheMaxAge: CACHE_SECONDS.failed });
+    expect(await handleStream({ id: "tt0111161", config: CONFIG })).toEqual({ streams: [], cacheMaxAge: AGES.failedMaxAgeSeconds });
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining("search failed: quota"));
   });
 
@@ -61,6 +63,30 @@ describe("stream handler", () => {
     const fetch = routeFetch([]);
     expect(await handleStream({ id: "tt0111161", config })).toEqual({ streams: [] });
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("maxAgeFor", () => {
+  const ages = { maxAgeSeconds: 21600, emptyMaxAgeSeconds: 3600, failedMaxAgeSeconds: 60 };
+  const OLD_FILM = { isEpisode: false, year: 1994, released: "1994-09-23" };
+  const today = new Date().toISOString().slice(0, 10);
+  const NEW_EPISODE = { isEpisode: true, year: 2019, released: today, releaseYear: Number(today.slice(0, 4)) };
+
+  test("videos found are kept for hours, nothing found for less", () => {
+    expect(maxAgeFor({ status: "ok", title: OLD_FILM }, [{}], ages)).toBe(21600);
+    expect(maxAgeFor({ status: "ok", title: OLD_FILM }, [], ages)).toBe(3600);
+    expect(maxAgeFor({ status: "unknown title" }, [], ages)).toBe(3600);
+    expect(maxAgeFor({ status: "search failed", title: OLD_FILM }, [], ages)).toBe(60);
+  });
+
+  test("an answer from an out-of-date search is asked for again as soon as an empty one", () => {
+    expect(maxAgeFor({ status: "ok", title: OLD_FILM, stale: "quota" }, [{}], ages)).toBe(3600);
+  });
+
+  test("an empty answer for a recent release is kept no longer than its search", () => {
+    freshCache({ recentSearchMs: 20 * 60 * 1000 });
+    expect(maxAgeFor({ status: "ok", title: NEW_EPISODE }, [], ages)).toBe(1200);
+    expect(maxAgeFor({ status: "ok", title: NEW_EPISODE }, [{}], ages)).toBe(21600);
   });
 });
 
@@ -75,6 +101,11 @@ describe("logResult", () => {
   test("a cached lookup with no rejections", () => {
     logResult("x", { status: "ok", query: "q", cached: true, evaluations: [{ ok: true }], matches: [{}] });
     expect(console.log).toHaveBeenLastCalledWith('[stream] x "q" 1 results (cached) -> 1 matches');
+  });
+
+  test("an out-of-date cached search, and why it was used", () => {
+    logResult("x", { status: "ok", query: "q", cached: true, stale: "quota", evaluations: [], matches: [] });
+    expect(console.log).toHaveBeenLastCalledWith('[stream] x "q" 0 results (cached; YouTube failed: quota) -> 0 matches');
   });
 
   test("rejections are counted, most common first", () => {

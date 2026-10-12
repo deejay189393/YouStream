@@ -1,9 +1,9 @@
-const { clearAllCaches, searchCache, keyCooldown } = require("../src/cache");
+const { searchCache, keyCooldown } = require("../src/cache");
 const youtube = require("../src/youtube");
-const { response, routeFetch, apiVideo } = require("./helpers");
+const { response, routeFetch, apiVideo, freshCache, TEST_CACHE } = require("./helpers");
 
 beforeEach(() => {
-  clearAllCaches();
+  freshCache();
   youtube.inFlight.clear();
   jest.restoreAllMocks();
 });
@@ -81,7 +81,17 @@ describe("searchVideos", () => {
     expect(again.cached).toBe(true);
     expect(again.videos).toHaveLength(1);
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect([...searchCache.store.keys()].join()).not.toContain("KEY");
+  });
+
+  test("nothing stored names the key", async () => {
+    const store = freshCache();
+    routeFetch([
+      ["/search?", searchBody(["a"])],
+      ["/videos?", { items: [apiVideo("a")] }]
+    ]);
+    await youtube.searchVideos(PARAMS);
+    const stored = [...store.entries].map(([key, entry]) => key + entry.text).join();
+    expect(stored).not.toContain("KEY");
   });
 
   test("different filters are different searches", async () => {
@@ -108,7 +118,7 @@ describe("searchVideos", () => {
   test("a spent quota puts the key on cooldown, and the next lookup does not call YouTube", async () => {
     const fetch = routeFetch([["/search?", googleError(403, ["quotaExceeded"])]]);
     await expect(youtube.searchVideos(PARAMS)).rejects.toMatchObject({ kind: "quota" });
-    expect(keyCooldown.has(youtube.keyId("KEY"))).toBe(true);
+    expect(await keyCooldown.get(youtube.keyId("KEY"))).toEqual({ value: true, fresh: true });
     await expect(youtube.searchVideos({ ...PARAMS, q: "other" })).rejects.toMatchObject({ kind: "quota" });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -116,16 +126,88 @@ describe("searchVideos", () => {
   test("a cached search is still served to a key on cooldown", async () => {
     routeFetch([["/search?", searchBody([])]]);
     await youtube.searchVideos(PARAMS);
-    keyCooldown.set(youtube.keyId("KEY"), true);
+    await keyCooldown.set(youtube.keyId("KEY"), true);
     expect((await youtube.searchVideos(PARAMS)).cached).toBe(true);
   });
 
   test("other failures do not start a cooldown, and are not cached", async () => {
     routeFetch([["/search?", googleError(400, ["keyInvalid"])]]);
     await expect(youtube.searchVideos(PARAMS)).rejects.toMatchObject({ kind: "invalid", status: 400, message: "nope" });
-    expect(keyCooldown.size).toBe(0);
-    expect(searchCache.size).toBe(0);
+    expect(await keyCooldown.count()).toBe(0);
+    expect(await searchCache.count()).toBe(0);
     expect(youtube.inFlight.size).toBe(0);
+  });
+
+  test("a search is current for as long as the caller says", async () => {
+    const start = Date.now();
+    const clock = jest.spyOn(Date, "now").mockReturnValue(start);
+    const fetch = routeFetch([["/search?", searchBody([])]]);
+    await youtube.searchVideos({ ...PARAMS, freshMs: 60000 });
+    clock.mockReturnValue(start + 59000);
+    expect((await youtube.searchVideos(PARAMS)).cached).toBe(true);
+    clock.mockReturnValue(start + 61000);
+    expect((await youtube.searchVideos(PARAMS)).cached).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test("with the cache turned off, every lookup searches", async () => {
+    freshCache({ searchMs: 0 });
+    const fetch = routeFetch([["/search?", searchBody([])]]);
+    await youtube.searchVideos(PARAMS);
+    await youtube.searchVideos(PARAMS);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  describe("an out-of-date search", () => {
+    let clock;
+    let start;
+    const searchFails = (error) =>
+      routeFetch([["/search?", error], ["/videos?", { items: [apiVideo("a")] }]]);
+
+    beforeEach(async () => {
+      start = Date.now();
+      clock = jest.spyOn(Date, "now").mockReturnValue(start);
+      routeFetch([
+        ["/search?", searchBody(["a"])],
+        ["/videos?", { items: [apiVideo("a")] }]
+      ]);
+      await youtube.searchVideos(PARAMS);
+      clock.mockReturnValue(start + TEST_CACHE.searchMs + 1);
+    });
+
+    test("is searched again", async () => {
+      const fetch = routeFetch([["/search?", searchBody([])]]);
+      expect(await youtube.searchVideos(PARAMS)).toEqual({ videos: [], cached: false });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test.each([
+      ["a spent quota", googleError(403, ["quotaExceeded"]), "quota"],
+      ["an outage", response(null, { status: 503, json: false }), "unavailable"],
+      ["an unreachable YouTube", new Error("ETIMEDOUT"), "unavailable"]
+    ])("stands in for %s, saying so", async (_, error, kind) => {
+      searchFails(error);
+      const result = await youtube.searchVideos(PARAMS);
+      expect(result).toMatchObject({ cached: true, stale: kind });
+      expect(result.videos.map((v) => v.id)).toEqual(["a"]);
+    });
+
+    test("stands in for a key already on cooldown, without calling YouTube", async () => {
+      await keyCooldown.set(youtube.keyId("KEY"), true);
+      const fetch = routeFetch([]);
+      expect(await youtube.searchVideos(PARAMS)).toMatchObject({ cached: true, stale: "quota" });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    test("is not kept past 30 days in all, whatever the host asked for", async () => {
+      freshCache({ staleMs: 365 * 24 * 60 * 60 * 1000 });
+      clock.mockReturnValue(start);
+      routeFetch([["/search?", searchBody(["a"])], ["/videos?", { items: [apiVideo("a")] }]]);
+      await youtube.searchVideos(PARAMS);
+      clock.mockReturnValue(start + 30 * 24 * 60 * 60 * 1000 + 1);
+      searchFails(googleError(403, ["quotaExceeded"]));
+      await expect(youtube.searchVideos(PARAMS)).rejects.toMatchObject({ kind: "quota" });
+    });
   });
 
   test("an unreachable YouTube", async () => {
@@ -280,6 +362,25 @@ describe("checkKey", () => {
   test("a network failure is unreachable", async () => {
     routeFetch([["/videos?", new Error("down")]]);
     expect(await youtube.checkKey("KEY")).toBe("unreachable");
+  });
+});
+
+describe("quotaCooldownMs", () => {
+  test("lasts until the quota resets at midnight Pacific time", () => {
+    // 23:30 in Los Angeles (PDT, UTC-7) is 06:30 UTC.
+    expect(youtube.quotaCooldownMs(new Date("2026-10-12T06:30:00.000Z"))).toBe(30 * 60 * 1000);
+  });
+
+  test("but never more than an hour", () => {
+    expect(youtube.quotaCooldownMs(new Date("2026-10-12T15:00:00.000Z"))).toBe(60 * 60 * 1000);
+  });
+
+  test("and never less than a second", () => {
+    expect(youtube.quotaCooldownMs(new Date("2026-10-12T06:59:59.999Z"))).toBe(1000);
+  });
+
+  test("defaults to now", () => {
+    expect(youtube.quotaCooldownMs()).toBeLessThanOrEqual(60 * 60 * 1000);
   });
 });
 

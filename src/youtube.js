@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { searchCache, keyCooldown, HOUR_MS } = require("./cache");
+const { searchCache, keyCooldown } = require("./cache");
 
 /**
  * The YouTube Data API, used the way its quota forces.
@@ -11,13 +11,13 @@ const { searchCache, keyCooldown, HOUR_MS } = require("./cache");
  * video is, whether it can be embedded, where it is blocked, whether it is
  * age-restricted, and what language it is spoken in.
  *
- * Results are cached for a day and shared by everyone on the server: the
+ * Results are cached and shared by everyone on the server (see cache/): the
  * same query returns the same videos whoever's key asked, and a second
  * reader opening the same film should not cost anybody a search.
  */
 const BASE_URL = "https://www.googleapis.com/youtube/v3";
 const MAX_RESULTS = 50;
-const SEARCH_TTL_MS = 24 * HOUR_MS;
+const HOUR_MS = 60 * 60 * 1000;
 
 /**
  * Concurrent lookups for the same query share one request. An app opening a
@@ -101,7 +101,7 @@ function primaryLanguage(tag) {
 
 /**
  * One video, reduced to what matching and the stream list use. Kept small on
- * purpose: a day of cached searches is a thousand of these lists.
+ * purpose: every cached search holds fifty of them.
  */
 function toVideo(detail) {
   const snippet = detail.snippet || {};
@@ -138,6 +138,80 @@ function keyId(apiKey) {
 }
 
 /**
+ * How long a key that spent its quota is left alone: until the quota resets
+ * at midnight Pacific time, as Google's does, but never more than an hour,
+ * so a key whose quota was raised is soon tried again. A refused call costs
+ * no quota, only the round trip.
+ */
+function quotaCooldownMs(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    hourCycle: "h23",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric"
+  }).formatToParts(now);
+  const part = (type) => Number(parts.find((p) => p.type === type).value);
+  const elapsed = (part("hour") * 3600 + part("minute") * 60 + part("second")) * 1000 + now.getMilliseconds();
+  return Math.max(1000, Math.min(HOUR_MS, 24 * HOUR_MS - elapsed));
+}
+
+function quotaSpent() {
+  const err = new Error("This YouTube key's daily quota is spent");
+  err.kind = "quota";
+  return err;
+}
+
+async function fetchVideos({ apiKey, q, regionCode, relevanceLanguage, videoDuration, embeddableOnly }) {
+  const data = await call("search", {
+    key: apiKey,
+    part: "snippet",
+    type: "video",
+    q,
+    maxResults: MAX_RESULTS,
+    regionCode,
+    relevanceLanguage,
+    videoDuration,
+    videoEmbeddable: embeddableOnly ? "true" : undefined
+  });
+  const ids = (Array.isArray(data.items) ? data.items : [])
+    .map((item) => item && item.id && item.id.videoId)
+    .filter((id) => typeof id === "string" && id);
+  if (!ids.length) return [];
+  const details = await call("videos", {
+    key: apiKey,
+    part: "snippet,contentDetails,statistics,status",
+    id: ids.join(","),
+    maxResults: MAX_RESULTS
+  });
+  const byId = new Map((Array.isArray(details.items) ? details.items : []).map((v) => [v.id, v]));
+  // In the search's order, which is YouTube's own relevance ranking; a video
+  // the search found but that has since gone is skipped.
+  return ids.filter((id) => byId.has(id)).map((id) => toVideo(byId.get(id)));
+}
+
+async function lookup(cacheKey, params) {
+  const hit = await searchCache.get(cacheKey);
+  if (hit && hit.fresh) return { videos: hit.value, cached: true };
+  // Past its lifetime, a cached search is still better than nothing when
+  // YouTube cannot be asked: a spent quota, an outage.
+  const stale = (err) => {
+    if (!hit) throw err;
+    return { videos: hit.value, cached: true, stale: err.kind };
+  };
+
+  if (await keyCooldown.get(keyId(params.apiKey))) return stale(quotaSpent());
+  try {
+    const videos = await fetchVideos(params);
+    await searchCache.set(cacheKey, videos, params.freshMs);
+    return { videos, cached: false };
+  } catch (err) {
+    if (err.kind === "quota") await keyCooldown.set(keyId(params.apiKey), true, quotaCooldownMs());
+    return stale(err);
+  }
+}
+
+/**
  * One search plus its enrichment, as a list of videos in YouTube's order.
  *
  * @param {object} p
@@ -148,68 +222,25 @@ function keyId(apiKey) {
  * @param {string} [p.relevanceLanguage] ISO 639-1: a ranking hint only
  * @param {string} [p.videoDuration]     "short" | "medium" | "long"
  * @param {boolean} [p.embeddableOnly]
- * @returns {Promise<{ videos: object[], cached: boolean }>}
+ * @param {number} [p.freshMs]           how long the results stay current;
+ *                                       the host's default when not given
+ * @returns {Promise<{ videos: object[], cached: boolean, stale?: string }>}
+ *   `stale` names the failure an out-of-date answer stood in for.
  */
-async function searchVideos({ apiKey, q, regionCode, relevanceLanguage, videoDuration, embeddableOnly }) {
+async function searchVideos(params) {
   const cacheKey = JSON.stringify({
-    q: q.toLowerCase(),
-    regionCode: regionCode || null,
-    relevanceLanguage: relevanceLanguage || null,
-    videoDuration: videoDuration || null,
-    embeddableOnly: Boolean(embeddableOnly)
+    q: params.q.toLowerCase(),
+    regionCode: params.regionCode || null,
+    relevanceLanguage: params.relevanceLanguage || null,
+    videoDuration: params.videoDuration || null,
+    embeddableOnly: Boolean(params.embeddableOnly)
   });
-  const cached = searchCache.get(cacheKey);
-  if (cached) return { videos: cached, cached: true };
-  if (inFlight.has(cacheKey)) return { videos: await inFlight.get(cacheKey), cached: true };
-
-  // A key that reported its day's quota spent stays spent for a while, so
-  // the next request does not spend a round trip discovering it again.
-  if (keyCooldown.has(keyId(apiKey))) {
-    const err = new Error("This YouTube key's daily quota is spent");
-    err.kind = "quota";
-    throw err;
-  }
-
-  const run = (async () => {
-    try {
-      const data = await call("search", {
-        key: apiKey,
-        part: "snippet",
-        type: "video",
-        q,
-        maxResults: MAX_RESULTS,
-        regionCode,
-        relevanceLanguage,
-        videoDuration,
-        videoEmbeddable: embeddableOnly ? "true" : undefined
-      });
-      const ids = (Array.isArray(data.items) ? data.items : [])
-        .map((item) => item && item.id && item.id.videoId)
-        .filter((id) => typeof id === "string" && id);
-      let videos = [];
-      if (ids.length) {
-        const details = await call("videos", {
-          key: apiKey,
-          part: "snippet,contentDetails,statistics,status",
-          id: ids.join(","),
-          maxResults: MAX_RESULTS
-        });
-        const byId = new Map((Array.isArray(details.items) ? details.items : []).map((v) => [v.id, v]));
-        // In the search's order, which is YouTube's own relevance ranking;
-        // a video the search found but that has since gone is skipped.
-        videos = ids.filter((id) => byId.has(id)).map((id) => toVideo(byId.get(id)));
-      }
-      searchCache.set(cacheKey, videos, SEARCH_TTL_MS);
-      return videos;
-    } catch (err) {
-      if (err.kind === "quota") keyCooldown.set(keyId(apiKey), true);
-      throw err;
-    } finally {
-      inFlight.delete(cacheKey);
-    }
-  })();
+  // Joined before anything is awaited, so two lookups arriving together
+  // cannot both miss the cache and both spend a search.
+  if (inFlight.has(cacheKey)) return { ...(await inFlight.get(cacheKey)), cached: true };
+  const run = lookup(cacheKey, params).finally(() => inFlight.delete(cacheKey));
   inFlight.set(cacheKey, run);
-  return { videos: await run, cached: false };
+  return run;
 }
 
 /**
@@ -240,6 +271,7 @@ module.exports = {
   primaryLanguage,
   toVideo,
   keyId,
+  quotaCooldownMs,
   inFlight,
   MAX_RESULTS,
   BASE_URL

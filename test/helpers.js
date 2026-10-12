@@ -1,7 +1,17 @@
 /**
- * Shared test helpers: a fetch double that answers by URL, and builders for
- * the shapes the upstream APIs return.
+ * Shared test helpers: a fetch double that answers by URL, builders for the
+ * shapes the upstream APIs return, and a fresh cache for each test.
  */
+const { configureCache } = require("../src/cache");
+const { readHostConfig } = require("../src/hostConfig");
+
+/** The host's default cache settings, whatever this machine's environment says. */
+const TEST_CACHE = readHostConfig({}).cache;
+
+/** An empty in-memory cache with the default lifetimes, or the ones given. */
+function freshCache(overrides = {}) {
+  return configureCache({ ...TEST_CACHE, ...overrides });
+}
 
 /** A fetch Response as far as the addon reads one. */
 function response(body, { status = 200, json = true } = {}) {
@@ -77,4 +87,4 @@ function apiVideo(id, overrides = {}) {
   };
 }
 
-module.exports = { response, routeFetch, video, apiVideo };
+module.exports = { response, routeFetch, video, apiVideo, freshCache, TEST_CACHE };

@@ -12,14 +12,25 @@ const TIMEOUT_MS = 8000;
  *
  * Returns the parsed body, or null when the service says the thing does not
  * exist (404) -- which is cached like any other answer, so a title missing
- * from one source is not asked about again for a day. Anything else that
- * goes wrong throws, and is not cached: a timeout or an outage says nothing
- * about tomorrow.
+ * from one source is not asked about again until the entry expires. Anything
+ * else that goes wrong is not cached, and throws -- unless an out-of-date
+ * answer is still kept, which is then used instead: titles and runtimes
+ * rarely change, and an old answer beats none while a service is down.
  */
 async function getJson(url, { cacheKey = url, headers } = {}) {
-  const cached = metadataCache.get(cacheKey);
-  if (cached !== undefined) return cached.body;
+  const hit = await metadataCache.get(cacheKey);
+  if (hit && hit.fresh) return hit.value.body;
+  try {
+    const body = await fetchJson(url, headers);
+    await metadataCache.set(cacheKey, { body });
+    return body;
+  } catch (err) {
+    if (hit) return hit.value.body;
+    throw err;
+  }
+}
 
+async function fetchJson(url, headers) {
   let response;
   try {
     response = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -29,10 +40,7 @@ async function getJson(url, { cacheKey = url, headers } = {}) {
     throw wrapped;
   }
 
-  if (response.status === 404) {
-    metadataCache.set(cacheKey, { body: null });
-    return null;
-  }
+  if (response.status === 404) return null;
 
   let body = null;
   try {
@@ -46,9 +54,13 @@ async function getJson(url, { cacheKey = url, headers } = {}) {
     err.status = response.status;
     throw err;
   }
-
-  metadataCache.set(cacheKey, { body });
   return body;
+}
+
+/** "2015-06-17", "2015-06-17T00:00:00.000Z" -> "2015-06-17"; null otherwise. */
+function dateOf(value) {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(typeof value === "string" ? value : "");
+  return match ? match[1] : null;
 }
 
 /** "2015", "2015-06-17", "2015–2022" -> 2015. */
@@ -74,4 +86,4 @@ function runtimeSeconds(value) {
   return total > 0 ? Math.round(total * 60) : null;
 }
 
-module.exports = { getJson, yearOf, runtimeSeconds, TIMEOUT_MS };
+module.exports = { getJson, yearOf, dateOf, runtimeSeconds, TIMEOUT_MS };

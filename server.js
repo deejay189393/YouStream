@@ -1,4 +1,5 @@
 const path = require("path");
+const crypto = require("crypto");
 const express = require("express");
 const { decodeConfig, cleanKey, formatMargin } = require("./src/config");
 const { buildManifest, getUnconfiguredManifest } = require("./src/manifest");
@@ -9,6 +10,8 @@ const { searchDuration } = require("./src/matching");
 const { formatDuration, formatOffset } = require("./src/text");
 const youtube = require("./src/youtube");
 const tmdb = require("./src/metadata/tmdb");
+const { hostConfig, describeCache } = require("./src/hostConfig");
+const { NAMESPACES, cacheSettings, cacheStats, clearAllCaches } = require("./src/cache");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -39,7 +42,54 @@ app.get("/configure", (req, res) => {
   res.send(renderConfigurePage({ baseUrl: getBaseUrl(req), existing: null, serverTmdb: serverHasTmdbKey() }));
 });
 
-app.get("/health", (req, res) => res.json({ ok: true }));
+app.get("/health", (req, res) => res.json({ ok: true, cache: cacheSettings().store }));
+
+/**
+ * The cache, for whoever runs the server: GET for what it holds, DELETE to
+ * empty one namespace (search, metadata, cooldown) or all of them. Only
+ * there when CACHE_ADMIN_TOKEN is set, and only with that token as a bearer
+ * token.
+ */
+function sameSecret(given, expected) {
+  const digest = (text) => crypto.createHash("sha256").update(text).digest();
+  return crypto.timingSafeEqual(digest(given), digest(expected));
+}
+
+function requireAdmin(req, res, next) {
+  const token = cacheSettings().adminToken;
+  if (!token) return res.status(404).json({ error: "Not found" });
+  const match = /^Bearer (.+)$/.exec(req.get("authorization") || "");
+  if (!match || !sameSecret(match[1], token)) return res.status(401).json({ error: "Unauthorized" });
+  next();
+}
+
+/** Express 4 does not catch a rejected handler; a store that is down must not take the server with it. */
+const storeAnswer = (handler) => async (req, res) => {
+  try {
+    await handler(req, res);
+  } catch (err) {
+    res.status(503).json({ error: `The cache store did not answer: ${err.message}` });
+  }
+};
+
+app.get(
+  "/admin/cache",
+  requireAdmin,
+  storeAnswer(async (req, res) => res.json(await cacheStats()))
+);
+
+app.delete(
+  "/admin/cache/:namespace",
+  requireAdmin,
+  storeAnswer(async (req, res) => {
+    const { namespace } = req.params;
+    if (namespace === "all") return res.json({ removed: await clearAllCaches() });
+    if (!Object.hasOwn(NAMESPACES, namespace)) {
+      return res.status(400).json({ error: `Unknown namespace; one of ${[...Object.keys(NAMESPACES), "all"].join(", ")}` });
+    }
+    res.json({ removed: await NAMESPACES[namespace].clear() });
+  })
+);
 
 /**
  * Checks the keys a reader typed before their install link is built, so a
@@ -134,6 +184,7 @@ app.get("/:config/explain/:type/:id.json", async (req, res) => {
   if (result.error) out.error = result.error;
   if (result.evaluations) {
     out.cached = result.cached;
+    if (result.stale) out.stale = result.stale;
     out.matches = result.matches.map(describeVideo);
     out.rejected = result.evaluations.filter((e) => !e.ok).map(describeVideo);
   }
@@ -149,6 +200,8 @@ module.exports = { app, getBaseUrl };
    boots this file as a child process; coverage instrumentation does not span
    process boundaries. */
 if (require.main === module) {
+  hostConfig.warnings.forEach((w) => console.warn(`[config] ${w}`));
+  console.log(`[cache] ${describeCache(cacheSettings())}`);
   app.listen(PORT, () => {
     console.log(`YouStream addon listening on port ${PORT}`);
   });

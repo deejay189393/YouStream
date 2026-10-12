@@ -3,6 +3,7 @@ const tmdb = require("./tmdb");
 const kitsu = require("./kitsu");
 const tvmaze = require("./tvmaze");
 const { tokens } = require("../text");
+const { yearOf } = require("./http");
 
 /**
  * What a stream id refers to, in the terms a YouTube search needs:
@@ -16,6 +17,9 @@ const { tokens } = require("../text");
  *     runtimeKind,             // "exact": this film's or episode's own length
  *                              // "typical": only the show's usual length
  *                              // null: nothing listed anywhere
+ *     released,                // "2021-04-07": the film's release or the
+ *                              // episode's first airing, when listed
+ *     releaseYear,             // episodes: the year of `released`
  *     season, episode, absoluteEpisode, episodeTitle, seasonCount,
  *     sources                  // which services answered, for the logs
  *   }
@@ -94,6 +98,7 @@ async function imdbMovie(id, { tmdbKey, region }) {
     title,
     aliases: uniqueAliases(title, tm ? [tm.title, tm.originalTitle, ...tm.aliases] : []),
     year: (cine && cine.year) || (tm && tm.year) || null,
+    released: (cine && cine.released) || (tm && tm.released) || null,
     people: people(cine ? cine.people : [], tm ? tm.people : []),
     imdbId: id,
     ...runtime(chosen, null),
@@ -121,6 +126,7 @@ async function imdbEpisode(id, season, episode, { tmdbKey, region }) {
   }
   const title = (cine && cine.title) || (show && show.title);
   if (!title) return null;
+  const released = (cine && cine.released) || (ep && ep.released) || null;
   return {
     isEpisode: true,
     title,
@@ -138,7 +144,8 @@ async function imdbEpisode(id, season, episode, { tmdbKey, region }) {
     absoluteEpisode:
       (cine && cine.absoluteEpisode) || (show && show.seasons.length ? tmdb.absoluteEpisode(show.seasons, season, episode) : null),
     episodeTitle: (cine && cine.episodeTitle) || (ep && ep.episodeTitle) || null,
-    releaseYear: (cine && cine.releaseYear) || (ep && ep.releaseYear) || null,
+    released,
+    releaseYear: yearOf(released),
     seasonCount: (cine && cine.seasonCount) || (show ? show.seasons.filter((s) => s.season >= 1).length || null : null),
     sources: [cine && "cinemeta", (show || ep) && "tmdb", maze && "tvmaze"].filter(Boolean)
   };
@@ -155,6 +162,7 @@ async function tmdbMovie(id, { tmdbKey, region }) {
     title: tm.title,
     aliases: uniqueAliases(tm.title, [tm.originalTitle, ...tm.aliases]),
     year: tm.year,
+    released: tm.released || (cine && cine.released) || null,
     people: people(tm.people, cine ? cine.people : []),
     imdbId: tm.imdbId,
     ...runtime(chosen, null),
@@ -185,7 +193,8 @@ async function tmdbEpisode(id, season, episode, { tmdbKey, region }) {
     episode,
     absoluteEpisode: tmdb.absoluteEpisode(show.seasons, season, episode),
     episodeTitle: (ep && ep.episodeTitle) || null,
-    releaseYear: (ep && ep.releaseYear) || null,
+    released: (ep && ep.released) || null,
+    releaseYear: yearOf(ep && ep.released),
     seasonCount: show.seasons.filter((s) => s.season >= 1).length || null,
     sources: ["tmdb", maze && "tvmaze"].filter(Boolean)
   };
@@ -201,6 +210,7 @@ async function kitsuTitle(id, isEpisode, episode) {
     title: entry.title,
     aliases: uniqueAliases(entry.title, entry.aliases),
     year: entry.year,
+    released: entry.released,
     people: [],
     imdbId: null,
     otherRuntimes: [],
@@ -218,6 +228,8 @@ async function kitsuTitle(id, isEpisode, episode) {
     episode,
     absoluteEpisode: episode,
     episodeTitle: (ep && ep.episodeTitle) || null,
+    released: (ep && ep.released) || null,
+    releaseYear: yearOf(ep && ep.released),
     seasonCount: 1
   };
 }
