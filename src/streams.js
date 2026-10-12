@@ -21,7 +21,9 @@ function detailLine(match) {
   if (match.offsetSeconds !== null && match.offsetSeconds !== undefined) parts[0] += ` (${formatOffset(match.offsetSeconds)})`;
   const views = formatCount(video.views);
   if (views) parts.push(`👁 ${views}`);
-  const language = languageName(video.language);
+  // The language matching settled on, which trusts what the title declares
+  // over YouTube's field.
+  const language = languageName(match.language !== undefined ? match.language : video.language);
   if (language) parts.push(`🗣 ${language}`);
   return parts.join("  ");
 }

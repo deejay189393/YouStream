@@ -19,6 +19,7 @@ const { COUNTRY_SET, LANGUAGE_SET } = require("./regions");
  *   playbackVersion 1      the option list the above was saved against
  *   types           ["movie", "series"]
  *   maxResults      5      how many matching videos to list
+ *   minViews        1000   fewer views than this and a video is not offered
  *   region          "IN"   hides videos blocked there, ranks for it
  *   audioLanguage   "hi"   drops videos spoken in another language
  *   embeddableOnly  false  only videos that allow embedding (Stremio Web)
@@ -45,6 +46,16 @@ const DEFAULT_MARGINS = {
 
 const CONTENT_TYPES = ["movie", "series"];
 const DEFAULT_MAX_RESULTS = 5;
+
+/**
+ * Below this many views a video is not offered. Measured against the live
+ * API, every false match that got past the other checks was nearly unwatched
+ * -- a 205-view podcast episode titled "SEASON1 EPISODE 2 ... ASPIRANTs", a
+ * 103-view "New Move Vivah (2026)" -- while the genuine uploads ran from
+ * thousands to tens of millions. 0 turns the floor off.
+ */
+const DEFAULT_MIN_VIEWS = 1000;
+const MAX_MIN_VIEWS = 100000000;
 const MAX_RESULTS_LIMIT = 20;
 
 /**
@@ -57,11 +68,12 @@ const MAX_RESULTS_LIMIT = 20;
  */
 const DEFAULT_EXCLUDE = [
   "trailer", "teaser", "promo", "sneak peek", "reaction", "react", "reacts", "reacting", "review", "explained",
-  "explanation", "recap", "breakdown", "analysis", "commentary", "behind the scenes", "making of", "bloopers",
+  "explanation", "explaine", "recap", "breakdown", "analysis", "commentary", "commentry", "behind the scenes",
+  "making of", "bloopers",
   "interview", "podcast", "spoof", "parody", "fan made", "fanmade", "fan film", "gameplay", "walkthrough",
   "cutscenes", "jukebox", "soundtrack", "ost", "lyrics", "amv", "edit", "shorts", "in minutes", "summary",
   "summarized", "ending explained", "theory", "theories", "best scenes", "deleted scenes", "compilation", "revisit",
-  "rewind", "watching", "watch along", "watchalong", "watch party", "discussion", "facts", "best of", "album"
+  "rewind", "watching", "watch along", "watchalong", "watch party", "discussion", "fact", "best of", "album"
 ];
 
 const DEFAULT_MOVIE_QUERY = "{title} {year} full movie {language}";
@@ -134,6 +146,11 @@ function cleanMaxResults(raw) {
   return Number.isSafeInteger(n) && n >= 1 && n <= MAX_RESULTS_LIMIT ? n : DEFAULT_MAX_RESULTS;
 }
 
+function cleanMinViews(raw) {
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  return Number.isSafeInteger(n) && n >= 0 && n <= MAX_MIN_VIEWS ? n : DEFAULT_MIN_VIEWS;
+}
+
 /**
  * Every setting, validated, with defaults filled in. Safe on anything: the
  * SDK hands its handlers whatever JSON the URL carried, and a hand-edited
@@ -151,6 +168,7 @@ function normalizeConfig(config) {
     playback: normalizePlayback(c.playback),
     types: cleanTypes(c.types),
     maxResults: cleanMaxResults(c.maxResults),
+    minViews: cleanMinViews(c.minViews),
     region: typeof c.region === "string" && COUNTRY_SET.has(c.region) ? c.region : "",
     audioLanguage: typeof c.audioLanguage === "string" && LANGUAGE_SET.has(c.audioLanguage) ? c.audioLanguage : "",
     embeddableOnly: c.embeddableOnly === true,
@@ -174,6 +192,7 @@ function encodeConfig(config) {
   out.playbackVersion = PLAYBACK_VERSION;
   if (!sameList(n.types, CONTENT_TYPES)) out.types = n.types;
   if (n.maxResults !== DEFAULT_MAX_RESULTS) out.maxResults = n.maxResults;
+  if (n.minViews !== DEFAULT_MIN_VIEWS) out.minViews = n.minViews;
   if (n.region) out.region = n.region;
   if (n.audioLanguage) out.audioLanguage = n.audioLanguage;
   if (n.embeddableOnly) out.embeddableOnly = true;
@@ -234,6 +253,8 @@ module.exports = {
   DEFAULT_MOVIE_QUERY,
   DEFAULT_EPISODE_QUERY,
   DEFAULT_MAX_RESULTS,
+  DEFAULT_MIN_VIEWS,
+  MAX_MIN_VIEWS,
   MAX_RESULTS_LIMIT,
   MAX_QUERY_LENGTH,
   CONTENT_TYPES

@@ -41,4 +41,15 @@ function languageName(code) {
   return LANGUAGE_SET.has(code) ? languageNames.of(code) : "";
 }
 
-module.exports = { COUNTRIES, LANGUAGES, COUNTRY_SET, LANGUAGE_SET, languageName };
+/**
+ * What uploaders call each language in a title, folded to lower case: the
+ * English name, plus the other names in common use ("Bengali" beside
+ * "Bangla", "Tagalog" beside "Filipino").
+ */
+const EXTRA_NAMES = { bn: ["bengali"], zh: ["mandarin", "cantonese"], fil: ["tagalog"] };
+const LANGUAGE_BY_NAME = new Map();
+LANGUAGE_CODES.forEach((code) => {
+  [languageNames.of(code).toLowerCase(), ...(EXTRA_NAMES[code] || [])].forEach((name) => LANGUAGE_BY_NAME.set(name, code));
+});
+
+module.exports = { COUNTRIES, LANGUAGES, COUNTRY_SET, LANGUAGE_SET, LANGUAGE_BY_NAME, languageName };

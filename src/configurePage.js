@@ -10,6 +10,8 @@ const {
   DEFAULT_EPISODE_QUERY,
   DEFAULT_MAX_RESULTS,
   MAX_RESULTS_LIMIT,
+  DEFAULT_MIN_VIEWS,
+  MAX_MIN_VIEWS,
   MAX_QUERY_LENGTH
 } = require("./config");
 
@@ -346,14 +348,22 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
           <select id="region">${options(COUNTRIES, s.region, "Any country")}</select>
         </label>
       </div>
-      <label class="field">
-        <span class="label-text">Audio language</span>
-        <select id="audio-language">${options(LANGUAGES, s.audioLanguage, "Any language")}</select>
-      </label>
+      <div class="grid-2">
+        <label class="field">
+          <span class="label-text">Audio language</span>
+          <select id="audio-language">${options(LANGUAGES, s.audioLanguage, "Any language")}</select>
+        </label>
+        <label class="field">
+          <span class="label-text">Minimum views</span>
+          <input type="number" id="min-views" min="0" max="${MAX_MIN_VIEWS}" step="1" inputmode="numeric" value="${s.minViews}" />
+        </label>
+      </div>
       <div class="hint" style="margin-top:0;margin-bottom:12px">
         Your country hides videos that are blocked there and ranks results for it. An audio language drops
-        videos YouTube knows to be spoken in another one, adds it to movie searches (good for dubbed films),
-        and ranks it first. Videos with no language set are kept.
+        videos in another one &mdash; going by what the title says (&ldquo;Hindi dub&rdquo;) before YouTube's own
+        tag, which channels often get wrong &mdash; adds it to movie searches (good for dubbed films), and ranks
+        it first. Videos with no language known are kept. The view minimum keeps out nearly unwatched lookalikes;
+        0 turns it off.
       </div>
       <div class="row-box">
         <label class="check"><input type="checkbox" id="embeddable-only"${s.embeddableOnly ? " checked" : ""} />
@@ -427,6 +437,8 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
   var DEFAULT_EPISODE_QUERY = ${jsonForScript(DEFAULT_EPISODE_QUERY)};
   var DEFAULT_MAX_RESULTS = ${DEFAULT_MAX_RESULTS};
   var MAX_RESULTS_LIMIT = ${MAX_RESULTS_LIMIT};
+  var DEFAULT_MIN_VIEWS = ${DEFAULT_MIN_VIEWS};
+  var MAX_MIN_VIEWS = ${MAX_MIN_VIEWS};
   var DEFAULTS = { "movie-query": DEFAULT_MOVIE_QUERY, "episode-query": DEFAULT_EPISODE_QUERY, exclude: DEFAULT_EXCLUDE.join(", ") };
   var KEY_PROBLEMS = {
     missing: "Enter your YouTube API key.",
@@ -585,6 +597,13 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false }) {
     }
     var maxResults = parseInt(maxText, 10);
     if (maxResults !== DEFAULT_MAX_RESULTS) config.maxResults = maxResults;
+
+    var minViewsText = document.getElementById("min-views").value.trim();
+    if (!isWholeNumber(minViewsText) || parseInt(minViewsText, 10) > MAX_MIN_VIEWS) {
+      return "Minimum views: a whole number, 0 or more.";
+    }
+    var minViews = parseInt(minViewsText, 10);
+    if (minViews !== DEFAULT_MIN_VIEWS) config.minViews = minViews;
 
     var region = regionSelect.value;
     if (region) config.region = region;

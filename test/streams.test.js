@@ -84,6 +84,11 @@ describe("toStreams", () => {
   });
 });
 
+test("detailLine names the language matching settled on, over YouTube's tag", () => {
+  expect(detailLine(match({ language: "en" }, { language: "hi" }))).toContain("Hindi");
+  expect(detailLine(match({ language: "ja" }, { language: null }))).not.toContain("Japanese");
+});
+
 test("detailLine leaves out what is unknown", () => {
   expect(detailLine(match({ views: null, language: "xx" }, { offsetSeconds: undefined }))).toBe("⏱ 36m 51s");
 });

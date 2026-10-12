@@ -11,7 +11,8 @@ const {
   DEFAULT_EXCLUDE,
   DEFAULT_MOVIE_QUERY,
   DEFAULT_EPISODE_QUERY,
-  DEFAULT_MAX_RESULTS
+  DEFAULT_MAX_RESULTS,
+  DEFAULT_MIN_VIEWS
 } = require("../src/config");
 const { PLAYBACK_VERSION } = require("../src/playback");
 
@@ -79,6 +80,7 @@ describe("normalizeConfig", () => {
       playback: ["app", "youtube"],
       types: ["movie", "series"],
       maxResults: DEFAULT_MAX_RESULTS,
+      minViews: DEFAULT_MIN_VIEWS,
       region: "",
       audioLanguage: "",
       embeddableOnly: false,
@@ -86,6 +88,16 @@ describe("normalizeConfig", () => {
       movieQuery: DEFAULT_MOVIE_QUERY,
       episodeQuery: DEFAULT_EPISODE_QUERY
     });
+  });
+
+  test("the view minimum: 1,000 by default, 0 turns it off, anything invalid is the default", () => {
+    expect(DEFAULT_MIN_VIEWS).toBe(1000);
+    expect(normalizeConfig({ minViews: 0 }).minViews).toBe(0);
+    expect(normalizeConfig({ minViews: "250" }).minViews).toBe(250);
+    expect(normalizeConfig({ minViews: -1 }).minViews).toBe(DEFAULT_MIN_VIEWS);
+    expect(normalizeConfig({ minViews: 1.5 }).minViews).toBe(DEFAULT_MIN_VIEWS);
+    expect(normalizeConfig({ minViews: 1e9 }).minViews).toBe(DEFAULT_MIN_VIEWS);
+    expect(normalizeConfig({ minViews: " " }).minViews).toBe(DEFAULT_MIN_VIEWS);
   });
 
   test("the defaults are what was asked for: 10 minutes for films, 45 seconds for episodes", () => {
@@ -201,6 +213,7 @@ describe("encodeConfig", () => {
         playback: ["smarttube"],
         types: ["movie"],
         maxResults: 3,
+        minViews: 0,
         region: "IN",
         audioLanguage: "hi",
         embeddableOnly: true,
@@ -218,6 +231,7 @@ describe("encodeConfig", () => {
       playbackVersion: PLAYBACK_VERSION,
       types: ["movie"],
       maxResults: 3,
+      minViews: 0,
       region: "IN",
       audioLanguage: "hi",
       embeddableOnly: true,

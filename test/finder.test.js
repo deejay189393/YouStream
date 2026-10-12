@@ -105,8 +105,9 @@ describe("findVideos", () => {
     expect(result.status).toBe("ok");
     expect(result.query).toBe("Kota Factory season 1 episode 3");
     expect(result.cached).toBe(false);
-    expect(result.matches.map((m) => m.video.id)).toEqual(["e3", "e3b"]);
+    expect(result.matches.map((m) => m.video.id)).toEqual(["e3"]);
     expect(result.evaluations.find((e) => e.video.id === "e4").reason).toBe("episode 4");
+    expect(result.evaluations.find((e) => e.video.id === "e3b").reason).toBe("too few views");
 
     const search = new URL(fetch.mock.calls.find(([url]) => url.includes("/search?"))[0]).searchParams;
     expect(search.get("videoDuration")).toBe("long");

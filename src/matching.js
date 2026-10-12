@@ -1,4 +1,5 @@
 const { fold, tokens, hasPhrase, significantTokens } = require("./text");
+const { LANGUAGE_BY_NAME } = require("./regions");
 
 /**
  * Deciding whether a YouTube video is the film or the episode asked for.
@@ -11,7 +12,8 @@ const { fold, tokens, hasPhrase, significantTokens } = require("./text");
  *   1. it is a finished, playable upload (not live, not a premiere)
  *   2. its length is inside the reader's margin around the listed runtime
  *   3. it is not blocked in the reader's country, nor spoken in a language
- *      other than the one the reader asked for
+ *      other than the one the reader asked for, and has been watched at
+ *      least the reader's minimum number of times
  *   4. its title carries none of the reader's excluded words ("trailer",
  *      "reaction", ...) -- unless the word is part of the title's own name
  *   5. its title (or channel) names the film or show
@@ -324,6 +326,42 @@ function episodeVerdict(video, title, foldedTitle, names) {
   return { ok: false, reason: "names no episode" };
 }
 
+// --- Audio language ------------------------------------------------------
+
+const DUB_WORDS = new Set(["dub", "dubbed", "dubbing", "audio", "version"]);
+
+/**
+ * The audio languages a title declares: "[Hindi dub]", "Tamil Dubbed",
+ * "Full Movie in Hindi", "Dubbed in Telugu". A language named before "sub"
+ * or "subtitles" is a subtitle, not the audio, and is not counted.
+ *
+ * This is trusted over the audio-language field. Measured on Muse India's
+ * Spy x Family uploads, the field is set per channel, not per video: the
+ * "[Hindi dub]" upload is tagged English and the "[English Dub]" upload
+ * Japanese.
+ */
+function titleLanguages(videoTitle) {
+  const words = tokens(videoTitle);
+  const found = new Set();
+  words.forEach((word, i) => {
+    const code = LANGUAGE_BY_NAME.get(word);
+    if (!code) return;
+    if (DUB_WORDS.has(words[i + 1]) || words[i - 1] === "in") found.add(code);
+  });
+  return found;
+}
+
+/**
+ * The languages a video is spoken in, as far as can be told: what its title
+ * declares, else what YouTube's field says. Empty when neither says, or when
+ * the field says "zxx" -- ISO for "no linguistic content", silent footage.
+ */
+function audioLanguages(video) {
+  const declared = titleLanguages(video.title);
+  if (declared.size) return declared;
+  return new Set(video.language && video.language !== "zxx" ? [video.language] : []);
+}
+
 function regionBlocked(video, region) {
   if (!region) return false;
   if (video.regionBlocked && video.regionBlocked.includes(region)) return true;
@@ -342,10 +380,13 @@ function evaluate(video, title, window, settings) {
   if (!video.durationSeconds) return fail("no length");
   if (video.durationSeconds < window.min || video.durationSeconds > window.max) return fail("wrong length");
   if (regionBlocked(video, settings.region)) return fail(`blocked in ${settings.region}`);
-  if (settings.audioLanguage && video.language && video.language !== "zxx" && video.language !== settings.audioLanguage) {
-    return fail(`${video.language} audio`);
+  const languages = audioLanguages(video);
+  if (settings.audioLanguage && languages.size && !languages.has(settings.audioLanguage)) {
+    return fail(`${[...languages].join("/")} audio`);
   }
   if (settings.embeddableOnly && !video.embeddable) return fail("not embeddable");
+  // A hidden count is not a low one, so a video without one is kept.
+  if (video.views !== null && video.views < settings.minViews) return fail("too few views");
 
   const names = [title.title, ...title.aliases];
   const foldedTitle = fold(video.title);
@@ -373,14 +414,19 @@ function evaluate(video, title, window, settings) {
     if (year === "match") score += 10;
   }
 
+  // Inside the window, closeness counts for less than how widely a video
+  // has been watched. Measured: the studios' own uploads of Indian films run
+  // 10 to 25 minutes under the listed runtime, songs trimmed, so the closest
+  // upload is often a re-upload while the canonical one, with tens of
+  // millions of views, sits further away.
   const offsetSeconds = window.target ? video.durationSeconds - window.target : null;
-  if (window.target) score -= Math.min(30, (Math.abs(offsetSeconds) / Math.max(window.tolerance, 1)) * 30);
+  if (window.target) score -= Math.min(15, (Math.abs(offsetSeconds) / Math.max(window.tolerance, 1)) * 15);
   if (named.phrase) score += 10;
-  if (settings.audioLanguage && video.language === settings.audioLanguage) score += 10;
+  if (settings.audioLanguage && languages.has(settings.audioLanguage)) score += 10;
   if (video.definition === "hd") score += 5;
-  if (video.views) score += Math.min(20, Math.log10(video.views + 1) * 2);
+  if (video.views) score += Math.min(25, Math.log10(video.views + 1) * 3);
 
-  return { ...base, ok: true, score: Math.round(score * 10) / 10, offsetSeconds, how };
+  return { ...base, ok: true, score: Math.round(score * 10) / 10, offsetSeconds, how, language: [...languages][0] || null };
 }
 
 /** The matches, best first. */
@@ -402,6 +448,8 @@ module.exports = {
   excludedWord,
   episodeVerdict,
   regionBlocked,
+  titleLanguages,
+  audioLanguages,
   evaluate,
   rankMatches,
   UNKNOWN_RUNTIME

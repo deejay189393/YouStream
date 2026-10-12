@@ -106,6 +106,7 @@ describe("building the install link", () => {
     movie.querySelector(".margin-unit").value = "%";
     p.$('[data-margin="episodeMargin"] .margin-value').value = "90";
     p.set("max-results", "8");
+    p.set("min-views", "0");
     p.set("region", "IN");
     p.set("audio-language", "hi");
     p.check("embeddable-only", true);
@@ -123,6 +124,7 @@ describe("building the install link", () => {
       playbackVersion: 1,
       types: ["series"],
       maxResults: 8,
+      minViews: 0,
       region: "IN",
       audioLanguage: "hi",
       embeddableOnly: true,
@@ -211,6 +213,8 @@ describe("validation", () => {
     ["too many results", (p) => p.set("max-results", "21"), "Videos to list: a whole number from 1 to 20."],
     ["zero results", (p) => p.set("max-results", "0"), "Videos to list"],
     ["a fractional count", (p) => p.set("max-results", "2.5"), "Videos to list"],
+    ["a negative view minimum", (p) => p.set("min-views", "-5"), "Minimum views: a whole number, 0 or more."],
+    ["too large a view minimum", (p) => p.set("min-views", "100000001"), "Minimum views"],
     ["a search without {title}", (p) => p.set("episode-query", "season {season}"), "Both searches need {title} in them."]
   ])("%s", (_, setup, message) => {
     const p = attempt(setup);

@@ -263,6 +263,34 @@ describe("excludedWord", () => {
   });
 });
 
+describe("audio languages", () => {
+  const { titleLanguages, audioLanguages } = require("../src/matching");
+  const langs = (title) => [...titleLanguages(title)];
+
+  test.each([
+    ["SPY\u00d7FAMILY - Episode 03 (S1E03) [Hindi dub]", ["hi"]],
+    ["[Hindi Dub] SPY\u00d7FAMILY - Episode 03", ["hi"]],
+    ["Vivah | Tamil Dubbed Hindi Movie", ["ta"]],
+    ["Full Movie in English | HD", ["en"]],
+    ["Dubbed in Telugu", ["te"]],
+    ["Movie Explained in Bangla", ["bn"]],
+    ["Full Movie Bengali Version", ["bn"]],
+    ["Japanese Audio", ["ja"]],
+    ["SPY\u00d7FAMILY - Episode 03 (S1E03) [English Sub]", []],
+    ["Charade (1963) | Full Movie | English", []],
+    ["Hindi", []]
+  ])("%s declares %p", (title, codes) => {
+    expect(langs(title)).toEqual(codes);
+  });
+
+  test("the title first, then YouTube's tag, and 'no linguistic content' is no language", () => {
+    expect([...audioLanguages(video({ title: "X [Hindi dub]", language: "en" }))]).toEqual(["hi"]);
+    expect([...audioLanguages(video({ title: "X", language: "en" }))]).toEqual(["en"]);
+    expect([...audioLanguages(video({ title: "X", language: "zxx" }))]).toEqual([]);
+    expect([...audioLanguages(video({ title: "X", language: null }))]).toEqual([]);
+  });
+});
+
 describe("regionBlocked", () => {
   test("with no country set, nothing is blocked", () => {
     expect(regionBlocked(video({ regionBlocked: ["IN"] }), "")).toBe(false);
@@ -301,6 +329,13 @@ describe("evaluate: films", () => {
     expect(judge(overrides)).toMatchObject({ ok: false, reason });
   });
 
+  test("too few views, unless the count is hidden or the floor is off", () => {
+    expect(judge({ views: 999 })).toMatchObject({ ok: false, reason: "too few views" });
+    expect(judge({ views: 1000 }).ok).toBe(true);
+    expect(judge({ views: null }).ok).toBe(true);
+    expect(judge({ views: 3 }, normalizeConfig({ minViews: 0 })).ok).toBe(true);
+  });
+
   test("the reader's country, audio language and embedding settings", () => {
     const settings = normalizeConfig({ region: "IN", audioLanguage: "en", embeddableOnly: true });
     expect(judge({ regionBlocked: ["IN"] }, settings)).toMatchObject({ ok: false, reason: "blocked in IN" });
@@ -310,9 +345,26 @@ describe("evaluate: films", () => {
     expect(judge({ language: null }, settings).ok).toBe(true);
   });
 
-  test("the reader's audio language ranks first", () => {
+  test("the reader's audio language ranks first, whether tagged or named in the title", () => {
     const settings = normalizeConfig({ audioLanguage: "en" });
-    expect(judge({ language: "en" }, settings).score).toBeGreaterThan(judge({ language: null }, settings).score);
+    const untagged = judge({ language: null }, settings).score;
+    expect(judge({ language: "en" }, settings).score).toBeGreaterThan(untagged);
+    expect(judge({ title: "The Shawshank Redemption (1994) Full Movie in English" }, settings).score).toBeGreaterThan(untagged);
+  });
+
+  test("what the title declares overrides YouTube's tag, both ways", () => {
+    const hindi = normalizeConfig({ audioLanguage: "hi" });
+    // Measured on Muse India: the "[Hindi dub]" upload is tagged English.
+    expect(judge({ title: "The Shawshank Redemption (1994) [Hindi dub]", language: "en" }, hindi)).toMatchObject({ ok: true, language: "hi" });
+    expect(judge({ title: "The Shawshank Redemption (1994) [English Dub]", language: "hi" }, hindi)).toMatchObject({
+      ok: false,
+      reason: "en audio"
+    });
+  });
+
+  test("a match reports the language it settled on", () => {
+    expect(judge({ language: "zxx" })).toMatchObject({ ok: true, language: null });
+    expect(judge({ language: "ta" })).toMatchObject({ ok: true, language: "ta" });
   });
 
   test("the right year, the whole name, HD and views all rank higher", () => {
