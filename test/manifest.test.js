@@ -5,7 +5,8 @@ const {
   identity,
   stremioAddonsConfig,
   ADDON_ID,
-  ADDON_VERSION
+  ADDON_VERSION,
+  UNCONFIGURED_PREFIX
 } = require("../src/manifest");
 const { COUNTRIES, LANGUAGES, languageName } = require("../src/regions");
 
@@ -19,7 +20,7 @@ afterEach(() => {
 });
 
 describe("the served manifest", () => {
-  test("unconfigured: stream-only, and configuration is required", () => {
+  test("unconfigured: stream-only, configuration required, and claiming no title's id", () => {
     expect(getUnconfiguredManifest(BASE)).toEqual({
       id: ADDON_ID,
       name: "YouStream",
@@ -30,10 +31,21 @@ describe("the served manifest", () => {
       contactEmail: expect.any(String),
       resources: ["stream"],
       types: ["movie", "series", "anime"],
-      idPrefixes: ["tt", "kitsu:"],
+      idPrefixes: [UNCONFIGURED_PREFIX],
       catalogs: [],
       behaviorHints: { configurable: true, configurationRequired: true }
     });
+  });
+
+  test("installed unconfigured anyway (Nuvio ignores configurationRequired), it is never asked about a title", () => {
+    // Nuvio's rule: a non-empty idPrefixes list must contain a prefix of the id.
+    const { idPrefixes } = getUnconfiguredManifest(BASE);
+    expect(idPrefixes.length).toBeGreaterThan(0);
+    ["tt0063350", "tt0063350:1:1", "kitsu:45398:3", "tmdb:10331"].forEach((id) =>
+      expect(idPrefixes.some((p) => id.startsWith(p))).toBe(false)
+    );
+    // A config without a key is just as unconfigured.
+    expect(buildManifest({ types: ["movie"] }, BASE).idPrefixes).toEqual([UNCONFIGURED_PREFIX]);
   });
 
   test("configured: installable", () => {

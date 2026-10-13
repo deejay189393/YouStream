@@ -9,7 +9,7 @@ const { normalizeConfig, isConfigured, effectiveTmdbKey } = require("./config");
  * to play it.
  */
 const ADDON_ID = "org.deejay189393.youstream";
-const ADDON_VERSION = "0.5.0";
+const ADDON_VERSION = "0.5.1";
 const ADDON_NAME = "YouStream";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION =
@@ -51,6 +51,15 @@ function idPrefixes(settings) {
 }
 
 /**
+ * What a manifest with no usable key claims instead: one prefix no title id
+ * ever starts with, so an app that installs it anyway never asks it for
+ * anything. Stremio will not install it (configurationRequired), but Nuvio
+ * ignores that flag. Not an empty list: Nuvio reads an empty idPrefixes, or
+ * an empty types, as "every id" and "every type".
+ */
+const UNCONFIGURED_PREFIX = "youstream-not-configured:";
+
+/**
  * Kitsu-backed anime addons file their titles under "anime" as well as the
  * usual types, so that type is claimed alongside them.
  */
@@ -79,7 +88,7 @@ function buildManifest(config, baseUrl) {
     contactEmail: CONTACT_EMAIL,
     resources: ["stream"],
     types: typesFor(settings),
-    idPrefixes: idPrefixes(settings),
+    idPrefixes: configured ? idPrefixes(settings) : [UNCONFIGURED_PREFIX],
     catalogs: [],
     behaviorHints: { configurable: true, configurationRequired: !configured },
     ...(signed ? { stremioAddonsConfig: signed } : {})
@@ -119,6 +128,7 @@ module.exports = {
   releaseChannel,
   stremioAddonsConfig,
   idPrefixes,
+  UNCONFIGURED_PREFIX,
   ADDON_ID,
   ADDON_VERSION,
   ADDON_NAME,

@@ -345,6 +345,11 @@ The manifest is stream-only (`resources: ["stream"]`, no catalogs). It
 claims `movie`, `series` and `anime` with the id prefixes `tt`, `kitsu:`
 and, only when a TMDB key is available to read them, `tmdb:`.
 
+The unconfigured manifest (`/manifest.json`, or any without a YouTube key)
+cannot be used by accident: Stremio offers Configure instead of Install, and
+since Nuvio ignores that flag, it also claims a single id prefix no title
+has, so an app that installs it anyway never asks it about anything.
+
 ## Running locally
 
 ```bash
