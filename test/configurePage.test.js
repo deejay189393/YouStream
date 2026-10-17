@@ -112,3 +112,23 @@ test("a movies-only setup leaves series unticked", () => {
 test("says when the server has its own TMDB key", () => {
   expect(page(null, { serverTmdb: true })).toContain("This server already has a TMDB key");
 });
+
+describe("browserSource", () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { browserSource } = require("../src/configurePage");
+  const write = (text) => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "youstream-")), "module.js");
+    fs.writeFileSync(file, text);
+    return file;
+  };
+
+  test("is the module as written, without its exports line", () => {
+    expect(browserSource(write("function a() {}\nmodule.exports = { a };\n"))).toBe("function a() {}\n");
+  });
+
+  test("refuses a module that would end the page's script early", () => {
+    expect(() => browserSource(write('const x = "</script>";\nmodule.exports = { x };\n'))).toThrow("cannot be inlined in a page");
+  });
+});

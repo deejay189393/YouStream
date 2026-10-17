@@ -245,6 +245,79 @@ Age-restricted videos play only for a signed-in viewer, so they get no in-app
 row, only the external ones. Each row's `bingeGroup` names the way of
 watching and the channel, so next-episode autoplay stays on the same choice.
 
+## Stream name and description
+
+What each row says comes from two templates in AIOStreams' [custom formatter
+syntax](https://docs.aiostreams.viren070.me/reference/custom-formatter), the
+language PenguPlay uses too, so a template made for either works here. Pick a
+preset on the configure page (Advanced → Stream name and description) or
+write your own; the page previews it live, for a film and an episode, one row
+per way of watching you turned on.
+
+| Preset | Name | Description |
+|---|---|---|
+| **YouStream** (default) | `▶️ YouStream HD` | what it is, the video's title, its definition and length (and how far from the listed runtime), the channel with views and upload date, the language, how it plays |
+| **Compact** | `YouStream HD` | the video's title, then length, views and language |
+| **Tamtaro style** | `720P ⁽ʸᵗ⁾` / `〈Web-dl〉` | the look of Tamtaro's AIOStreams formatter, for YouStream rows that sit beside an AIOStreams list using it |
+| **Classic (Torrentio)** | `YouStream` / `720p` | the release name, then the numbers, then flags |
+
+The fields are YouTube's own, `{video.title}`, `{video.channel}`,
+`{video.official}`, `{video.definition}`, `{video.views}`,
+`{video.uploaded}`, `{video.length}`, `{video.offset}`, `{video.language}`,
+`{video.ageRestricted}`, `{video.id}`, `{video.url}`, and how the row plays,
+`{play.icon}` and `{play.label}`, beside AIOStreams' own: `{stream.*}`,
+`{metadata.*}`, `{addon.name}`, `{service.*}` and `{user.*}`. Every field
+AIOStreams documents exists, empty where YouTube has nothing for it (sizes,
+seeders, codecs), so a template written for AIOStreams renders rather than
+erring.
+
+### With AIOStreams
+
+Add YouStream to AIOStreams as a custom addon, with its install URL.
+AIOStreams reads what a stream is from `behaviorHints` before anything in its
+text (its docs: Addon protocol → Streams), so YouStream sends:
+
+| Hint | Example | What AIOStreams uses it for |
+|---|---|---|
+| `filename` | `Example Film (1968) HD WEB-DL English`, `Example Show (2019) S01E03 HD WEB-DL Hindi` | title, year, season and episode matching; resolution (HD reads as 720p, SD as 480p); quality (WEB-DL); language |
+| `duration` | `5709` (seconds) | the runtime |
+| `publishDate` | `2023-10-16T00:00:09Z` | the age |
+| `indexer` | `YouTube` | the source |
+
+The filename is built from the title the video was matched to, not from the
+video's own title. So AIOStreams' title matching (Tamtaro's template asks for
+an exact match), its strict year matching and its season and episode matching
+all pass, and a YouTube title's stray words cannot read as a resolution, a 3D
+format or a language. The year is the film's, or the year the show began:
+AIOStreams checks an episode's against the show's first year, the season's
+and the episode's, which also tells apart two shows of one name.
+
+There is no `videoSize`. The YouTube Data API gives a video's length and its
+definition, HD or SD, but never its file size or bitrate, and YouTube does not
+stream at fixed bitrates: the player adapts to the connection. A size made up
+from the length would be read as fact by AIOStreams' size and bitrate filters
+and sorting, while a stream without one passes those filters untouched.
+
+AIOStreams also reads a stream's text: debrid codes in the name ("RD", "TB",
+"EN"...), seeders after 👤 or 👥, a size such as "1.5 GB", and a language for
+every flag. The presets use none of these; values written into a name have
+any such code broken by an invisible word joiner; a YouTube title's flags,
+👤, 👥 and sizes are cleared before it is shown; and a language gets a flag
+only where AIOStreams reads that flag back as the same language (India's flag
+reads as Hindi, so Tamil, Telugu and the rest get none). The configure page
+warns about any you type into a template yourself.
+
+In AIOStreams an in-app row (`ytId`) is stream type `youtube`, and a
+YouTube-app or SmartTube row (`externalUrl`) is `external`. Tamtaro's
+template removes every `external` stream ("Info & Other Unwanted"), so with it
+only the in-app rows appear; to keep the others, turn on **Result Passthrough**
+for YouStream. Under that template an in-app row sorts in its "HD+" tier (720p,
+WEB-DL), scores +4 on the ranked expressions it pulls in (+5 for HD, −1 for no
+release group), and its SELect step keeps the first few of each resolution and
+quality, in YouStream's order, best first. AIOStreams writes its own name and
+description from what it parsed; to show YouStream's instead, turn on
+**Format Passthrough** for it.
+
 ## Quota
 
 A YouTube Data API key gets **10,000 units a day**. A search costs 100, so a
@@ -292,7 +365,10 @@ encodeURIComponent(JSON.stringify({
   exclude: ["trailer", "reaction", …],  // words that rule out a video's title
   excludeDescription: ["fan movie", …], // phrases that rule out its description
   movieQuery: "{title} {year} full movie {language}",
-  episodeQuery: "{title} season {season} episode {episode}"
+  episodeQuery: "{title} season {season} episode {episode}",
+  format: "youstream",                  // stream text preset: youstream, compact, tamtaro, classic
+  nameTemplate: "…",                    // or your own templates, in AIOStreams' formatter syntax
+  descriptionTemplate: "…"
 }))
 ```
 
@@ -434,7 +510,10 @@ project, `youstream`, with a service per release channel.
 | Service | Branch | Domain | Region | Variables |
 |---|---|---|---|---|
 | `youstream` | `main` | [youstream.up.railway.app](https://youstream.up.railway.app/configure) | Singapore | `PORT=3000`, `TVDB_API_KEY`, optionally `TMDB_API_KEY`, `REDIS_URL` |
-| `youstream-beta` | `beta` | `youstream-beta.up.railway.app` | US East | the same, plus `RELEASE_CHANNEL=beta` |
+| `youstream-beta` | `dev` | [youstream-beta.up.railway.app](https://youstream-beta.up.railway.app/configure) | Singapore | the same, plus `RELEASE_CHANNEL=beta` |
+
+Work happens on `dev`, which beta deploys on every push; `main` moves only
+when a release goes to prod. CI runs on both.
 
 For a cache that survives redeploys, add Railway's Redis to the project and
 set `REDIS_URL=${{Redis.REDIS_URL}}` on each service. Railway's private
@@ -505,6 +584,10 @@ The configure page and the terms page show the credits these terms ask for.
 - **Films split into parts** ("Part 1/2") are not stitched together. Each
   part is too short to match.
 - **MAL ids** (`mal:`) are not read yet. Kitsu ids are.
+- **Resolution is HD or SD, nothing finer.** YouTube's API says only which a
+  video is, so an HD video is labelled 720p for AIOStreams, the least HD
+  means, though in-app playback picks the best quality YouTube has, often
+  1080p or more.
 
 ## Legal
 

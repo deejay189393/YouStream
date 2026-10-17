@@ -1,6 +1,6 @@
 {
   "name": "youstream",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Stremio / Nuvio stream addon: full movies and episodes that are on YouTube, matched by runtime so trailers never show up.",
   "main": "server.js",
   "type": "commonjs",

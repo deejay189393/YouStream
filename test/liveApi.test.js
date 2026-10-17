@@ -114,9 +114,11 @@ describe("anime through Kitsu: Muse India's Spy x Family S1E3", () => {
   });
 
   test("the stream row names the language the title declares", () => {
-    const { matches, settings } = run("kitsu:45398:3");
+    const { found, matches, settings } = run("kitsu:45398:3");
     const hindiDub = matches.find((m) => m.video.title.endsWith("[Hindi dub]"));
     expect(hindiDub.video.language).toBe("en");
-    expect(toStreams([hindiDub], settings)[0].description).toContain("Hindi");
+    const [row] = toStreams([hindiDub], settings, found.title);
+    expect(row.description).toContain("Hindi");
+    expect(row.behaviorHints.filename).toMatch(/ Hindi$/);
   });
 });

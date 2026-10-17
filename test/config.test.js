@@ -7,6 +7,8 @@ const {
   parseMargin,
   formatMargin,
   cleanKey,
+  cleanFormatTemplate,
+  presetFor,
   DEFAULT_MARGINS,
   DEFAULT_EXCLUDE,
   DEFAULT_EXCLUDE_DESCRIPTION,
@@ -16,6 +18,7 @@ const {
   DEFAULT_MIN_VIEWS
 } = require("../src/config");
 const { PLAYBACK_VERSION } = require("../src/playback");
+const { PRESETS } = require("../src/streamFormat");
 
 afterEach(() => {
   delete process.env.TMDB_API_KEY;
@@ -90,7 +93,10 @@ describe("normalizeConfig", () => {
       exclude: DEFAULT_EXCLUDE,
       excludeDescription: DEFAULT_EXCLUDE_DESCRIPTION,
       movieQuery: DEFAULT_MOVIE_QUERY,
-      episodeQuery: DEFAULT_EPISODE_QUERY
+      episodeQuery: DEFAULT_EPISODE_QUERY,
+      format: "youstream",
+      nameTemplate: PRESETS.youstream.name,
+      descriptionTemplate: PRESETS.youstream.description
     });
   });
 
@@ -198,6 +204,59 @@ describe("normalizeConfig", () => {
 
   test("keeps an emptied exclusion list empty", () => {
     expect(normalizeConfig({ exclude: [] }).exclude).toEqual([]);
+  });
+});
+
+describe("stream text", () => {
+  test("a preset by name, the default when unknown", () => {
+    expect(normalizeConfig({ format: "tamtaro" })).toMatchObject({
+      format: "tamtaro",
+      nameTemplate: PRESETS.tamtaro.name,
+      descriptionTemplate: PRESETS.tamtaro.description
+    });
+    expect(normalizeConfig({ format: "nope" }).format).toBe("youstream");
+    expect(normalizeConfig({ format: 7 }).format).toBe("youstream");
+  });
+
+  test("the reader's own templates, tidied, over the preset", () => {
+    const own = normalizeConfig({ format: "compact", nameTemplate: " {addon.name}\r\nX\u0001 ", descriptionTemplate: "{video.title}\rY" });
+    expect(own).toMatchObject({ format: "custom", nameTemplate: "{addon.name}\nX", descriptionTemplate: "{video.title}\nY" });
+  });
+
+  test("an empty, too long or non-text template is the preset's", () => {
+    const n = normalizeConfig({ format: "compact", nameTemplate: "   ", descriptionTemplate: "x".repeat(1501) });
+    expect(n).toMatchObject({ format: "compact", nameTemplate: PRESETS.compact.name, descriptionTemplate: PRESETS.compact.description });
+    expect(normalizeConfig({ nameTemplate: ["x"] }).nameTemplate).toBe(PRESETS.youstream.name);
+    expect(normalizeConfig({ nameTemplate: "x".repeat(300) }).nameTemplate).toHaveLength(300);
+    expect(normalizeConfig({ nameTemplate: "x".repeat(301) }).nameTemplate).toBe(PRESETS.youstream.name);
+  });
+
+  test("templates that are a preset count as that preset", () => {
+    expect(normalizeConfig({ nameTemplate: PRESETS.classic.name, descriptionTemplate: PRESETS.classic.description }).format).toBe("classic");
+    expect(presetFor(PRESETS.compact.name, PRESETS.compact.description)).toBe("compact");
+    expect(presetFor(PRESETS.compact.name, PRESETS.classic.description)).toBeNull();
+  });
+
+  test("the link carries a preset by name, the reader's own templates in full, the default not at all", () => {
+    expect(decoded({ youtubeKey: "yt" }).format).toBeUndefined();
+    expect(decoded({ youtubeKey: "yt", format: "compact" }).format).toBe("compact");
+    expect(decoded({ youtubeKey: "yt", nameTemplate: PRESETS.tamtaro.name, descriptionTemplate: PRESETS.tamtaro.description })).toMatchObject({
+      format: "tamtaro"
+    });
+    const own = decoded({ youtubeKey: "yt", format: "compact", nameTemplate: "{addon.name}" });
+    expect(own).toMatchObject({ nameTemplate: "{addon.name}", descriptionTemplate: PRESETS.compact.description });
+    expect(own.format).toBeUndefined();
+    expect(decodeConfig(encodeConfig({ youtubeKey: "yt", nameTemplate: "{addon.name}" }))).toMatchObject({
+      format: "custom",
+      nameTemplate: "{addon.name}",
+      descriptionTemplate: PRESETS.youstream.description
+    });
+  });
+
+  test("cleanFormatTemplate", () => {
+    expect(cleanFormatTemplate(null, 10)).toBeNull();
+    expect(cleanFormatTemplate(" a\tb ", 10)).toBe("a\tb");
+    expect(cleanFormatTemplate("abc", 2)).toBeNull();
   });
 });
 

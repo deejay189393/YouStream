@@ -1,5 +1,14 @@
-const { DESCRIPTION, ADDON_NAME } = require("./manifest");
+const fs = require("fs");
+const { DESCRIPTION, ADDON_NAME, identity } = require("./manifest");
 const { orderedPlaybackOptions, PLAYBACK_VERSION } = require("./playback");
+const {
+  PRESETS,
+  DEFAULT_FORMAT,
+  FORMATTER_LANGUAGES,
+  MAX_NAME_TEMPLATE,
+  MAX_DESCRIPTION_TEMPLATE,
+  previewData
+} = require("./streamFormat");
 const { COUNTRIES, LANGUAGES } = require("./regions");
 const {
   normalizeConfig,
@@ -21,6 +30,61 @@ const REPO_URL = "https://github.com/deejay189393/YouStream";
 const YOUTUBE_KEY_URL = "https://console.cloud.google.com/apis/library/youtube.googleapis.com";
 const YOUTUBE_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials";
 const TMDB_KEY_URL = "https://www.themoviedb.org/settings/api";
+const FORMATTER_DOCS_URL = "https://docs.aiostreams.viren070.me/reference/custom-formatter";
+
+/**
+ * A module's code as a plain script for the page: the file as written,
+ * without its module.exports line. Read from disk rather than taken from
+ * the loaded function, whose text a coverage tool may have rewritten.
+ */
+function browserSource(file) {
+  const text = fs.readFileSync(require.resolve(file), "utf8").replace(/\nmodule\.exports = [^\n]*\n*$/, "\n");
+  if (/<\/script/i.test(text)) throw new Error(`${file} cannot be inlined in a page`);
+  return text;
+}
+const FORMATTER_SOURCE = browserSource("./formatter");
+const TEMPLATE_CHECK_SOURCE = browserSource("./templateCheck");
+
+/**
+ * The fields the configure page lists. Every field AIOStreams' formatter
+ * documents is accepted too; those YouTube has nothing for are empty.
+ */
+const FIELD_HELP = [
+  ["play.icon", "▶️ in the app, 📱 YouTube app, 📺 SmartTube"],
+  ["play.label", "Play in app, YouTube app or SmartTube"],
+  ["video.title", "The video's title on YouTube"],
+  ["video.channel", "The channel that uploaded it"],
+  ["video.official", "true for an upload by a YouTube content partner"],
+  ["video.definition", "HD or SD"],
+  ["video.views", "338K"],
+  ["video.uploaded", "The upload date, 2023-10-16; ::date('%-d %b %Y') gives 16 Oct 2023"],
+  ["video.length", "1h 35m 09s"],
+  ["video.offset", "How far from the listed runtime: −51s, +2m 10s or exact"],
+  ["video.language", "The language it is spoken in"],
+  ["video.ageRestricted", "true for a video YouTube restricts by age"],
+  ["video.id, video.url", "The video's id and link"],
+  ["stream.filename", "The release-style name AIOStreams parses: title, year, episode, HD, WEB-DL, language"],
+  ["stream.resolution", "720p for HD, 480p for SD: what AIOStreams reads"],
+  ["stream.quality", "WEB-DL"],
+  ["stream.duration", "The length in milliseconds; ::time('[%-Hh ]%-Mm %Ss') gives 1h 35m 09s"],
+  ["stream.languages", "The language as a list, also as languageEmojis, languageCodes and smallLanguageCodes"],
+  ["stream.seasonEpisode", "S01 and E03 for an episode; ::join('') gives S01E03"],
+  ["stream.type", "youtube for in-app rows, external for the others"],
+  ["stream.age", "How long ago it was uploaded: 365d"],
+  ["stream.message", "A note, such as that a video is age-restricted"],
+  ["metadata.title, metadata.year", "The film or show the stream was found for"],
+  ["metadata.episodeTitle", "The episode's own title"],
+  ["addon.name", identity().name]
+];
+
+function presetOptions(selected) {
+  return [
+    ...Object.entries(PRESETS).map(
+      ([id, preset]) => `<option value="${escapeHtml(id)}"${id === selected ? " selected" : ""}>${escapeHtml(preset.label)}</option>`
+    ),
+    `<option value="custom"${selected === "custom" ? " selected" : ""}>Custom</option>`
+  ].join("");
+}
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -277,6 +341,31 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   footer .credits a, footer .disclaimer a { display: inline; font-size: 12px; }
   footer .credits img { vertical-align: middle; margin-right: 4px; }
   footer .disclaimer a { text-decoration: underline; }
+  textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; min-height: 0; }
+  .format { margin-bottom: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+  .format .hint code, .fields-help code { color: var(--text); font-size: 11.5px; }
+  .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+  .preview-head .label-text { margin: 0; }
+  .preview-tabs { display: flex; gap: 6px; }
+  .preview-tabs button {
+    background: var(--field); border: 1px solid var(--border); color: var(--muted); border-radius: 7px;
+    padding: 4px 10px; font-size: 12px; cursor: pointer;
+  }
+  .preview-tabs button[aria-pressed="true"] { color: var(--text); border-color: var(--link); }
+  .preview { list-style: none; margin: 0 0 10px; padding: 0; }
+  .preview li {
+    display: flex; gap: 12px; background: #121318; border: 1px solid var(--border); border-radius: 9px;
+    padding: 10px 12px; margin-bottom: 6px;
+  }
+  .preview .p-name { flex: 0 0 32%; font-weight: 700; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .preview .p-desc { flex: 1 1 auto; min-width: 0; font-size: 12.5px; color: #d8dbe2; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+  @media (max-width: 480px) { .preview li { flex-direction: column; gap: 4px; } .preview .p-name { flex-basis: auto; } }
+  .format-warnings { list-style: none; padding: 0; margin: 0 0 10px; }
+  .format-warnings li { color: var(--warn); font-size: 12px; line-height: 1.5; margin-bottom: 4px; }
+  .fields-help summary { font-size: 12px; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--link); }
+  .fields-help table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+  .fields-help td { padding: 3px 8px 3px 0; vertical-align: top; color: var(--muted); line-height: 1.45; }
+  .fields-help td:first-child { white-space: nowrap; }
   .agree { margin: 18px 0 4px; font-size: 13px; color: var(--muted); }
   .agree a { color: var(--link); }
 </style>
@@ -395,6 +484,43 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     <div class="card">
       <details id="advanced">
         <summary>Advanced</summary>
+        <div class="format">
+          <span class="label-text">Stream name and description</span>
+          <p class="hint" style="margin:0 0 10px">
+            How each stream reads in your app. Templates use AIOStreams' formatter syntax, which PenguPlay uses too,
+            so one made for either works here: <code>{video.channel::upper}</code>,
+            <code>{video.official::istrue["✓"||""]}</code>, and <code>{? … ?}</code> for a part shown only when its
+            fields have values. <a href="${FORMATTER_DOCS_URL}" target="_blank" rel="noopener">The syntax</a>
+          </p>
+          <label class="field">
+            <span class="label-text">Preset</span>
+            <select id="format-preset">${presetOptions(s.format)}</select>
+          </label>
+          <label class="field">
+            <span class="label-text">Name</span>
+            <textarea id="name-template" class="code" rows="2" maxlength="${MAX_NAME_TEMPLATE}" spellcheck="false">${escapeHtml(s.nameTemplate)}</textarea>
+          </label>
+          <label class="field">
+            <span class="label-text">Description</span>
+            <textarea id="description-template" class="code" rows="8" maxlength="${MAX_DESCRIPTION_TEMPLATE}" spellcheck="false">${escapeHtml(s.descriptionTemplate)}</textarea>
+          </label>
+          <div class="preview-head">
+            <span class="label-text">Preview</span>
+            <div class="preview-tabs">
+              <button type="button" class="preview-tab" data-sample="film" aria-pressed="true">Film</button>
+              <button type="button" class="preview-tab" data-sample="episode" aria-pressed="false">Episode</button>
+            </div>
+          </div>
+          <ul id="format-preview" class="preview" aria-live="polite"></ul>
+          <ul id="format-warnings" class="format-warnings"></ul>
+          <details class="fields-help">
+            <summary>Fields</summary>
+            <table>${FIELD_HELP.map(([field, about]) => `<tr><td><code>{${escapeHtml(field)}}</code></td><td>${escapeHtml(about)}</td></tr>`).join("")}</table>
+            <p class="hint">Every field AIOStreams documents works too; those YouTube has nothing for, such as sizes and seeders, are empty.
+            AIOStreams itself reads each stream's resolution, quality, year, episode and language from the release name,
+            so its filters and sorting work the same whatever these templates say.</p>
+          </details>
+        </div>
         <label class="field">
           <span class="label-text">Movie search</span>
           <input type="text" id="movie-query" maxlength="${MAX_QUERY_LENGTH}" value="${escapeHtml(s.movieQuery)}" spellcheck="false" />
@@ -464,6 +590,16 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   </footer>
 </div>
 
+<script type="application/json" id="format-data">${jsonForScript({
+    presets: PRESETS,
+    defaultFormat: DEFAULT_FORMAT,
+    languages: FORMATTER_LANGUAGES,
+    maxName: MAX_NAME_TEMPLATE,
+    maxDescription: MAX_DESCRIPTION_TEMPLATE,
+    ...previewData(identity().name)
+  })}</script>
+<script>${FORMATTER_SOURCE}</script>
+<script>${TEMPLATE_CHECK_SOURCE}</script>
 <script>
   // NOTE: this script lives inside a JS template literal, which consumes
   // backslash escapes before the browser sees them. A regex or escape written
@@ -586,6 +722,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     if (delta < 0) pbList.insertBefore(row, rows[target]);
     else pbList.insertBefore(rows[target], row);
     refreshPbArrows();
+    renderPreview();
   }
   pbRows().forEach(function (row) {
     row.querySelector(".pb-up").addEventListener("click", function () { movePb(row, -1); });
@@ -600,6 +737,113 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       document.getElementById(id).value = DEFAULTS[id];
     });
   });
+
+  // The stream name and description: a preset or the reader's own
+  // templates, previewed live with the very formatter the server uses
+  // (formatter.js, inlined above), for each way of watching turned on.
+  var FORMAT = JSON.parse(document.getElementById("format-data").textContent);
+  var formatter = createFormatter({ languages: FORMAT.languages });
+  var presetSelect = document.getElementById("format-preset");
+  var nameInput = document.getElementById("name-template");
+  var descriptionInput = document.getElementById("description-template");
+  var previewList = document.getElementById("format-preview");
+  var formatWarnings = document.getElementById("format-warnings");
+  var previewSample = "film";
+
+  function matchingPreset(name, description) {
+    var ids = Object.keys(FORMAT.presets);
+    for (var i = 0; i < ids.length; i++) {
+      var preset = FORMAT.presets[ids[i]];
+      if (preset.name === name && preset.description === description) return ids[i];
+    }
+    return "";
+  }
+  // What the server will use: a blank template is the default preset's.
+  function templatesInUse() {
+    var fallback = FORMAT.presets[FORMAT.defaultFormat];
+    return {
+      name: nameInput.value.trim() || fallback.name,
+      description: descriptionInput.value.trim() || fallback.description
+    };
+  }
+  function previewScope(optionId) {
+    var base = FORMAT.samples[previewSample];
+    var scope = {};
+    Object.keys(base).forEach(function (key) { scope[key] = base[key]; });
+    var stream = {};
+    Object.keys(base.stream).forEach(function (key) { stream[key] = base.stream[key]; });
+    stream.type = optionId === "app" ? "youtube" : "external";
+    scope.stream = stream;
+    scope.play = FORMAT.play[optionId];
+    return scope;
+  }
+  function addLine(list, className, text) {
+    var item = document.createElement("li");
+    if (className) item.className = className;
+    item.textContent = text;
+    list.appendChild(item);
+    return item;
+  }
+  function renderPreview() {
+    var templates = templatesInUse();
+    var options = pbRows()
+      .filter(function (row) { return row.querySelector(".pb-on").checked; })
+      .map(function (row) { return row.getAttribute("data-option"); });
+    if (!options.length) options = ["app"];
+    var broken = false;
+    previewList.innerHTML = "";
+    options.forEach(function (optionId) {
+      var scope = previewScope(optionId);
+      var name = formatter.render(templates.name, scope) || scope.addon.name;
+      var description = formatter.render(templates.description, scope) || scope.video.title;
+      if ((name + description).indexOf("{unknown_") !== -1 || (name + description).indexOf("{cannot_") !== -1) broken = true;
+      var row = addLine(previewList, "", "");
+      var nameEl = document.createElement("div");
+      nameEl.className = "p-name";
+      nameEl.textContent = name;
+      var descriptionEl = document.createElement("div");
+      descriptionEl.className = "p-desc";
+      descriptionEl.textContent = description;
+      row.appendChild(nameEl);
+      row.appendChild(descriptionEl);
+    });
+    formatWarnings.innerHTML = "";
+    var warnings = templateWarnings(nameInput.value, descriptionInput.value);
+    if (broken) warnings.unshift("A field or modifier in these templates is unknown: the preview shows it in braces, as your app would.");
+    warnings.forEach(function (text) { addLine(formatWarnings, "", text); });
+  }
+  function syncPreset() {
+    var templates = templatesInUse();
+    presetSelect.value = matchingPreset(templates.name, templates.description) || "custom";
+  }
+  presetSelect.addEventListener("change", function () {
+    var preset = FORMAT.presets[presetSelect.value];
+    if (preset) {
+      nameInput.value = preset.name;
+      descriptionInput.value = preset.description;
+    }
+    renderPreview();
+  });
+  [nameInput, descriptionInput].forEach(function (input) {
+    input.addEventListener("input", function () {
+      syncPreset();
+      renderPreview();
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".preview-tab"), function (tab) {
+    tab.addEventListener("click", function () {
+      previewSample = tab.getAttribute("data-sample");
+      Array.prototype.forEach.call(document.querySelectorAll(".preview-tab"), function (other) {
+        other.setAttribute("aria-pressed", other === tab ? "true" : "false");
+      });
+      renderPreview();
+    });
+  });
+  pbRows().forEach(function (row) {
+    row.querySelector(".pb-on").addEventListener("change", renderPreview);
+  });
+  syncPreset();
+  renderPreview();
 
   // A new setup starts in the reader's own country, read from the browser's
   // language tag ("en-IN" is India). Reconfiguring keeps what was saved.
@@ -679,6 +923,18 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     }
     if (movieQuery !== DEFAULT_MOVIE_QUERY) config.movieQuery = movieQuery;
     if (episodeQuery !== DEFAULT_EPISODE_QUERY) config.episodeQuery = episodeQuery;
+
+    var templates = templatesInUse();
+    if (templates.name.length > FORMAT.maxName || templates.description.length > FORMAT.maxDescription) {
+      return "The stream name can be " + FORMAT.maxName + " characters long and the description " + FORMAT.maxDescription + ".";
+    }
+    var preset = matchingPreset(templates.name, templates.description);
+    if (!preset) {
+      config.nameTemplate = templates.name;
+      config.descriptionTemplate = templates.description;
+    } else if (preset !== FORMAT.defaultFormat) {
+      config.format = preset;
+    }
 
     var exclude = readList("exclude");
     if (exclude.join(",") !== DEFAULT_EXCLUDE.join(",")) config.exclude = exclude;
@@ -766,4 +1022,4 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
 </html>`;
 }
 
-module.exports = { renderConfigurePage, escapeHtml, jsonForScript, REPO_URL };
+module.exports = { renderConfigurePage, escapeHtml, jsonForScript, browserSource, REPO_URL, FORMATTER_DOCS_URL };

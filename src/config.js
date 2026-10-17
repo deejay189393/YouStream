@@ -1,5 +1,6 @@
 const { normalizePlayback, PLAYBACK_VERSION } = require("./playback");
 const { COUNTRY_SET, LANGUAGE_SET } = require("./regions");
+const { PRESETS, DEFAULT_FORMAT, MAX_NAME_TEMPLATE, MAX_DESCRIPTION_TEMPLATE } = require("./streamFormat");
 
 /**
  * The reader's settings travel in the addon URL as its first path segment,
@@ -29,6 +30,11 @@ const { COUNTRY_SET, LANGUAGE_SET } = require("./regions");
  *   excludeDescription [...] phrases that disqualify a video's description
  *   movieQuery      "{title} {year} full movie {language}"
  *   episodeQuery    "{title} season {season} episode {episode}"
+ *   format          "youstream"  the preset a stream's name and description
+ *                   come from: youstream, compact, tamtaro or classic
+ *   nameTemplate, descriptionTemplate   the reader's own, in AIOStreams'
+ *                   formatter syntax (streamFormat.js); only when they are
+ *                   no preset, which is then left out
  */
 
 /**
@@ -166,6 +172,25 @@ function cleanTemplate(raw, fallback) {
   return text.includes("{title}") ? text : fallback;
 }
 
+/**
+ * A stream text template as typed: line breaks kept, other control
+ * characters dropped. Too long, or empty, is no template at all.
+ */
+function cleanFormatTemplate(raw, max) {
+  if (typeof raw !== "string") return null;
+  const text = raw
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "")
+    .trim();
+  return text && text.length <= max ? text : null;
+}
+
+/** The preset a pair of templates is, or null when they are the reader's own. */
+function presetFor(nameTemplate, descriptionTemplate) {
+  const id = Object.keys(PRESETS).find((key) => PRESETS[key].name === nameTemplate && PRESETS[key].description === descriptionTemplate);
+  return id || null;
+}
+
 function cleanExclude(raw, defaults = DEFAULT_EXCLUDE) {
   if (!Array.isArray(raw)) return [...defaults];
   const seen = new Set();
@@ -203,6 +228,10 @@ function cleanMinViews(raw) {
 function normalizeConfig(config) {
   const c = config && typeof config === "object" && !Array.isArray(config) ? config : {};
   const margin = (name) => parseMargin(c[name]) || { ...DEFAULT_MARGINS[name] };
+  const preset = typeof c.format === "string" && Object.hasOwn(PRESETS, c.format) ? c.format : DEFAULT_FORMAT;
+  const nameTemplate = cleanFormatTemplate(c.nameTemplate, MAX_NAME_TEMPLATE) || PRESETS[preset].name;
+  const descriptionTemplate =
+    cleanFormatTemplate(c.descriptionTemplate, MAX_DESCRIPTION_TEMPLATE) || PRESETS[preset].description;
   return {
     youtubeKey: cleanKey(c.youtubeKey),
     tmdbKey: cleanKey(c.tmdbKey),
@@ -221,7 +250,11 @@ function normalizeConfig(config) {
     exclude: cleanExclude(c.exclude),
     excludeDescription: cleanExclude(c.excludeDescription, DEFAULT_EXCLUDE_DESCRIPTION),
     movieQuery: cleanTemplate(c.movieQuery, DEFAULT_MOVIE_QUERY),
-    episodeQuery: cleanTemplate(c.episodeQuery, DEFAULT_EPISODE_QUERY)
+    episodeQuery: cleanTemplate(c.episodeQuery, DEFAULT_EPISODE_QUERY),
+    // "custom" when the templates are the reader's own
+    format: presetFor(nameTemplate, descriptionTemplate) || "custom",
+    nameTemplate,
+    descriptionTemplate
   };
 }
 
@@ -248,6 +281,12 @@ function encodeConfig(config) {
   if (!sameList(n.excludeDescription, DEFAULT_EXCLUDE_DESCRIPTION)) out.excludeDescription = n.excludeDescription;
   if (n.movieQuery !== DEFAULT_MOVIE_QUERY) out.movieQuery = n.movieQuery;
   if (n.episodeQuery !== DEFAULT_EPISODE_QUERY) out.episodeQuery = n.episodeQuery;
+  if (n.format === "custom") {
+    out.nameTemplate = n.nameTemplate;
+    out.descriptionTemplate = n.descriptionTemplate;
+  } else if (n.format !== DEFAULT_FORMAT) {
+    out.format = n.format;
+  }
   return encodeURIComponent(JSON.stringify(out));
 }
 
@@ -296,6 +335,8 @@ module.exports = {
   parseMargin,
   formatMargin,
   cleanKey,
+  cleanFormatTemplate,
+  presetFor,
   MARGIN_UNITS,
   DEFAULT_MARGINS,
   DEFAULT_EXCLUDE,

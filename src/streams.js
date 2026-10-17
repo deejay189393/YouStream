@@ -1,6 +1,6 @@
-const { externalUrlFor, OPTIONS_BY_ID } = require("./playback");
-const { formatDuration, formatOffset, formatCount } = require("./text");
-const { languageName } = require("./regions");
+const { externalUrlFor } = require("./playback");
+const { streamScope, renderStreamText } = require("./streamFormat");
+const { identity } = require("./manifest");
 
 /**
  * Stream rows for the matched videos: for each video, best first, one row per
@@ -9,40 +9,34 @@ const { languageName } = require("./regions");
  * autoplay picks.
  *
  * The protocol draws the line that matters here: `ytId` plays in the app's
- * own player, `externalUrl` is handed to the device to open.
+ * own player, `externalUrl` is handed to the device to open. What each row
+ * says comes from the reader's templates (streamFormat.js).
  */
 
-const ADDON_NAME = "YouStream";
-const ICONS = { app: "▶️", youtube: "📱", smarttube: "📺" };
-
-function detailLine(match) {
+/**
+ * @param {string} optionId  app | youtube | smarttube
+ * @param {object} match     from matching.js
+ * @param {object} context   { title: what the stream was found for, settings }
+ */
+function buildStream(optionId, match, { title, settings }) {
   const { video } = match;
-  const parts = [`⏱ ${formatDuration(video.durationSeconds)}`];
-  if (match.offsetSeconds !== null && match.offsetSeconds !== undefined) parts[0] += ` (${formatOffset(match.offsetSeconds)})`;
-  const views = formatCount(video.views);
-  if (views) parts.push(`👁 ${views}`);
-  // The language matching settled on, which trusts what the title declares
-  // over YouTube's field.
-  const language = languageName(match.language !== undefined ? match.language : video.language);
-  if (language) parts.push(`🗣 ${language}`);
-  return parts.join("  ");
-}
-
-function buildStream(optionId, match) {
-  const { video } = match;
-  const option = OPTIONS_BY_ID.get(optionId);
-  const lines = [`${ICONS[optionId]} ${option.short}`, video.title, `📺 ${video.channelTitle || "YouTube"}`, detailLine(match)];
-  if (video.ageRestricted) lines.push("🔞 Age-restricted: opens in YouTube, where you are signed in");
-  const description = lines.join("\n");
+  const scope = streamScope({ optionId, match, title, settings, addonName: identity().name });
+  const { name, description } = renderStreamText(scope, settings);
 
   const stream = {
-    name: `${ADDON_NAME}\n${video.definition === "hd" ? "HD" : "SD"}`,
+    name,
     title: description,
     description,
     behaviorHints: {
       // Lets an app's next-episode autoplay pick the same way of watching
       // from the same channel, rather than whatever happens to rank first.
-      bingeGroup: `youstream-${optionId}${video.channelId ? `-${video.channelId}` : ""}`
+      bingeGroup: `youstream-${optionId}${video.channelId ? `-${video.channelId}` : ""}`,
+      // Read by AIOStreams before anything in the text; Stremio passes the
+      // filename to subtitle addons and ignores the rest.
+      filename: scope.stream.filename,
+      duration: video.durationSeconds,
+      ...(video.publishedAt ? { publishDate: video.publishedAt } : {}),
+      indexer: "YouTube"
     }
   };
 
@@ -65,8 +59,8 @@ function optionsFor(match, playback) {
   return external.length ? external : ["youtube"];
 }
 
-function toStreams(matches, settings) {
-  return matches.flatMap((match) => optionsFor(match, settings.playback).map((id) => buildStream(id, match)));
+function toStreams(matches, settings, title) {
+  return matches.flatMap((match) => optionsFor(match, settings.playback).map((id) => buildStream(id, match, { title, settings })));
 }
 
-module.exports = { toStreams, buildStream, optionsFor, detailLine, ADDON_NAME };
+module.exports = { toStreams, buildStream, optionsFor };

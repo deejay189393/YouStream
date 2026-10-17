@@ -61,7 +61,7 @@ async function handleStream({ id, config }) {
   const result = await findVideos(id, settings);
   logResult(id, result);
 
-  const streams = result.status === "ok" ? toStreams(result.matches, settings) : [];
+  const streams = result.status === "ok" ? toStreams(result.matches, settings, result.title) : [];
   return { streams, cacheMaxAge: maxAgeFor(result, streams) };
 }
 

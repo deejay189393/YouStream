@@ -395,3 +395,149 @@ describe("agreeing to the terms", () => {
     expect(loadPage({ existing: { youtubeKey: "AIzaKEY" }, agreed: false }).$("#agree").checked).toBe(true);
   });
 });
+
+describe("the stream name and description", () => {
+  const { PRESETS } = require("../src/streamFormat");
+  const fire = (p, id, type) => p.$(`#${id}`).dispatchEvent(new p.dom.window.Event(type, { bubbles: true }));
+  const rows = (p) =>
+    [...p.document.querySelectorAll("#format-preview li")].map((li) => ({
+      name: li.querySelector(".p-name").textContent,
+      description: li.querySelector(".p-desc").textContent
+    }));
+  const warnings = (p) => [...p.document.querySelectorAll("#format-warnings li")].map((li) => li.textContent);
+
+  test("starts on the default preset, previewing one row per way of watching", () => {
+    const p = loadPage();
+    expect(p.$("#format-preset").value).toBe("youstream");
+    expect(p.$("#name-template").value).toBe(PRESETS.youstream.name);
+    expect(p.$("#description-template").value).toBe(PRESETS.youstream.description);
+    const preview = rows(p);
+    expect(preview.map((r) => r.name)).toEqual(["▶️ YouStream HD", "📱 YouStream HD"]);
+    expect(preview[0].description.split("\n")[0]).toBe("🍿 Example Film (1968)");
+    expect(preview[1].description.split("\n").pop()).toBe("📱 YouTube app");
+    expect(warnings(p)).toEqual([]);
+    expect(p.errors).toEqual([]);
+  });
+
+  test("a preset fills both templates, and the link names it", () => {
+    const p = loadPage();
+    p.set("format-preset", "tamtaro");
+    fire(p, "format-preset", "change");
+    expect(p.$("#name-template").value).toBe(PRESETS.tamtaro.name);
+    expect(rows(p)[0].name).toBe("720P ⁽ʸᵗ⁾\n  〈Web-dl〉");
+    expect(rows(p)[1].name).toBe("720P ⁽ᵉˣᵗ⁾\n  〈Web-dl〉");
+    p.set("youtube-key", "k");
+    p.submit();
+    expect(p.rawGenerated()).toMatchObject({ format: "tamtaro" });
+    expect(p.rawGenerated().nameTemplate).toBeUndefined();
+    expect(p.generated()).toMatchObject({ format: "tamtaro", nameTemplate: PRESETS.tamtaro.name });
+  });
+
+  test("choosing Custom keeps the templates as they are", () => {
+    const p = loadPage();
+    p.set("format-preset", "custom");
+    fire(p, "format-preset", "change");
+    expect(p.$("#name-template").value).toBe(PRESETS.youstream.name);
+  });
+
+  test("an edited template is the reader's own, previewed as typed, and the link carries both", () => {
+    const p = loadPage();
+    p.set("name-template", "{addon.name} {video.channel::upper}");
+    fire(p, "name-template", "input");
+    expect(p.$("#format-preset").value).toBe("custom");
+    expect(rows(p)[0].name).toBe("YouStream CLASSIC FILMS");
+    p.set("youtube-key", "k");
+    p.submit();
+    expect(p.rawGenerated()).toMatchObject({
+      nameTemplate: "{addon.name} {video.channel::upper}",
+      descriptionTemplate: PRESETS.youstream.description
+    });
+    expect(p.rawGenerated().format).toBeUndefined();
+    expect(p.generated()).toMatchObject({ format: "custom", nameTemplate: "{addon.name} {video.channel::upper}" });
+  });
+
+  test("templates edited back into a preset's are that preset again, and blank ones are the default", () => {
+    const p = loadPage();
+    p.set("name-template", PRESETS.compact.name);
+    p.set("description-template", PRESETS.compact.description);
+    fire(p, "description-template", "input");
+    expect(p.$("#format-preset").value).toBe("compact");
+    p.set("name-template", " ");
+    p.set("description-template", "");
+    fire(p, "name-template", "input");
+    expect(p.$("#format-preset").value).toBe("youstream");
+    expect(rows(p)[0].name).toBe("▶️ YouStream HD");
+    p.set("youtube-key", "k");
+    p.submit();
+    expect(p.rawGenerated()).toEqual({ youtubeKey: "k", playback: ["app", "youtube"], playbackVersion: 1, region: "US" });
+  });
+
+  test("the episode tab previews an episode", () => {
+    const p = loadPage();
+    p.click('.preview-tab[data-sample="episode"]');
+    expect(p.$('.preview-tab[data-sample="episode"]').getAttribute("aria-pressed")).toBe("true");
+    expect(p.$('.preview-tab[data-sample="film"]').getAttribute("aria-pressed")).toBe("false");
+    expect(rows(p)[0].description.split("\n")[0]).toBe("📡 Example Show (2019) • S01E03 • The Exam");
+  });
+
+  test("the preview follows the ways of watching: switched off, moved, or none at all", () => {
+    const p = loadPage();
+    const option = (id) => p.$(`.pb-option[data-option="${id}"]`);
+    option("smarttube").querySelector(".pb-on").checked = true;
+    option("smarttube").querySelector(".pb-on").dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
+    expect(rows(p).map((r) => r.name)).toEqual(["▶️ YouStream HD", "📱 YouStream HD", "📺 YouStream HD"]);
+    p.click(option("smarttube").querySelector(".pb-up"));
+    expect(rows(p).map((r) => r.name)).toEqual(["▶️ YouStream HD", "📺 YouStream HD", "📱 YouStream HD"]);
+    ["app", "youtube", "smarttube"].forEach((id) => {
+      option(id).querySelector(".pb-on").checked = false;
+      option(id).querySelector(".pb-on").dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
+    });
+    expect(rows(p).map((r) => r.name)).toEqual(["▶️ YouStream HD"]);
+  });
+
+  test("what AIOStreams would misread is pointed out, and so is an unknown field", () => {
+    const p = loadPage();
+    p.set("name-template", "YouStream EN");
+    p.set("description-template", "👤 {stream.foo}");
+    fire(p, "description-template", "input");
+    expect(rows(p)[0].description).toBe("👤 {unknown_propertyName(stream.foo)}");
+    expect(warnings(p)).toEqual([
+      "A field or modifier in these templates is unknown: the preview shows it in braces, as your app would.",
+      "AIOStreams reads “EN” in a stream's name as a debrid service, and would take these YouTube rows for debrid streams.",
+      "AIOStreams reads a number after 👤 or 👥 in the description as torrent seeders."
+    ]);
+    p.set("description-template", '{video.title["a"||"b"]}');
+    fire(p, "description-template", "input");
+    expect(warnings(p)[0]).toMatch(/unknown/);
+  });
+
+  test("a template longer than the link can carry is refused", () => {
+    const p = loadPage();
+    p.set("youtube-key", "k");
+    p.set("name-template", "x".repeat(301));
+    p.submit();
+    expect(p.error()).toBe("The stream name can be 300 characters long and the description 1500.");
+    p.set("name-template", "x");
+    p.set("description-template", "y".repeat(1501));
+    p.submit();
+    expect(p.error()).toBe("The stream name can be 300 characters long and the description 1500.");
+  });
+
+  test("reconfiguring shows the saved templates, the reader's own or a preset", () => {
+    const own = loadPage({ existing: normalizeConfig({ youtubeKey: "k", nameTemplate: "N <b>", descriptionTemplate: "D & {video.title}" }) });
+    expect(own.$("#format-preset").value).toBe("custom");
+    expect(own.$("#name-template").value).toBe("N <b>");
+    expect(own.$("#description-template").value).toBe("D & {video.title}");
+    expect(rows(own)[0]).toEqual({ name: "N <b>", description: "D & Example Film (1968) | Full Movie | Restored" });
+    const preset = loadPage({ existing: normalizeConfig({ youtubeKey: "k", format: "classic" }) });
+    expect(preset.$("#format-preset").value).toBe("classic");
+    expect(rows(preset)[0].name).toBe("YouStream\n720p");
+  });
+
+  test("the fields are listed, with the syntax a link away", () => {
+    const p = loadPage();
+    const fields = [...p.document.querySelectorAll(".fields-help code")].map((c) => c.textContent);
+    expect(fields).toEqual(expect.arrayContaining(["{video.title}", "{stream.filename}", "{play.icon}", "{addon.name}"]));
+    expect(p.$(".format a").href).toBe("https://docs.aiostreams.viren070.me/reference/custom-formatter");
+  });
+});
