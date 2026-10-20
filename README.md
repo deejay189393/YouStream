@@ -17,6 +17,12 @@ It is built to be **wrong as rarely as possible**: across 79 titles and about
 none is the wrong content (see [Measured, not guessed](#measured-not-guessed)).
 When it cannot show a video is the title you asked for, it offers nothing.
 
+It also brings **YouTube itself** into the app: a YouTube row in the app's
+search, and your own catalogs on its home screen (searches, channels,
+playlists and Trending), each video with real metadata, playable the same
+ways, and saveable to your library (see
+[YouTube in your app](#youtube-in-your-app-search-catalogs-and-your-library)).
+
 It only ever returns YouTube video ids and YouTube links. Nothing is
 downloaded, proxied or re-hosted.
 
@@ -318,11 +324,147 @@ quality, in YouStream's order, best first. AIOStreams writes its own name and
 description from what it parsed; to show YouStream's instead, turn on
 **Format Passthrough** for it.
 
+## YouTube in your app: search, catalogs and your library
+
+Everything here is YouTube used as YouTube: what you search, ranked the way
+YouTube ranks it, and rows of the searches, channels, playlists and charts
+you choose.
+
+### The type `YouTube`
+
+Every video YouStream lists is an item of its own type, **`YouTube`**,
+spelled exactly so, with the id `youstream:<video id>`. A video is not a film
+or an episode, so it gets a type of its own. In Nuvio's library, pick
+**YouTube** in the type list to see every video you saved. The `youstream:`
+prefix is claimed by no other addon, so the app asks YouStream, and only
+YouStream, about these ids, however long after they were saved.
+
+The manifest declares this per resource. Metadata is claimed only for type
+`YouTube` and `youstream:` ids, and streams for those and for films and
+shows. Metadata addons are never asked about a video, and YouStream is never
+asked about a film. Nuvio and Stremio both route requests by these
+per-resource types and prefixes. Nuvio matches the type exactly, case
+included.
+
+### Search
+
+The app's search gets one row of YouTube results, named after the addon
+(**YouStream**). It is on for a new setup. An addon installed before search
+existed keeps working as it did, with search off, until you switch it on
+under Configure. It is live: each new search asks YouTube, ranked the way
+YouTube ranks it unless you choose newest, most viewed or top rated. It can
+be kept to under 4 minutes, 4 to 20, or over 20. **SafeSearch** is YouTube's
+moderate by default, or strict, or off. Your country and audio language are
+passed as ranking hints, not filters, so a search finds what YouTube finds.
+
+A search costs **100 of your 10,000 daily units**, and Nuvio searches as you
+type: 350 ms after each keystroke, from the second letter, and on a TV remote
+every letter takes longer than that. Typing a title would spend a search per
+letter. So YouStream:
+
+- skips anything under **3 characters** (one is enough in Chinese, Japanese
+  or Korean, which write a word in a character or two), though it notes that
+  you are typing;
+- waits **one second** for typing to settle, and longer while you are
+  plainly still typing (your last search, under five seconds earlier, was
+  the start of this one, or this the start of it): the slowest gap between
+  your letters so far and half as much again, **five seconds** at most. A
+  newer, different search from you in that time drops the one waiting;
+- drops a search the app has already abandoned while it waited;
+- makes a search sent twice at once only once.
+
+So typing a title costs one search, on a phone or a letter at a time on a TV
+remote, unless you stop mid-word for longer than that. Replaying Nuvio's live
+search, "interstellar" typed at a steady 1 to 3.5 seconds a letter cost one
+search every time. With each letter's pace drawn at random from 1 to 4
+seconds, a harsher test than real typing, it averaged 1.2.
+
+Results are kept **two minutes**, so going back or scrolling on costs nothing,
+and ten more as a fallback. What you search is not logged.
+
+### Catalogs
+
+Rows on the home screen, in your order, up to 20:
+
+| Kind | Add it with | Lists | One page costs |
+|---|---|---|---|
+| Search | any text | YouTube's results, by relevance or newest, most viewed or top rated; length and upload date optional | 101 units |
+| Channel | an `@handle`, a channel link or a `UC…` id | its videos without Shorts, or its Shorts, its live streams, or everything; newest or most viewed first | 2 units |
+| Playlist | a playlist link (also a watch link with `list=`) or a `PL…` id | the playlist, in its order | 2 units |
+| Trending | a chip | YouTube's most popular in your country, all or one category (Music, Gaming, Film & Animation, Sports, News…) | 1 unit |
+
+A new setup starts with **no rows**. Add a search, a channel, a playlist or
+a Trending row, choose how its videos are ordered, and arrange the rows with
+the arrows. A search orders by relevance, newest, most viewed or top rated,
+and a channel by newest or most viewed. A playlist keeps its own order and
+Trending is YouTube's ranking, so those two have no choice to make.
+
+A channel row leaves Shorts out exactly, not by guessing from length.
+YouTube keeps every channel's long-form uploads, Shorts and live streams as
+playlists of their own (`UULF`, `UUSH` and `UULV` in place of the channel
+id's `UC`). Beside each it keeps the same list most viewed first, its top
+200 (`UULP`, `UUPS`, `UUPV`, and `PU` for everything). YouStream reads
+those, so either order costs the same. They are not in YouTube's
+documentation; should YouTube stop keeping one, its row comes back empty
+rather than failing. A pasted link is looked up once, at 1 unit, on the
+configure page (`POST /api/youtube-source`). An old `/c/` link, a single
+video, or a mix YouTube makes per viewer is explained rather than added.
+
+**Refresh.** A row's results are kept for **two hours** by default and you
+can choose any interval from 30 minutes up, in minutes, hours or days, with
+no maximum. YouTube's terms let a server keep its data 30 days at most, so
+anything longer refreshes then. A row only refreshes when the app shows it
+after that long. The configure page works out what your search rows could
+cost if shown all day: two of them every 30 minutes come to 96 of your 100
+daily searches. Channels, playlists and Trending cost almost nothing.
+
+The cache is **per reader**, filed under a one-way fingerprint of your key,
+never the key itself. Past its interval, a row is still answered from it
+when YouTube cannot be asked, such as a spent quota or an outage.
+
+**Pages.** A page is 50 videos, one page of YouTube's, and a row goes 5
+pages deep (250 videos). The steps are declared (`skip` options 0 to 200),
+because the protocol's default page is 100 and a shorter page with no
+declared step reads as the end. Nuvio asks for the next page at the count it
+already has, and Stremio at the declared steps. `skip` counts the videos
+actually offered, which gives both apps the same unbroken list. Each answer
+stays within one page of YouTube's, so it costs at most one call.
+
+**Left out:** premieres still to air, videos blocked in your country, videos
+this server was asked to block (`BLOCKED_VIDEOS`, `BLOCKED_CHANNELS`), and
+non-embeddable videos when you asked for embeddable only.
+
+### Metadata and streams
+
+A video's page has its title, its whole description, who uploaded it (✓ for
+a YouTube content partner) and how widely it has been seen, the upload date,
+the length, its category and its uploader's tags, a link to the channel, and
+16:9 artwork. Tags are cleaned the way Newsio cleans publishers' keywords:
+- generic words, the channel's own name, handles, hashtags and slug families
+  are dropped;
+- rewordings of one phrase are kept once;
+- the result is capped at six.
+
+Every video a row lists is also kept by id for everyone for a day, so opening
+one costs nothing. One opened from the library a month later costs one unit.
+A video YouTube no longer has answers **404**, which Nuvio takes as final;
+YouTube failing to answer is an error, which the app asks about again.
+
+Its streams are the ways to watch you chose, written by your stream name and
+description templates. A YouTube video has no film or show behind it, so the
+presets leave out the line that names one. A live stream shows 🔴 Live where
+its length would be. The configure page previews this on its **YouTube
+video** tab.
+
 ## Quota
 
 A YouTube Data API key gets **10,000 units a day**. A search costs 100, so a
-key can **search 100 times a day**. Enrichment is 1 unit. YouStream spends
-**one search per title looked up**:
+key can **search 100 times a day**. Enrichment is 1 unit. Browsing YouTube
+spends from the same allowance (see
+[YouTube in your app](#youtube-in-your-app-search-catalogs-and-your-library)):
+a search, typed or as a row, is one of those 100 searches; a channel,
+playlist or Trending row is 1 or 2 units. For films and episodes YouStream
+spends **one search per title looked up**:
 
 - Results are cached and **shared by everyone on the server** (see
   [Caching](#caching)). The same query returns the same videos whoever asks,
@@ -368,9 +510,29 @@ encodeURIComponent(JSON.stringify({
   episodeQuery: "{title} season {season} episode {episode}",
   format: "youstream",                  // stream text preset: youstream, compact, tamtaro, classic
   nameTemplate: "…",                    // or your own templates, in AIOStreams' formatter syntax
-  descriptionTemplate: "…"
+  descriptionTemplate: "…",
+  search: true,                         // the app's search searches YouTube too (absent: off)
+  searchSort: "relevance",              // YouTube's ranking; or date, viewCount, rating
+  searchLength: "any",                  // or short (under 4 min), medium, long (over 20 min)
+  safeSearch: "moderate",               // YouTube's default; or strict, none
+  catalogs: [                           // rows on the home screen, in order, up to 20
+    { q: "lofi hip hop", sort: "date", length: "long", within: "week" },
+    { channel: "UC…", name: "Marques Brownlee", show: "shorts", sort: "viewCount" },
+                                        // show: videos (default), shorts, live, all; sort: date (default), viewCount
+    { playlist: "PL…", name: "Lectures" },
+    { trending: "music" }               // all, music, gaming, film, sports, news, …
+  ],
+  catalogRefresh: "2h"                  // "90m", "6h", "1d": at least 30 minutes
 }))
 ```
+
+`types: []` turns films and shows off, for YouStream as YouTube alone.
+
+**Editing your setup.** The Configure button on an installed addon opens
+`/<your config>/configure` with every setting filled in as saved: your
+rows in their order, each with its choices. Save without changing anything
+and the link is the same, character for character. The tests hold this for
+links built by earlier versions of the page too.
 
 Search templates take `{title} {year} {season} {episode} {s00e00}
 {episodeTitle} {absolute} {language}`. `{language}` is your audio language by
@@ -409,17 +571,26 @@ https://<host>/<your config>/explain/series/<imdb id>:<season>:<episode>.json
 | `GET /:config/configure` | Re-configuration, pre-filled |
 | `GET /manifest.json` | Unconfigured manifest (configuration required) |
 | `GET /:config/manifest.json` | Your manifest |
-| `GET /:config/stream/:type/:id.json` | Streams, through the official `stremio-addon-sdk` router |
+| `GET /:config/catalog/YouTube/:id/:extra?.json` | Your catalogs and the search row (`search=…`, `skip=…`) |
+| `GET /:config/meta/YouTube/youstream:<video id>.json` | A YouTube video's details; 404 when it is gone |
+| `GET /:config/stream/:type/:id.json` | Streams for films, episodes and YouTube videos |
 | `GET /:config/explain/:type/:id.json` | The working behind one lookup |
 | `POST /api/check-keys` | Key check for the configure page |
+| `POST /api/youtube-source` | Looks up a pasted channel or playlist for the configure page (1 unit) |
 | `GET /terms` | Terms of use and privacy policy |
 | `GET /health` | Health check used by Railway; also names the cache store |
 | `GET /admin/cache` | What the cache holds (only with `CACHE_ADMIN_TOKEN`) |
-| `DELETE /admin/cache/:namespace` | Empty `search`, `metadata`, `cooldown` or `all` (only with `CACHE_ADMIN_TOKEN`) |
+| `DELETE /admin/cache/:namespace` | Empty `search`, `metadata`, `cooldown`, `browse`, `video` or `all` (only with `CACHE_ADMIN_TOKEN`) |
 
-The manifest is stream-only (`resources: ["stream"]`, no catalogs). It
-claims `movie`, `series` and `anime` with the id prefixes `tt`, `kitsu:`
-and, only when a TMDB key is available to read them, `tmdb:`.
+Catalogs, metadata and streams go through the official `stremio-addon-sdk`
+router. The manifest claims, per resource:
+
+- streams for `movie`, `series` and `anime`, with the id prefixes `tt`,
+  `kitsu:` and, only when a TMDB key is available to read them, `tmdb:`;
+- metadata and streams for `YouTube`, with `youstream:`.
+
+Its catalogs are yours, then the search row. A catalog id must be in your
+own config to answer, so the addon is no open proxy for YouTube searches.
 
 The unconfigured manifest (`/manifest.json`, or any without a YouTube key)
 cannot be used by accident: Stremio offers Configure instead of Install, and
@@ -483,6 +654,9 @@ redeploys, one instance.
 | A search | 1 day | then searched again, so new uploads appear and taken-down ones go |
 | A search for a recent release | 3 hours | anything released in the last 30 days, or not yet: an upload that follows a premiere is found the same day |
 | Metadata | 3 days | titles, runtimes and credits rarely change |
+| A YouTube catalog's page | your refresh interval, 2 hours by default | per reader, under a fingerprint of the key |
+| A YouTube search's page | 2 minutes, then 10 more for outages only | per reader |
+| A YouTube video's details | 1 day (the search lifetime) | shared: every video a row lists, and any opened by id |
 | Kept past that, for outages | 7 days | answered with **only** when the service it came from fails (a spent quota, an outage): yesterday's results beat none |
 | A key with its quota spent | until the quota resets, an hour at most | |
 
@@ -588,6 +762,13 @@ The configure page and the terms page show the credits these terms ask for.
   video is, so an HD video is labelled 720p for AIOStreams, the least HD
   means, though in-app playback picks the best quality YouTube has, often
   1080p or more.
+- **YouTube search here is not your YouTube.** With an API key, search is
+  YouTube's ranking for anyone, not personalised. It has no subscriptions,
+  history or recommendations, which need you to sign in with Google.
+  Channel catalogs are the way to follow channels.
+- **Shorts can be left out of a channel exactly, not of a search.** The API
+  has no Shorts filter. A search row's length filter (4 minutes and over)
+  keeps nearly all of them out.
 
 ## Legal
 

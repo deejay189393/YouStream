@@ -126,10 +126,11 @@ class Namespace {
     }
   }
 
-  async set(id, value, freshMs = this.freshMs(cacheSettings())) {
+  /** `staleMs` overrides the namespace's for one entry kept a shorter while. */
+  async set(id, value, freshMs = this.freshMs(cacheSettings()), staleFor = this.staleMs(cacheSettings(), freshMs)) {
     if (!(freshMs > 0)) return;
     const now = Date.now();
-    const staleMs = Math.max(0, this.staleMs(cacheSettings(), freshMs));
+    const staleMs = Math.max(0, staleFor);
     try {
       await current().set(this.keyOf(id), JSON.stringify({ f: now + freshMs, v: value }), now + freshMs + staleMs);
     } catch (err) {
@@ -173,7 +174,36 @@ const keyCooldown = new Namespace("cooldown", 1, {
   staleMs: () => 0
 });
 
-const NAMESPACES = { search: searchCache, metadata: metadataCache, cooldown: keyCooldown };
+/**
+ * A page of one reader's YouTube catalog or search, by a fingerprint of
+ * their key, what the page lists and which page it is. Kept apart per
+ * reader and for as long as that reader chose (their refresh interval, or
+ * a couple of minutes for a search), then kept a while longer only to
+ * answer with when YouTube cannot be asked. Version 1 is browse.js's page
+ * shape.
+ */
+const browseCache = new Namespace("browse", 1, {
+  freshMs: () => 2 * 60 * 60 * 1000,
+  staleMs: (s, freshMs) => Math.min(s.staleMs, MAX_YOUTUBE_DATA_MS - freshMs)
+});
+
+/**
+ * One video's details by id, shared by everyone on this server, for the
+ * metadata and streams of a video opened from a catalog, from search or
+ * from an app's library. Version 1 is items.toItem's shape.
+ */
+const videoCache = new Namespace("video", 1, {
+  freshMs: (s) => s.searchMs,
+  staleMs: (s, freshMs) => Math.min(s.staleMs, MAX_YOUTUBE_DATA_MS - freshMs)
+});
+
+const NAMESPACES = {
+  search: searchCache,
+  metadata: metadataCache,
+  cooldown: keyCooldown,
+  browse: browseCache,
+  video: videoCache
+};
 
 /**
  * Whether a film or episode came out recently enough that new uploads of it
@@ -215,6 +245,8 @@ module.exports = {
   searchCache,
   metadataCache,
   keyCooldown,
+  browseCache,
+  videoCache,
   NAMESPACES,
   Namespace,
   isNewRelease,

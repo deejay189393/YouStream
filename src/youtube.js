@@ -162,6 +162,38 @@ function quotaSpent() {
   return err;
 }
 
+/**
+ * Runs calls with a reader's key, unless that key is known to have spent
+ * today's quota, and remembers when it has -- so the next request does not
+ * spend a round trip learning it again.
+ */
+async function withKey(apiKey, run) {
+  if (await keyCooldown.get(keyId(apiKey))) throw quotaSpent();
+  try {
+    return await run();
+  } catch (err) {
+    if (err.kind === "quota") await keyCooldown.set(keyId(apiKey), true, quotaCooldownMs());
+    throw err;
+  }
+}
+
+/** Every video's details at once, which is what `videos.list` charges one unit for. */
+const VIDEO_PARTS = "snippet,contentDetails,statistics,status";
+
+const idsOf = (items, pick) =>
+  (Array.isArray(items) ? items : []).map((item) => item && pick(item)).filter((id) => typeof id === "string" && id);
+
+/**
+ * Details for up to fifty videos, in the order asked for. A video that has
+ * gone since it was listed -- deleted, made private -- is left out.
+ */
+async function videosById(apiKey, ids) {
+  if (!ids.length) return [];
+  const details = await call("videos", { key: apiKey, part: VIDEO_PARTS, id: ids.join(","), maxResults: MAX_RESULTS });
+  const byId = new Map((Array.isArray(details.items) ? details.items : []).map((v) => [v.id, v]));
+  return ids.filter((id) => byId.has(id)).map((id) => byId.get(id));
+}
+
 async function fetchVideos({ apiKey, q, regionCode, relevanceLanguage, videoDuration, embeddableOnly }) {
   const data = await call("search", {
     key: apiKey,
@@ -174,41 +206,97 @@ async function fetchVideos({ apiKey, q, regionCode, relevanceLanguage, videoDura
     videoDuration,
     videoEmbeddable: embeddableOnly ? "true" : undefined
   });
-  const ids = (Array.isArray(data.items) ? data.items : [])
-    .map((item) => item && item.id && item.id.videoId)
-    .filter((id) => typeof id === "string" && id);
-  if (!ids.length) return [];
-  const details = await call("videos", {
-    key: apiKey,
-    part: "snippet,contentDetails,statistics,status",
-    id: ids.join(","),
-    maxResults: MAX_RESULTS
-  });
-  const byId = new Map((Array.isArray(details.items) ? details.items : []).map((v) => [v.id, v]));
-  // In the search's order, which is YouTube's own relevance ranking; a video
-  // the search found but that has since gone is skipped.
-  return ids.filter((id) => byId.has(id)).map((id) => toVideo(byId.get(id)));
+  // In the search's order, which is YouTube's own relevance ranking.
+  const details = await videosById(apiKey, idsOf(data.items, (item) => item.id && item.id.videoId));
+  return details.map(toVideo);
 }
 
 async function lookup(cacheKey, params) {
   const hit = await searchCache.get(cacheKey);
   if (hit && hit.fresh) return { videos: hit.value, cached: true };
-  // Past its lifetime, a cached search is still better than nothing when
-  // YouTube cannot be asked: a spent quota, an outage.
-  const stale = (err) => {
-    if (!hit) throw err;
-    return { videos: hit.value, cached: true, stale: err.kind };
-  };
-
-  if (await keyCooldown.get(keyId(params.apiKey))) return stale(quotaSpent());
   try {
-    const videos = await fetchVideos(params);
+    const videos = await withKey(params.apiKey, () => fetchVideos(params));
     await searchCache.set(cacheKey, videos, params.freshMs);
     return { videos, cached: false };
   } catch (err) {
-    if (err.kind === "quota") await keyCooldown.set(keyId(params.apiKey), true, quotaCooldownMs());
-    return stale(err);
+    // Past its lifetime, a cached search is still better than nothing when
+    // YouTube cannot be asked: a spent quota, an outage.
+    if (!hit) throw err;
+    return { videos: hit.value, cached: true, stale: err.kind };
   }
+}
+
+/**
+ * One page of a search for browsing: the ids, in YouTube's order, and the
+ * token for the page after. `search.list` costs 100 units whatever it
+ * returns, so it only says which videos; `videosById` says the rest.
+ *
+ * @param {object} p
+ * @param {string} [p.order]           relevance (YouTube's ranking) | date |
+ *                                     viewCount | rating
+ * @param {string} [p.videoDuration]   short (< 4 min) | medium | long (> 20 min)
+ * @param {string} [p.publishedAfter]  RFC 3339
+ * @param {string} [p.safeSearch]      moderate (YouTube's default) | strict | none
+ */
+async function searchPage({ apiKey, q, order, videoDuration, publishedAfter, safeSearch, regionCode, relevanceLanguage, embeddableOnly, pageToken }) {
+  const data = await call("search", {
+    key: apiKey,
+    part: "id",
+    type: "video",
+    q,
+    maxResults: MAX_RESULTS,
+    order,
+    videoDuration,
+    publishedAfter,
+    safeSearch,
+    regionCode,
+    relevanceLanguage,
+    videoEmbeddable: embeddableOnly ? "true" : undefined,
+    pageToken
+  });
+  return { ids: idsOf(data.items, (item) => item.id && item.id.videoId), next: data.nextPageToken || null };
+}
+
+/**
+ * One page of a playlist's videos, in its own order: 1 unit. A channel's
+ * uploads are a playlist too -- UU plus the channel id after its UC -- and
+ * so are its long videos without Shorts (UULF), its Shorts (UUSH) and its
+ * live streams (UULV).
+ */
+async function playlistPage({ apiKey, playlistId, pageToken }) {
+  const data = await call("playlistItems", { key: apiKey, part: "contentDetails", playlistId, maxResults: MAX_RESULTS, pageToken });
+  return { ids: idsOf(data.items, (item) => item.contentDetails && item.contentDetails.videoId), next: data.nextPageToken || null };
+}
+
+/**
+ * One page of YouTube's most popular videos in a country, all of them or
+ * one category, with every video's details: 1 unit for fifty.
+ */
+async function chartPage({ apiKey, regionCode, videoCategoryId, pageToken }) {
+  const data = await call("videos", {
+    key: apiKey,
+    part: VIDEO_PARTS,
+    chart: "mostPopular",
+    regionCode,
+    videoCategoryId,
+    maxResults: MAX_RESULTS,
+    pageToken
+  });
+  return { details: Array.isArray(data.items) ? data.items : [], next: data.nextPageToken || null };
+}
+
+/** A channel by its id, its @handle or an old username, or null: 1 unit. */
+async function findChannel(apiKey, { id, handle, username }) {
+  const data = await call("channels", { key: apiKey, part: "snippet", id, forHandle: handle, forUsername: username });
+  const channel = Array.isArray(data.items) ? data.items[0] : null;
+  return channel ? { id: channel.id, title: (channel.snippet && channel.snippet.title) || "" } : null;
+}
+
+/** A public playlist by id, or null: 1 unit. */
+async function findPlaylist(apiKey, id) {
+  const data = await call("playlists", { key: apiKey, part: "snippet", id });
+  const list = Array.isArray(data.items) ? data.items[0] : null;
+  return list ? { id: list.id, title: (list.snippet && list.snippet.title) || "" } : null;
 }
 
 /**
@@ -266,6 +354,13 @@ async function checkKey(apiKey) {
 module.exports = {
   searchVideos,
   checkKey,
+  withKey,
+  videosById,
+  searchPage,
+  playlistPage,
+  chartPage,
+  findChannel,
+  findPlaylist,
   classify,
   durationToSeconds,
   primaryLanguage,

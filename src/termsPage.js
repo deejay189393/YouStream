@@ -13,7 +13,7 @@ const YOUTUBE_TERMS_URL = "https://www.youtube.com/t/terms";
 const GOOGLE_PRIVACY_URL = "https://policies.google.com/privacy";
 const YOUTUBE_COPYRIGHT_URL = "https://support.google.com/youtube/answer/2807622";
 const GOOGLE_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials";
-const UPDATED = "12 October 2026";
+const UPDATED = "19 October 2026";
 
 /** A contact as a link: an email address becomes mailto:, anything else is a URL. */
 function contactLink(contact) {
@@ -63,6 +63,7 @@ function renderTermsPage({ contact, credits }) {
 
   <h2>What YouStream is</h2>
   <p>YouStream is an addon for Stremio and Nuvio. When you open a film or an episode, it searches YouTube for a full upload of it, using YouTube API Services with your own YouTube Data API key, and returns links to the YouTube videos it finds: their YouTube ids and youtube.com addresses.</p>
+  <p>It can also show YouTube itself in your app: results for what you search, and catalogs of the searches, channels, playlists and Trending lists you choose, with each video's title, description, artwork and statistics as YouTube gives them.</p>
   <p>YouStream does not host, store, download, copy, proxy or modify any video. Every video it lists is hosted by YouTube, played from YouTube, and subject to YouTube's own rules and takedowns.</p>
 
   <h2>Terms of use</h2>
@@ -77,7 +78,8 @@ function renderTermsPage({ contact, credits }) {
   <ul>
     <li>YouStream has no accounts, sets no cookies and does not track you.</li>
     <li>Your settings and keys are encoded into your personal install link. YouStream does not store them, but your app sends that link with every request, so the hosting provider's request logs record it for a limited time.</li>
-    <li>Searches and video details are requested from YouTube with your key, so Google receives them under the ${a(GOOGLE_PRIVACY_URL, "Google Privacy Policy")}. Search results are cached on this server for at most 30 days and shared by everyone who uses it, with nothing that identifies who asked.</li>
+    <li>Searches and video details are requested from YouTube with your key, so Google receives them under the ${a(GOOGLE_PRIVACY_URL, "Google Privacy Policy")}, including what you type into your app's search when YouTube search is on. The searches for films and episodes, and video details, are cached on this server for at most 30 days and shared by everyone who uses it, with nothing that identifies who asked.</li>
+    <li>Your YouTube catalogs' results are cached on this server for the refresh interval you choose, and at most 30 days, filed under a one-way fingerprint of your key, never the key itself. Search results are kept a few minutes the same way. YouStream does not log what you search for; like your settings, it is part of the address your app requests, which the hosting provider's request logs record for a limited time.</li>
     <li>Film and episode details are looked up in Cinemeta, IMDb's published data, TheTVDB, TVmaze, TMDB and Kitsu. Those requests carry nothing about you, except your TMDB key if you add one.</li>
     <li>YouStream keeps nothing that identifies you, so there is nothing of yours to delete. Questions: ${contactLink(contact)}.</li>
   </ul>

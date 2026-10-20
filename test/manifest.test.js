@@ -4,10 +4,14 @@ const {
   buildInterfaceManifest,
   identity,
   stremioAddonsConfig,
+  catalogsFor,
   ADDON_ID,
   ADDON_VERSION,
-  UNCONFIGURED_PREFIX
+  UNCONFIGURED_PREFIX,
+  SEARCH_CATALOG_ID
 } = require("../src/manifest");
+const { normalizeConfig } = require("../src/config");
+const { MAX_CATALOGS, MAX_QUERY_LENGTH, SKIP_OPTIONS } = require("../src/catalogs");
 const { COUNTRIES, LANGUAGES, languageName } = require("../src/regions");
 
 const BASE = "https://youstream.up.railway.app";
@@ -52,14 +56,75 @@ describe("the served manifest", () => {
     expect(buildManifest({ youtubeKey: "k" }, BASE).behaviorHints).toEqual({ configurable: true, configurationRequired: false });
   });
 
-  test("the reader's content types", () => {
-    expect(buildManifest({ youtubeKey: "k", types: ["series"] }, BASE).types).toEqual(["series", "anime"]);
+  test("the reader's content types, and YouTube's own", () => {
+    expect(buildManifest({ youtubeKey: "k", types: ["series"] }, BASE).types).toEqual(["series", "anime", "YouTube"]);
   });
 
   test("tmdb: ids are claimed only when there is a TMDB key to read them with", () => {
-    expect(buildManifest({ youtubeKey: "k", tmdbKey: "t" }, BASE).idPrefixes).toEqual(["tt", "kitsu:", "tmdb:"]);
+    expect(buildManifest({ youtubeKey: "k" }, BASE).idPrefixes).toEqual(["tt", "kitsu:", "youstream:"]);
+    expect(buildManifest({ youtubeKey: "k", tmdbKey: "t" }, BASE).idPrefixes).toEqual(["tt", "kitsu:", "tmdb:", "youstream:"]);
     process.env.TMDB_API_KEY = "server";
-    expect(buildManifest({ youtubeKey: "k" }, BASE).idPrefixes).toEqual(["tt", "kitsu:", "tmdb:"]);
+    expect(buildManifest({ youtubeKey: "k" }, BASE).idPrefixes).toEqual(["tt", "kitsu:", "tmdb:", "youstream:"]);
+  });
+
+  test("metadata only for YouTube items, streams for those and for films and shows, each resource with its own ids", () => {
+    const manifest = buildManifest({ youtubeKey: "k", catalogs: [{ trending: "all" }] }, BASE);
+    expect(manifest.resources).toEqual([
+      "catalog",
+      { name: "meta", types: ["YouTube"], idPrefixes: ["youstream:"] },
+      { name: "stream", types: ["movie", "series", "anime", "YouTube"], idPrefixes: ["tt", "kitsu:", "youstream:"] }
+    ]);
+  });
+
+  test("the reader's catalogs in their order, then search, each paged in YouTube's steps", () => {
+    const manifest = buildManifest({ youtubeKey: "k", search: true, catalogs: [{ q: "lofi", sort: "date" }, { trending: "music" }] }, BASE);
+    expect(manifest.catalogs.map((c) => [c.type, c.name])).toEqual([
+      ["YouTube", "lofi · Newest"],
+      ["YouTube", "Trending Music"],
+      ["YouTube", "YouStream"]
+    ]);
+    expect(manifest.catalogs[0].extra).toEqual([{ name: "skip", options: SKIP_OPTIONS }]);
+    expect(manifest.catalogs[2]).toEqual({
+      type: "YouTube",
+      id: SEARCH_CATALOG_ID,
+      name: "YouStream",
+      extra: [{ name: "search", isRequired: true }, { name: "skip", options: SKIP_OPTIONS }]
+    });
+    expect(SKIP_OPTIONS).toEqual(["0", "50", "100", "150", "200"]);
+  });
+
+  test("search alone is a catalog too, and with search off and no catalogs there is none", () => {
+    expect(buildManifest({ youtubeKey: "k", search: true }, BASE).catalogs.map((c) => c.id)).toEqual([SEARCH_CATALOG_ID]);
+    // An addon installed before search existed: as it was.
+    const quiet = buildManifest({ youtubeKey: "k" }, BASE);
+    expect(quiet.catalogs).toEqual([]);
+    expect(quiet.resources[0]).toEqual({ name: "meta", types: ["YouTube"], idPrefixes: ["youstream:"] });
+    expect(buildManifest({ youtubeKey: "k", search: false }, BASE).catalogs).toEqual([]);
+  });
+
+  test("YouTube alone: with films and shows off, only YouTube items are claimed", () => {
+    const manifest = buildManifest({ youtubeKey: "k", types: [], search: true }, BASE);
+    expect(manifest.types).toEqual(["YouTube"]);
+    expect(manifest.idPrefixes).toEqual(["youstream:"]);
+    expect(manifest.resources[2]).toEqual({ name: "stream", types: ["YouTube"], idPrefixes: ["youstream:"] });
+  });
+
+  test("the beta's search row is named for the beta", () => {
+    process.env.RELEASE_CHANNEL = "beta";
+    expect(catalogsFor(normalizeConfig({ search: true })).map((c) => c.name)).toEqual(["YouStream Beta"]);
+  });
+
+  test("the fullest config stays within the 8 KB Stremio's addon sync takes", () => {
+    process.env.STREMIO_ADDONS_CONFIG_SIGNATURE = "s".repeat(300);
+    const catalogs = Array.from({ length: MAX_CATALOGS + 5 }, (_, i) => ({
+      q: `${"x".repeat(MAX_QUERY_LENGTH - 3)}${String(i).padStart(3, "0")}`,
+      sort: "viewCount",
+      length: "medium",
+      within: "month"
+    }));
+    const manifest = buildManifest({ youtubeKey: "k", tmdbKey: "t", search: true, catalogs }, BASE);
+    expect(manifest.catalogs).toHaveLength(MAX_CATALOGS + 1);
+    expect(JSON.stringify(manifest).length).toBeLessThan(8192);
   });
 
   test("the beta deployment has its own id and name, so both can be installed", () => {
@@ -86,8 +151,11 @@ describe("the served manifest", () => {
 test("the internal routing manifest has the config array the SDK needs for /:config routes", () => {
   const manifest = buildInterfaceManifest();
   expect(manifest.config.length).toBeGreaterThan(0);
-  expect(manifest.resources).toEqual(["stream"]);
-  expect(manifest.idPrefixes).toContain("tmdb:");
+  expect(manifest.resources).toEqual(["catalog", "meta", "stream"]);
+  expect(manifest.idPrefixes).toEqual(["tt", "kitsu:", "tmdb:", "youstream:"]);
+  // One catalog, so the router serves catalogs at all; each reader's own
+  // catalog ids are read from their config.
+  expect(manifest.catalogs.map((c) => c.id)).toEqual([SEARCH_CATALOG_ID]);
 });
 
 describe("regions", () => {

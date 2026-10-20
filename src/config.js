@@ -1,6 +1,7 @@
 const { normalizePlayback, PLAYBACK_VERSION } = require("./playback");
 const { COUNTRY_SET, LANGUAGE_SET } = require("./regions");
 const { PRESETS, DEFAULT_FORMAT, MAX_NAME_TEMPLATE, MAX_DESCRIPTION_TEMPLATE } = require("./streamFormat");
+const { normalizeCatalogs, toStoredCatalogs, SORTS, LENGTHS } = require("./catalogs");
 
 /**
  * The reader's settings travel in the addon URL as its first path segment,
@@ -35,6 +36,22 @@ const { PRESETS, DEFAULT_FORMAT, MAX_NAME_TEMPLATE, MAX_DESCRIPTION_TEMPLATE } =
  *   nameTemplate, descriptionTemplate   the reader's own, in AIOStreams'
  *                   formatter syntax (streamFormat.js); only when they are
  *                   no preset, which is then left out
+ *
+ * YouTube itself, browsed in the app (catalogs.js, browse.js):
+ *
+ *   search          false  the app's search searches YouTube too. Off
+ *                   unless saved on, so an addon installed before search
+ *                   existed works as it did; the configure page switches
+ *                   it on for a new setup
+ *   searchSort      "relevance"  YouTube's own ranking; or date, viewCount,
+ *                   rating
+ *   searchLength    "any"  or short (under 4 minutes), medium, long
+ *   safeSearch      "moderate"  YouTube's default; or strict, none
+ *   catalogs        []     the reader's rows: searches, channels, playlists,
+ *                   Trending, in order (catalogs.js)
+ *   catalogRefresh  "2h"   how long a catalog's results are reused before
+ *                   YouTube is asked again: minutes, hours or days, at
+ *                   least 30 minutes
  */
 
 /**
@@ -71,6 +88,25 @@ const DEFAULT_MARGINS = {
 
 const CONTENT_TYPES = ["movie", "series"];
 const DEFAULT_MAX_RESULTS = 5;
+
+/** YouTube search's SafeSearch: moderate is what YouTube does unasked. */
+const SAFE_SEARCH = ["moderate", "strict", "none"];
+
+/**
+ * How often a catalog asks YouTube again, per reader. Two hours by default:
+ * a search catalog costs one of the reader's 100 daily searches each time
+ * it refreshes, and a row of videos barely changes in two hours. At least
+ * thirty minutes, and no upper limit -- though YouTube's API policies let a
+ * server keep its data 30 days at most, so anything longer refreshes then.
+ */
+const REFRESH_UNITS = {
+  m: { label: "minutes", ms: 60 * 1000 },
+  h: { label: "hours", ms: 60 * 60 * 1000 },
+  d: { label: "days", ms: 24 * 60 * 60 * 1000 }
+};
+const DEFAULT_CATALOG_REFRESH = { value: 2, unit: "h" };
+const MIN_CATALOG_REFRESH = { value: 30, unit: "m" };
+const MIN_CATALOG_REFRESH_MS = 30 * 60 * 1000;
 
 /**
  * Below this many views a video is not offered. Measured against the live
@@ -160,6 +196,38 @@ function sameMargin(a, b) {
   return a.value === b.value && a.unit === b.unit;
 }
 
+/**
+ * A refresh interval, "90m", "2h", "1.5d" or { value, unit }. Anything
+ * shorter than thirty minutes is thirty minutes; anything that is not an
+ * interval is null.
+ */
+function parseRefresh(raw) {
+  let value;
+  let unit;
+  if (raw && typeof raw === "object") {
+    ({ value, unit } = raw);
+    value = Number(value);
+  } else if (typeof raw === "string") {
+    const match = /^\s*(\d+(?:\.\d+)?)\s*([mhd])\s*$/i.exec(raw);
+    if (!match) return null;
+    value = Number(match[1]);
+    unit = match[2].toLowerCase();
+  } else {
+    return null;
+  }
+  if (!Object.hasOwn(REFRESH_UNITS, unit) || !Number.isFinite(value) || value <= 0) return null;
+  const rounded = Math.round(value * 100) / 100;
+  if (rounded * REFRESH_UNITS[unit].ms < MIN_CATALOG_REFRESH_MS) return { ...MIN_CATALOG_REFRESH };
+  return { value: rounded, unit };
+}
+
+/** An interval in milliseconds. */
+function refreshMs(refresh) {
+  return refresh.value * REFRESH_UNITS[refresh.unit].ms;
+}
+
+const optionIdOf = (list, id) => (list.some((option) => option.id === id) ? id : list[0].id);
+
 function cleanKey(raw) {
   if (typeof raw !== "string") return "";
   const key = raw.trim();
@@ -205,9 +273,13 @@ function cleanExclude(raw, defaults = DEFAULT_EXCLUDE) {
   return words.slice(0, MAX_EXCLUDE_WORDS);
 }
 
+/**
+ * Which kinds of title the reader wants streams for. Both when nothing was
+ * saved. An empty list is a choice too: a reader who only browses YouTube
+ * turns films and episodes off.
+ */
 function cleanTypes(raw) {
-  const types = Array.isArray(raw) ? CONTENT_TYPES.filter((t) => raw.includes(t)) : [];
-  return types.length ? types : [...CONTENT_TYPES];
+  return Array.isArray(raw) ? CONTENT_TYPES.filter((t) => raw.includes(t)) : [...CONTENT_TYPES];
 }
 
 function cleanMaxResults(raw) {
@@ -254,7 +326,13 @@ function normalizeConfig(config) {
     // "custom" when the templates are the reader's own
     format: presetFor(nameTemplate, descriptionTemplate) || "custom",
     nameTemplate,
-    descriptionTemplate
+    descriptionTemplate,
+    search: c.search === true,
+    searchSort: optionIdOf(SORTS, c.searchSort),
+    searchLength: optionIdOf(LENGTHS, c.searchLength),
+    safeSearch: SAFE_SEARCH.includes(c.safeSearch) ? c.safeSearch : SAFE_SEARCH[0],
+    catalogs: normalizeCatalogs(c.catalogs),
+    catalogRefresh: parseRefresh(c.catalogRefresh) || { ...DEFAULT_CATALOG_REFRESH }
   };
 }
 
@@ -287,6 +365,12 @@ function encodeConfig(config) {
   } else if (n.format !== DEFAULT_FORMAT) {
     out.format = n.format;
   }
+  if (n.search) out.search = true;
+  if (n.searchSort !== SORTS[0].id) out.searchSort = n.searchSort;
+  if (n.searchLength !== LENGTHS[0].id) out.searchLength = n.searchLength;
+  if (n.safeSearch !== SAFE_SEARCH[0]) out.safeSearch = n.safeSearch;
+  if (n.catalogs.length) out.catalogs = toStoredCatalogs(n.catalogs);
+  if (!sameMargin(n.catalogRefresh, DEFAULT_CATALOG_REFRESH)) out.catalogRefresh = formatMargin(n.catalogRefresh);
   return encodeURIComponent(JSON.stringify(out));
 }
 
@@ -334,9 +418,15 @@ module.exports = {
   effectiveTmdbKey,
   parseMargin,
   formatMargin,
+  parseRefresh,
+  refreshMs,
   cleanKey,
   cleanFormatTemplate,
   presetFor,
+  SAFE_SEARCH,
+  REFRESH_UNITS,
+  DEFAULT_CATALOG_REFRESH,
+  MIN_CATALOG_REFRESH,
   MARGIN_UNITS,
   DEFAULT_MARGINS,
   DEFAULT_EXCLUDE,

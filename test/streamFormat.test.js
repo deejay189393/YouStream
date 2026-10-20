@@ -254,7 +254,8 @@ describe("renderStreamText", () => {
 
 test("previewData: each sample's in-app fields and every way of watching", () => {
   const data = previewData("YouStream Beta", NOW);
-  expect(Object.keys(data.samples)).toEqual(["film", "episode"]);
+  expect(Object.keys(data.samples)).toEqual(["film", "episode", "video"]);
+  expect(data.samples.video.metadata.type).toBe("YouTube");
   expect(data.samples.film.addon.name).toBe("YouStream Beta");
   expect(data.samples.episode.stream.type).toBe("youtube");
   expect(data.play).toEqual({
@@ -272,4 +273,59 @@ test("the formatter knows each language's code and, where it is safe, its flag",
   // A flag only where AIOStreams reads it back as the same language.
   expect(LANGUAGE_FLAGS.ta).toBeUndefined();
   expect(LANGUAGE_FLAGS.tr).toBeUndefined();
+});
+
+describe("a YouTube video opened as an item of its own", () => {
+  const itemScope = (overrides = {}, optionId = "app") =>
+    streamScope({ optionId, match: { video: video({ title: "How Example Engines Work", language: "en", ...overrides }) }, title: null, settings: {}, addonName: "YouStream", now: NOW });
+
+  test("no film or show behind it: its type is YouTube and every title field is empty", () => {
+    const scope = itemScope();
+    expect(scope.metadata).toMatchObject({
+      queryType: "YouTube",
+      type: "YouTube",
+      isAnime: false,
+      title: null,
+      titles: [],
+      year: null,
+      season: null,
+      episode: null,
+      episodeTitle: null,
+      daysSinceRelease: null
+    });
+    expect(scope.stream).toMatchObject({ title: "How Example Engines Work", year: null, seasons: [], episodes: [], seasonEpisode: [] });
+    expect(scope.video.offset).toBeNull();
+  });
+
+  test("its release name is the video's own title, then the same tags", () => {
+    expect(itemScope().stream.filename).toBe("How Example Engines Work HD WEB-DL English");
+    expect(itemScope({ definition: "sd", language: null, title: "Big 🇬🇧 Upload 2 GB" }).stream.filename).toBe("Big Upload 2 ⁠GB SD WEB-DL");
+  });
+
+  test("a live stream has no length yet, and says it is live", () => {
+    const live = itemScope({ live: "live", durationSeconds: null });
+    expect(live.stream.duration).toBeNull();
+    expect(live.video.length).toBeNull();
+    expect(live.video.live).toBe(true);
+    expect(itemScope().video.live).toBe(false);
+  });
+
+  test.each(Object.keys(PRESETS))("the %s preset leaves out the film and episode lines, and says when it is live", (id) => {
+    const settings = { nameTemplate: PRESETS[id].name, descriptionTemplate: PRESETS[id].description };
+    const { name, description } = renderStreamText(itemScope(), settings);
+    const live = renderStreamText(itemScope({ live: "live", durationSeconds: null }), settings).description;
+    [name, description, live].forEach((text) => {
+      expect(text).not.toMatch(/\{unknown_|\{cannot_|undefined|null/);
+      expect(text).not.toMatch(/🍿|📡|✎/);
+    });
+    expect(description).not.toContain("Live");
+    if (id !== "tamtaro") expect(live).toContain("🔴 Live");
+  });
+
+  test("the default reads like a film's, without the line naming the film", () => {
+    const settings = normalizeConfig({});
+    expect(renderStreamText(itemScope(), settings).description).toBe(
+      ["🎬 How Example Engines Work", "🎞️ HD • ⏱️ 2h 22m 00s", "📺 A Channel • 👁 10K • 📅 1 Jan 2020", "🎧 English", "▶️ Play in app"].join("\n")
+    );
+  });
 });

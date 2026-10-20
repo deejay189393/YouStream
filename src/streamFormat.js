@@ -2,6 +2,7 @@ const { formatDuration, formatOffset, formatCount } = require("./text");
 const { languageName, LANGUAGES } = require("./regions");
 const { WATCH_URL } = require("./playback");
 const { createFormatter } = require("./formatter");
+const { ITEM_TYPE } = require("./items");
 
 /**
  * What a stream row says, for two readers.
@@ -123,6 +124,50 @@ function releaseName(title, video, language) {
   return parts.join(" ");
 }
 
+/**
+ * The same for a YouTube video opened as an item of its own, which no film
+ * or show stands behind: its own title, then the same tags.
+ */
+function itemReleaseName(video, language) {
+  return releaseName({ title: video.title }, video, language);
+}
+
+/**
+ * The film-or-show fields for a YouTube video opened as an item: none of
+ * them, and its type, so a template's film and episode lines drop out.
+ */
+function itemMetadata(empty) {
+  return {
+    queryType: ITEM_TYPE,
+    type: ITEM_TYPE,
+    isAnime: false,
+    title: null,
+    titles: empty(),
+    year: null,
+    yearEnd: null,
+    runtime: null,
+    episodeRuntime: null,
+    genres: empty(),
+    originalLanguage: null,
+    country: null,
+    season: null,
+    episode: null,
+    absoluteEpisode: null,
+    relativeAbsoluteEpisode: null,
+    episodeTitle: null,
+    episodeTitles: empty(),
+    latestSeason: null,
+    daysSinceRelease: null,
+    daysSinceFirstAired: null,
+    daysSinceLastAired: null,
+    hasNextEpisode: null,
+    daysUntilNextEpisode: null,
+    anilistId: null,
+    malId: null,
+    hasSeaDex: false
+  };
+}
+
 /** AIOStreams' way of saying how old a release is: 5h, 12d, 2190d. */
 function ageText(hours) {
   return hours < 24 ? `${Math.max(0, Math.floor(hours))}h` : `${Math.floor(hours / 24)}d`;
@@ -138,9 +183,15 @@ const smallCaps = (text) => formatter.render("{x.v::smallcaps}", { x: { v: text 
  *
  *   play.*    how this row plays: in the app, the YouTube app, SmartTube
  *   video.*   the YouTube video itself
+ *
+ * `title` is the film or episode the video was matched to, or null for a
+ * YouTube video opened as an item of its own (items.js).
  */
 function streamScope({ optionId, match, title, settings, addonName, now = Date.now() }) {
   const { video } = match;
+  const isEpisode = Boolean(title && title.isEpisode);
+  // A live stream has no length yet.
+  const hasLength = Number.isFinite(video.durationSeconds) && video.durationSeconds > 0;
   // The language matching settled on, which trusts what the title declares
   // over YouTube's field.
   const languageCodeOf = match.language !== undefined ? match.language : video.language;
@@ -150,15 +201,15 @@ function streamScope({ optionId, match, title, settings, addonName, now = Date.n
   const uLanguages = languages.filter((l) => userLanguages.includes(l));
   const codes = (list) => list.map((l) => FORMATTER_LANGUAGES.find((x) => x.name === l).code.toUpperCase());
   const flags = (list) => list.map((l) => FORMATTER_LANGUAGES.find((x) => x.name === l).flag).filter(Boolean);
-  const isAnime = Boolean(title.sources && title.sources.includes("kitsu"));
-  const seasons = title.isEpisode ? [title.season] : [];
-  const episodes = title.isEpisode ? [title.episode] : [];
+  const isAnime = Boolean(title && title.sources && title.sources.includes("kitsu"));
+  const seasons = isEpisode ? [title.season] : [];
+  const episodes = isEpisode ? [title.episode] : [];
   const published = video.publishedAt ? Date.parse(video.publishedAt) : NaN;
   const ageHours = Number.isNaN(published) ? null : Math.max(0, (now - published) / 3600000);
-  const released = title.released ? Date.parse(title.released) : NaN;
+  const released = title && title.released ? Date.parse(title.released) : NaN;
   const hasOffset = match.offsetSeconds !== null && match.offsetSeconds !== undefined;
-  const runtimeMinutes = title.runtimeSeconds ? Math.round(title.runtimeSeconds / 60) : null;
-  const filename = releaseName(title, video, languageCodeOf);
+  const runtimeMinutes = title && title.runtimeSeconds ? Math.round(title.runtimeSeconds / 60) : null;
+  const filename = title ? releaseName(title, video, languageCodeOf) : itemReleaseName(video, languageCodeOf);
   const message = video.ageRestricted ? "Age-restricted: opens in YouTube, where you are signed in" : null;
   const empty = () => [];
 
@@ -178,10 +229,11 @@ function streamScope({ optionId, match, title, settings, addonName, now = Date.n
       views: formatCount(video.views),
       viewCount: Number.isFinite(video.views) ? video.views : null,
       uploaded: video.publishedAt ? video.publishedAt.slice(0, 10) : null,
-      length: formatDuration(video.durationSeconds),
+      length: hasLength ? formatDuration(video.durationSeconds) : null,
       offset: hasOffset ? formatOffset(match.offsetSeconds) : null,
       offsetSeconds: hasOffset ? match.offsetSeconds : null,
-      language: spoken || null
+      language: spoken || null,
+      live: video.live === "live"
     },
     stream: {
       type: optionId === "app" ? "youtube" : "external",
@@ -196,7 +248,7 @@ function streamScope({ optionId, match, title, settings, addonName, now = Date.n
       size: null,
       folderSize: null,
       bitrate: null,
-      duration: video.durationSeconds * 1000,
+      duration: hasLength ? video.durationSeconds * 1000 : null,
       container: null,
       extension: null,
       quality: "WEB-DL",
@@ -228,8 +280,8 @@ function streamScope({ optionId, match, title, settings, addonName, now = Date.n
       subtitleTracks: empty(),
       subbed: false,
       mediaInfoQuality: null,
-      title: plainText(title.title),
-      year: title.year ? String(title.year) : null,
+      title: plainText(title ? title.title : video.title),
+      year: title && title.year ? String(title.year) : null,
       country: null,
       date: null,
       releaseGroup: null,
@@ -243,14 +295,14 @@ function streamScope({ optionId, match, title, settings, addonName, now = Date.n
       upscaled: false,
       seasonPack: false,
       seasons,
-      formattedSeasons: title.isEpisode ? `S${pad(title.season)}` : null,
+      formattedSeasons: isEpisode ? `S${pad(title.season)}` : null,
       folderSeasons: empty(),
       formattedFolderSeasons: null,
       episodes,
-      formattedEpisodes: title.isEpisode ? `E${pad(title.episode)}` : null,
+      formattedEpisodes: isEpisode ? `E${pad(title.episode)}` : null,
       folderEpisodes: empty(),
       formattedFolderEpisodes: null,
-      seasonEpisode: title.isEpisode ? [`S${pad(title.season)}`, `E${pad(title.episode)}`] : empty(),
+      seasonEpisode: isEpisode ? [`S${pad(title.season)}`, `E${pad(title.episode)}`] : empty(),
       episodeTitle: null,
       seeders: null,
       private: false,
@@ -269,35 +321,37 @@ function streamScope({ optionId, match, title, settings, addonName, now = Date.n
       rseMatched: empty(),
       preloading: false
     },
-    metadata: {
-      queryType: `${isAnime ? "anime." : ""}${title.isEpisode ? "series" : "movie"}`,
-      type: title.isEpisode ? "series" : "movie",
-      isAnime,
-      title: plainText(title.title),
-      titles: [...new Set([title.title, ...(title.aliases || [])].map(plainText))],
-      year: title.year || null,
-      yearEnd: null,
-      runtime: title.isEpisode ? null : runtimeMinutes,
-      episodeRuntime: title.isEpisode ? runtimeMinutes : null,
-      genres: empty(),
-      originalLanguage: null,
-      country: null,
-      season: title.isEpisode ? title.season : null,
-      episode: title.isEpisode ? title.episode : null,
-      absoluteEpisode: title.absoluteEpisode || null,
-      relativeAbsoluteEpisode: null,
-      episodeTitle: title.episodeTitle ? plainText(title.episodeTitle) : null,
-      episodeTitles: title.episodeTitle ? [plainText(title.episodeTitle)] : empty(),
-      latestSeason: title.seasonCount || null,
-      daysSinceRelease: Number.isNaN(released) ? null : Math.floor((now - released) / 86400000),
-      daysSinceFirstAired: null,
-      daysSinceLastAired: null,
-      hasNextEpisode: null,
-      daysUntilNextEpisode: null,
-      anilistId: null,
-      malId: null,
-      hasSeaDex: false
-    },
+    metadata: !title
+      ? itemMetadata(empty)
+      : {
+          queryType: `${isAnime ? "anime." : ""}${isEpisode ? "series" : "movie"}`,
+          type: isEpisode ? "series" : "movie",
+          isAnime,
+          title: plainText(title.title),
+          titles: [...new Set([title.title, ...(title.aliases || [])].map(plainText))],
+          year: title.year || null,
+          yearEnd: null,
+          runtime: isEpisode ? null : runtimeMinutes,
+          episodeRuntime: isEpisode ? runtimeMinutes : null,
+          genres: empty(),
+          originalLanguage: null,
+          country: null,
+          season: isEpisode ? title.season : null,
+          episode: isEpisode ? title.episode : null,
+          absoluteEpisode: title.absoluteEpisode || null,
+          relativeAbsoluteEpisode: null,
+          episodeTitle: title.episodeTitle ? plainText(title.episodeTitle) : null,
+          episodeTitles: title.episodeTitle ? [plainText(title.episodeTitle)] : empty(),
+          latestSeason: title.seasonCount || null,
+          daysSinceRelease: Number.isNaN(released) ? null : Math.floor((now - released) / 86400000),
+          daysSinceFirstAired: null,
+          daysSinceLastAired: null,
+          hasNextEpisode: null,
+          daysUntilNextEpisode: null,
+          anilistId: null,
+          malId: null,
+          hasSeaDex: false
+        },
     user: {
       languages: userLanguages,
       subtitles: userLanguages,
@@ -332,9 +386,9 @@ const PRESETS = {
     label: "YouStream",
     name: "{play.icon} {addon.name} {video.definition}",
     description: [
-      `{metadata.type::=series["📡 {metadata.title}{? ({metadata.year})?}{? • {stream.seasonEpisode::join('')}?}{? • {metadata.episodeTitle}?}"||"🍿 {metadata.title}{? ({metadata.year})?}"]}`,
+      `{?{metadata.type::=series["📡"||"🍿"]} {metadata.title}{? ({metadata.year})?}{? • {stream.seasonEpisode::join('')}?}{? • {metadata.episodeTitle}?}?}`,
       "🎬 {video.title}",
-      "🎞️ {video.definition} • ⏱️ {stream.duration::time('[%-Hh ]%-Mm %Ss')}{? ({video.offset})?}",
+      `🎞️ {video.definition}{? • ⏱️ {stream.duration::time('[%-Hh ]%-Mm %Ss')}?}{video.live::istrue[" • 🔴 Live"||""]}{? ({video.offset})?}`,
       `📺 {video.channel}{video.official::istrue[" ✓"||""]}{? • 👁 {video.views}?}{? • 📅 {video.uploaded::date('%-d %b %Y')}?}`,
       "{?🎧 {stream.languages::join(', ')}?}",
       "{?🔞 {stream.message}?}",
@@ -346,14 +400,14 @@ const PRESETS = {
     name: "{addon.name} {video.definition}",
     description: [
       "{play.icon} {video.title}",
-      `⏱️ {stream.duration::time('[%-Hh ]%-Mm')}{? • 👁 {video.views}?}{? • 🎧 {stream.languages::join(', ')}?}{video.ageRestricted::istrue[" • 🔞 18+"||""]}`
+      `{?⏱️ {stream.duration::time('[%-Hh ]%-Mm')}?}{video.live::istrue["🔴 Live"||""]}{? • 👁 {video.views}?}{? • 🎧 {stream.languages::join(', ')}?}{video.ageRestricted::istrue[" • 🔞 18+"||""]}`
     ].join("\n")
   },
   tamtaro: {
     label: "Tamtaro style",
     name: `{stream.resolution::replace('p','P')}{stream.type::=youtube[" ⁽ʸᵗ⁾"||" ⁽ᵉˣᵗ⁾"]}\n  〈{stream.quality::title}〉`,
     description: [
-      "✎  {metadata.title::title::truncate(25)}{? ({metadata.year})?}{?  {stream.seasonEpisode::join('·')::replace('E','ᴇ')::replace('S','s')::translate('0123456789','₀₁₂₃₄₅₆₇₈₉')}?}",
+      "{?✎  {metadata.title::title::truncate(25)}{? ({metadata.year})?}{?  {stream.seasonEpisode::join('·')::replace('E','ᴇ')::replace('S','s')::translate('0123456789','₀₁₂₃₄₅₆₇₈₉')}?}?}",
       "▦  {?{video.uploaded::date('%-d %b %Y')}  ▪  ?}{video.channel::smallcaps}",
       "{?⛿ {stream.smallLanguageCodes::join(' · ')}?}",
       "{?»  {stream.message::smallcaps}?}",
@@ -365,7 +419,7 @@ const PRESETS = {
     name: "{addon.name}\n{stream.resolution}",
     description: [
       "{stream.filename}",
-      "{?👁 {video.views} ?}⏱️ {stream.duration::time('[%-Hh ]%-Mm')} ⚙️ {video.channel}",
+      `{?👁 {video.views} ?}{?⏱️ {stream.duration::time('[%-Hh ]%-Mm')} ?}{video.live::istrue["🔴 Live "||""]}⚙️ {video.channel}`,
       "{?{stream.languageEmojis::join(' / ')}?}",
       "{play.icon} {play.label}"
     ].join("\n")
@@ -378,8 +432,9 @@ const MAX_NAME = 200;
 const MAX_DESCRIPTION = 2000;
 
 /**
- * Two made-up streams for the configure page's preview, one film and one
- * episode, built the way real ones are.
+ * Made-up streams for the configure page's preview, built the way real ones
+ * are: a film, an episode, and a YouTube video opened from a catalog,
+ * search or the library, which no film or show stands behind.
  */
 const SAMPLES = {
   film: {
@@ -406,6 +461,16 @@ const SAMPLES = {
         id: "bbbbbbbbbbb", title: "Example Show | S01E03 - The Exam", channelTitle: "Indie Series", channelId: "UCexample2",
         durationSeconds: 2211, definition: "hd", views: 5100000, language: "hi", publishedAt: "2019-04-30T10:28:12Z", licensed: true,
         ageRestricted: false
+      }
+    }
+  },
+  video: {
+    title: null,
+    match: {
+      video: {
+        id: "ccccccccccc", title: "How Example Engines Work", channelTitle: "Example Science", channelId: "UCexample3",
+        durationSeconds: 754, definition: "hd", views: 1200000, language: "en", publishedAt: "2025-03-14T15:00:00Z",
+        licensed: false, ageRestricted: false, live: null
       }
     }
   }

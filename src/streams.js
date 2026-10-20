@@ -15,8 +15,9 @@ const { identity } = require("./manifest");
 
 /**
  * @param {string} optionId  app | youtube | smarttube
- * @param {object} match     from matching.js
- * @param {object} context   { title: what the stream was found for, settings }
+ * @param {object} match     from matching.js, or { video } for a YouTube item
+ * @param {object} context   { title: what the stream was found for -- null for
+ *                           a YouTube video opened as an item -- and settings }
  */
 function buildStream(optionId, match, { title, settings }) {
   const { video } = match;
@@ -34,7 +35,8 @@ function buildStream(optionId, match, { title, settings }) {
       // Read by AIOStreams before anything in the text; Stremio passes the
       // filename to subtitle addons and ignores the rest.
       filename: scope.stream.filename,
-      duration: video.durationSeconds,
+      // A live stream has no length yet.
+      ...(scope.stream.duration ? { duration: video.durationSeconds } : {}),
       ...(video.publishedAt ? { publishDate: video.publishedAt } : {}),
       indexer: "YouTube"
     }
@@ -63,4 +65,10 @@ function toStreams(matches, settings, title) {
   return matches.flatMap((match) => optionsFor(match, settings.playback).map((id) => buildStream(id, match, { title, settings })));
 }
 
-module.exports = { toStreams, buildStream, optionsFor };
+/** The rows for a YouTube video opened as an item of its own (items.js). */
+function toItemStreams(item, settings) {
+  const match = { video: item };
+  return optionsFor(match, settings.playback).map((id) => buildStream(id, match, { title: null, settings }));
+}
+
+module.exports = { toStreams, toItemStreams, buildStream, optionsFor };

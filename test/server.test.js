@@ -171,6 +171,68 @@ describe("POST /api/check-keys", () => {
   });
 });
 
+describe("POST /api/youtube-source", () => {
+  test("a channel link becomes a catalog the page can add", async () => {
+    routeFetch([["googleapis.com/youtube/v3/channels", { items: [{ id: "UCBJycsmduvYEL83R_U4JriQ", snippet: { title: "Marques Brownlee" } }] }]]);
+    const res = await request(app).post("/api/youtube-source").send({ youtubeKey: "KEY", input: "https://www.youtube.com/@mkbhd" });
+    expect(res.body.entry).toMatchObject({ kind: "channel", channel: "UCBJycsmduvYEL83R_U4JriQ", name: "Marques Brownlee" });
+  });
+
+  test("text that is no link is a search, and needs no lookup", async () => {
+    const fetch = routeFetch([]);
+    const res = await request(app).post("/api/youtube-source").send({ youtubeKey: "KEY", input: "lofi hip hop" });
+    expect(res.body).toEqual({ search: true });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test("without a key, or with no text, it says what is missing", async () => {
+    const fetch = routeFetch([]);
+    expect((await request(app).post("/api/youtube-source").send({ input: "@mkbhd" })).body.error).toContain("API key");
+    expect((await request(app).post("/api/youtube-source").send({ youtubeKey: "KEY", input: 5 })).body).toEqual({ search: true });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("YouTube items over HTTP", () => {
+  const KEYED = () => encodeConfig({ youtubeKey: "KEY", catalogs: [{ trending: "all" }] });
+
+  test("a catalog, then the video's details and its streams, the way an app asks", async () => {
+    routeFetch([["googleapis.com/youtube/v3/videos", { items: [apiVideo("abcdefghijk", { snippet: { title: "Trending One" } })] }]]);
+    const catalog = await request(app).get(`/${KEYED()}/catalog/YouTube/trending.all.json`);
+    expect(catalog.status).toBe(200);
+    expect(catalog.headers["access-control-allow-origin"]).toBe("*");
+    expect(catalog.body.metas[0]).toMatchObject({ id: "youstream:abcdefghijk", type: "YouTube" });
+    // Nuvio puts skip in the path, its next request starting at the count it has.
+    const more = await request(app).get(`/${KEYED()}/catalog/YouTube/trending.all/skip=1.json`);
+    expect(more.body.metas).toEqual([]);
+    const meta = await request(app).get(`/${KEYED()}/meta/YouTube/youstream%3Aabcdefghijk.json`);
+    expect(meta.body.meta).toMatchObject({ id: "youstream:abcdefghijk", name: "Trending One" });
+    const streams = await request(app).get(`/${KEYED()}/stream/YouTube/youstream:abcdefghijk.json`);
+    expect(streams.body.streams[0].ytId).toBe("abcdefghijk");
+  });
+
+  test("a video that is gone is a 404, with the protocol's CORS header, which Nuvio takes as final", async () => {
+    routeFetch([["googleapis.com/youtube/v3/videos", { items: [] }]]);
+    const res = await request(app).get(`/${KEYED()}/meta/YouTube/youstream:gonegonegon.json`);
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Not found" });
+    expect(res.headers["access-control-allow-origin"]).toBe("*");
+  });
+
+  test("YouTube failing on a video's details is an error, not a 404", async () => {
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    routeFetch([["googleapis.com/youtube/v3/videos", response({}, { status: 503 })]]);
+    const res = await request(app).get(`/${KEYED()}/meta/YouTube/youstream:abcdefghijk.json`);
+    expect(res.status).toBe(500);
+  });
+
+  test("any other unknown path is a JSON 404", async () => {
+    const res = await request(app).get("/not/a/route");
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Not found" });
+  });
+});
+
 describe("GET /:config/explain/:type/:id.json", () => {
   test("shows what was searched, what matched and why the rest did not, without the key", async () => {
     routeFetch([
@@ -334,7 +396,7 @@ describe("/admin/cache", () => {
     test("names the namespaces when given another", async () => {
       const res = await request(app).delete("/admin/cache/videos").set(auth("s3cret"));
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe("Unknown namespace; one of search, metadata, cooldown, all");
+      expect(res.body.error).toBe("Unknown namespace; one of search, metadata, cooldown, browse, video, all");
     });
   });
 });

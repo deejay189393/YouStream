@@ -389,3 +389,127 @@ test("keyId is a short, stable fingerprint, not the key", () => {
   expect(youtube.keyId("KEY")).not.toContain("KEY");
   expect(youtube.keyId("KEY")).toHaveLength(16);
 });
+
+describe("browsing calls", () => {
+  const params = (fetch, i = 0) => Object.fromEntries(new URL(fetch.mock.calls[i][0]).searchParams);
+
+  test("searchPage: ids only, every filter YouTube takes, and the next page's token", async () => {
+    const fetch = routeFetch([["/search?", searchBody(["a", "b", null], { nextPageToken: "NEXT" })]]);
+    const page = await youtube.searchPage({
+      apiKey: "KEY",
+      q: "lofi",
+      order: "date",
+      videoDuration: "long",
+      publishedAfter: "2026-10-12T00:00:00.000Z",
+      safeSearch: "strict",
+      regionCode: "IN",
+      relevanceLanguage: "hi",
+      embeddableOnly: true,
+      pageToken: "TOKEN"
+    });
+    expect(page).toEqual({ ids: ["a", "b"], next: "NEXT" });
+    expect(params(fetch)).toEqual({
+      key: "KEY",
+      part: "id",
+      type: "video",
+      q: "lofi",
+      maxResults: "50",
+      order: "date",
+      videoDuration: "long",
+      publishedAfter: "2026-10-12T00:00:00.000Z",
+      safeSearch: "strict",
+      regionCode: "IN",
+      relevanceLanguage: "hi",
+      videoEmbeddable: "true",
+      pageToken: "TOKEN"
+    });
+  });
+
+  test("searchPage: the last page has no token, and filters not given are left out", async () => {
+    const fetch = routeFetch([["/search?", {}]]);
+    expect(await youtube.searchPage({ apiKey: "KEY", q: "lofi" })).toEqual({ ids: [], next: null });
+    ["order", "videoDuration", "publishedAfter", "safeSearch", "regionCode", "videoEmbeddable", "pageToken"].forEach((p) =>
+      expect(params(fetch)).not.toHaveProperty(p)
+    );
+  });
+
+  test("playlistPage: a playlist's video ids in its order", async () => {
+    const fetch = routeFetch([
+      ["/playlistItems?", { items: [{ contentDetails: { videoId: "x" } }, { snippet: {} }, { contentDetails: { videoId: "y" } }], nextPageToken: "N" }]
+    ]);
+    expect(await youtube.playlistPage({ apiKey: "KEY", playlistId: "UULFabc", pageToken: "T" })).toEqual({ ids: ["x", "y"], next: "N" });
+    expect(params(fetch)).toEqual({ key: "KEY", part: "contentDetails", playlistId: "UULFabc", maxResults: "50", pageToken: "T" });
+    routeFetch([["/playlistItems?", {}]]);
+    expect(await youtube.playlistPage({ apiKey: "KEY", playlistId: "UULFabc" })).toEqual({ ids: [], next: null });
+  });
+
+  test("chartPage: YouTube's most popular in a country and category, with their details", async () => {
+    const fetch = routeFetch([["/videos?", { items: [apiVideo("p")], nextPageToken: "N" }]]);
+    const page = await youtube.chartPage({ apiKey: "KEY", regionCode: "IN", videoCategoryId: "10" });
+    expect(page.details.map((d) => d.id)).toEqual(["p"]);
+    expect(page.next).toBe("N");
+    expect(params(fetch)).toEqual({
+      key: "KEY",
+      part: "snippet,contentDetails,statistics,status",
+      chart: "mostPopular",
+      regionCode: "IN",
+      videoCategoryId: "10",
+      maxResults: "50"
+    });
+    routeFetch([["/videos?", {}]]);
+    expect(await youtube.chartPage({ apiKey: "KEY" })).toEqual({ details: [], next: null });
+  });
+
+  test("videosById: in the order asked for, leaving out videos that have gone; nothing asked, no call", async () => {
+    const fetch = routeFetch([["/videos?", { items: [apiVideo("b"), apiVideo("a")] }]]);
+    expect((await youtube.videosById("KEY", ["a", "gone", "b"])).map((v) => v.id)).toEqual(["a", "b"]);
+    expect(await youtube.videosById("KEY", [])).toEqual([]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    routeFetch([["/videos?", {}]]);
+    expect(await youtube.videosById("KEY", ["a"])).toEqual([]);
+  });
+
+  test("findChannel: by id, @handle or username", async () => {
+    const fetch = routeFetch([["/channels?", { items: [{ id: "UCx", snippet: { title: "Some Channel" } }] }]]);
+    expect(await youtube.findChannel("KEY", { handle: "@some" })).toEqual({ id: "UCx", title: "Some Channel" });
+    expect(params(fetch)).toEqual({ key: "KEY", part: "snippet", forHandle: "@some" });
+    await youtube.findChannel("KEY", { id: "UCx" });
+    expect(params(fetch, 1)).toMatchObject({ id: "UCx" });
+    await youtube.findChannel("KEY", { username: "old" });
+    expect(params(fetch, 2)).toMatchObject({ forUsername: "old" });
+    routeFetch([["/channels?", { items: [{ id: "UCy" }] }]]);
+    expect(await youtube.findChannel("KEY", { id: "UCy" })).toEqual({ id: "UCy", title: "" });
+    routeFetch([["/channels?", {}]]);
+    expect(await youtube.findChannel("KEY", { handle: "@nobody" })).toBeNull();
+  });
+
+  test("findPlaylist: a public playlist by id", async () => {
+    const fetch = routeFetch([["/playlists?", { items: [{ id: "PLx", snippet: { title: "Lectures" } }] }]]);
+    expect(await youtube.findPlaylist("KEY", "PLx")).toEqual({ id: "PLx", title: "Lectures" });
+    expect(params(fetch)).toEqual({ key: "KEY", part: "snippet", id: "PLx" });
+    routeFetch([["/playlists?", { items: [{ id: "PLy" }] }]]);
+    expect(await youtube.findPlaylist("KEY", "PLy")).toEqual({ id: "PLy", title: "" });
+    routeFetch([["/playlists?", { items: [] }]]);
+    expect(await youtube.findPlaylist("KEY", "PLz")).toBeNull();
+    routeFetch([["/playlists?", {}]]);
+    expect(await youtube.findPlaylist("KEY", "PLz")).toBeNull();
+  });
+});
+
+describe("withKey", () => {
+  test("runs a call, and a key that spends its quota is left alone until it resets", async () => {
+    expect(await youtube.withKey("KEY", async () => "ok")).toBe("ok");
+    const quota = Object.assign(new Error("spent"), { kind: "quota" });
+    await expect(youtube.withKey("KEY", async () => { throw quota; })).rejects.toBe(quota);
+    expect((await keyCooldown.get(youtube.keyId("KEY"))).value).toBe(true);
+    const run = jest.fn();
+    await expect(youtube.withKey("KEY", run)).rejects.toMatchObject({ kind: "quota" });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  test("any other failure says nothing about the key", async () => {
+    const outage = Object.assign(new Error("down"), { kind: "unavailable" });
+    await expect(youtube.withKey("KEY2", async () => { throw outage; })).rejects.toBe(outage);
+    expect(await keyCooldown.get(youtube.keyId("KEY2"))).toBeUndefined();
+  });
+});

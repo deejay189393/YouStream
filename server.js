@@ -14,6 +14,8 @@ const tmdb = require("./src/metadata/tmdb");
 const { hostConfig, describeCache } = require("./src/hostConfig");
 const { NAMESPACES, cacheSettings, cacheStats, clearAllCaches } = require("./src/cache");
 const imdb = require("./src/metadata/imdb");
+const { resolveSource } = require("./src/browse");
+const { trackRequest } = require("./src/requestContext");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -140,6 +142,18 @@ app.post("/api/check-keys", express.json({ limit: "4kb" }), async (req, res) => 
   res.json({ youtube: youtubeStatus, tmdb: tmdbStatus });
 });
 
+/**
+ * Looks up a channel or playlist the reader pasted on the configure page --
+ * a link, an @handle or an id -- so it can become a catalog: { entry },
+ * { error }, or { search: true } for text that is a search instead. POST for
+ * the same reason as above; costs the reader 1 unit.
+ */
+app.post("/api/youtube-source", express.json({ limit: "4kb" }), async (req, res) => {
+  const youtubeKey = cleanKey(req.body.youtubeKey);
+  if (!youtubeKey) return res.json({ error: "Enter your YouTube API key above first: it is used to look the link up." });
+  res.json(await resolveSource(youtubeKey, typeof req.body.input === "string" ? req.body.input.slice(0, 500) : ""));
+});
+
 // --- Manifest routes are served here rather than by the SDK router, because
 // the manifest varies per reader (their content types, and whether tmdb: ids
 // can be read), which the SDK's single static manifest cannot express.
@@ -222,8 +236,14 @@ app.get("/:config/explain/:type/:id.json", async (req, res) => {
   res.json(out);
 });
 
-// --- Streams, handled by the real stremio-addon-sdk router.
-app.use(createResourceRouter());
+// --- Catalogs, metadata and streams, handled by the real stremio-addon-sdk
+// router. Each request carries whether the app is still waiting for it
+// (requestContext.js), so a search the app has abandoned is not made.
+app.use(trackRequest, createResourceRouter());
+
+// What the router passed on -- an item YouTube no longer has -- and any
+// other unknown path.
+app.use((req, res) => res.status(404).json({ error: "Not found" }));
 
 module.exports = { app, getBaseUrl, credits };
 

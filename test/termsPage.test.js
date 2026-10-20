@@ -33,3 +33,10 @@ describe("renderTermsPage", () => {
     expect(page).toContain('href="https://support.google.com/youtube/answer/2807622"');
   });
 });
+
+test("the privacy policy says what browsing YouTube keeps, and under what", () => {
+  const html = renderTermsPage({ contact: "a@b.c", credits: [] });
+  expect(html).toContain("one-way fingerprint of your key, never the key itself");
+  expect(html).toContain("YouStream does not log what you search for");
+  expect(html).toContain("catalogs of the searches, channels, playlists and Trending lists you choose");
+});

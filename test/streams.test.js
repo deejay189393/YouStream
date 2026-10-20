@@ -1,4 +1,4 @@
-const { toStreams, buildStream, optionsFor } = require("../src/streams");
+const { toStreams, toItemStreams, buildStream, optionsFor } = require("../src/streams");
 const { normalizeConfig } = require("../src/config");
 const { video } = require("./helpers");
 
@@ -157,5 +157,36 @@ describe("toStreams", () => {
 
   test("no matches, no rows", () => {
     expect(toStreams([], normalizeConfig({}), EPISODE)).toEqual([]);
+  });
+});
+
+describe("toItemStreams: a YouTube video opened from a catalog, search or the library", () => {
+  const item = (overrides = {}) =>
+    video({ id: "itemvideo01", title: "How Example Engines Work", channelId: "UCscience", durationSeconds: 754, language: "en", ...overrides });
+
+  test("one row per way of watching, in the reader's order, from the reader's templates", () => {
+    const streams = toItemStreams(item(), normalizeConfig({ playback: ["youtube", "app"] }));
+    expect(streams.map((s) => s.externalUrl || s.ytId)).toEqual(["https://www.youtube.com/watch?v=itemvideo01", "itemvideo01"]);
+    expect(streams[1].name).toBe("▶️ YouStream HD");
+    expect(streams[1].description.split("\n")[0]).toBe("🎬 How Example Engines Work");
+    expect(streams[1].behaviorHints).toEqual({
+      bingeGroup: "youstream-app-UCscience",
+      filename: "How Example Engines Work HD WEB-DL English",
+      duration: 754,
+      publishDate: "2020-01-01T00:00:00Z",
+      indexer: "YouTube"
+    });
+  });
+
+  test("an age-restricted video gets no in-app row", () => {
+    expect(toItemStreams(item({ ageRestricted: true }), normalizeConfig({})).map((s) => s.externalUrl)).toEqual([
+      "https://www.youtube.com/watch?v=itemvideo01"
+    ]);
+  });
+
+  test("a live stream has no duration to hint", () => {
+    const [row] = toItemStreams(item({ live: "live", durationSeconds: null }), normalizeConfig({ playback: ["app"] }));
+    expect(row.behaviorHints.duration).toBeUndefined();
+    expect(row.description).toContain("🔴 Live");
   });
 });

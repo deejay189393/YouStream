@@ -9,6 +9,9 @@ const {
   cleanKey,
   cleanFormatTemplate,
   presetFor,
+  parseRefresh,
+  refreshMs,
+  DEFAULT_CATALOG_REFRESH,
   DEFAULT_MARGINS,
   DEFAULT_EXCLUDE,
   DEFAULT_EXCLUDE_DESCRIPTION,
@@ -96,7 +99,13 @@ describe("normalizeConfig", () => {
       episodeQuery: DEFAULT_EPISODE_QUERY,
       format: "youstream",
       nameTemplate: PRESETS.youstream.name,
-      descriptionTemplate: PRESETS.youstream.description
+      descriptionTemplate: PRESETS.youstream.description,
+      search: false,
+      searchSort: "relevance",
+      searchLength: "any",
+      safeSearch: "moderate",
+      catalogs: [],
+      catalogRefresh: { value: 2, unit: "h" }
     });
   });
 
@@ -175,11 +184,24 @@ describe("normalizeConfig", () => {
       embeddableOnly: "yes",
       exclude: "trailer",
       movieQuery: "no placeholder",
-      episodeQuery: 5
+      episodeQuery: 5,
+      search: "no",
+      searchSort: "title",
+      searchLength: "forever",
+      safeSearch: "off",
+      catalogs: "lofi",
+      catalogRefresh: "soon"
     });
     expect(n).toMatchObject({
       movieMargin: DEFAULT_MARGINS.movieMargin,
-      types: ["movie", "series"],
+      // A list is a choice, and none of it named a type.
+      types: [],
+      search: false,
+      searchSort: "relevance",
+      searchLength: "any",
+      safeSearch: "moderate",
+      catalogs: [],
+      catalogRefresh: DEFAULT_CATALOG_REFRESH,
       maxResults: DEFAULT_MAX_RESULTS,
       region: "",
       audioLanguage: "",
@@ -289,7 +311,13 @@ describe("encodeConfig", () => {
         exclude: ["trailer"],
         excludeDescription: ["fan movie"],
         movieQuery: "{title} movie",
-        episodeQuery: "{title} {s00e00}"
+        episodeQuery: "{title} {s00e00}",
+        search: true,
+        searchSort: "viewCount",
+        searchLength: "long",
+        safeSearch: "strict",
+        catalogs: [{ q: "lofi", sort: "relevance", length: "any", within: "any" }, { trending: "music" }],
+        catalogRefresh: "90m"
       })
     ).toEqual({
       youtubeKey: "yt",
@@ -310,12 +338,29 @@ describe("encodeConfig", () => {
       exclude: ["trailer"],
       excludeDescription: ["fan movie"],
       movieQuery: "{title} movie",
-      episodeQuery: "{title} {s00e00}"
+      episodeQuery: "{title} {s00e00}",
+      search: true,
+      searchSort: "viewCount",
+      searchLength: "long",
+      safeSearch: "strict",
+      catalogs: [{ q: "lofi" }, { trending: "music" }],
+      catalogRefresh: "90m"
     });
   });
 
+  test("films and episodes both off is stored, and read back, as no types", () => {
+    expect(decoded({ youtubeKey: "yt", types: [] }).types).toEqual([]);
+    expect(decodeConfig(encodeConfig({ youtubeKey: "yt", types: [] })).types).toEqual([]);
+  });
+
   test("round-trips through decodeConfig", () => {
-    const config = { youtubeKey: "yt", movieMargin: "8%", region: "GB" };
+    const config = {
+      youtubeKey: "yt",
+      movieMargin: "8%",
+      region: "GB",
+      catalogs: [{ channel: "UCBJycsmduvYEL83R_U4JriQ", name: "Marques Brownlee", show: "shorts" }, { playlist: "PLBCF2DAC6FFB574DE", name: "Lectures" }],
+      catalogRefresh: "1.5d"
+    };
     expect(decodeConfig(encodeConfig(config))).toEqual(normalizeConfig(config));
   });
 
@@ -365,5 +410,76 @@ describe("effectiveTmdbKey", () => {
 
   test("is empty when neither has one", () => {
     expect(effectiveTmdbKey(normalizeConfig({}))).toBe("");
+  });
+});
+
+describe("YouTube browsing settings", () => {
+  test("a refresh interval: minutes, hours or days, at least thirty minutes", () => {
+    expect(parseRefresh("90m")).toEqual({ value: 90, unit: "m" });
+    expect(parseRefresh(" 2 H ")).toEqual({ value: 2, unit: "h" });
+    expect(parseRefresh("1.256d")).toEqual({ value: 1.26, unit: "d" });
+    expect(parseRefresh({ value: "3", unit: "h" })).toEqual({ value: 3, unit: "h" });
+    expect(parseRefresh("400d")).toEqual({ value: 400, unit: "d" });
+    // Shorter than the minimum is the minimum, not the default.
+    expect(parseRefresh("10m")).toEqual({ value: 30, unit: "m" });
+    expect(parseRefresh("0.25h")).toEqual({ value: 30, unit: "m" });
+    expect(parseRefresh("30m")).toEqual({ value: 30, unit: "m" });
+  });
+
+  test.each([["0m"], ["-1h"], ["2"], ["2w"], [{ value: 2, unit: "w" }], [{ value: "x", unit: "h" }], [{ value: 0, unit: "h" }], [2], [null]])(
+    "no refresh interval in %p",
+    (raw) => {
+      expect(parseRefresh(raw)).toBeNull();
+    }
+  );
+
+  test("refreshMs", () => {
+    expect(refreshMs({ value: 2, unit: "h" })).toBe(2 * 60 * 60 * 1000);
+    expect(refreshMs({ value: 30, unit: "m" })).toBe(30 * 60 * 1000);
+    expect(refreshMs({ value: 1.5, unit: "d" })).toBe(36 * 60 * 60 * 1000);
+  });
+
+  test("search is off unless saved on, so an addon installed before it existed works as it did", () => {
+    expect(normalizeConfig({}).search).toBe(false);
+    expect(normalizeConfig({ search: true }).search).toBe(true);
+    expect(normalizeConfig({ search: 1 }).search).toBe(false);
+    expect(decoded({ youtubeKey: "yt", search: true }).search).toBe(true);
+    expect(decoded({ youtubeKey: "yt", search: false }).search).toBeUndefined();
+  });
+
+  test("each search order, length and SafeSearch YouTube offers", () => {
+    ["relevance", "date", "viewCount", "rating"].forEach((sort) => expect(normalizeConfig({ searchSort: sort }).searchSort).toBe(sort));
+    ["any", "short", "medium", "long"].forEach((length) => expect(normalizeConfig({ searchLength: length }).searchLength).toBe(length));
+    ["moderate", "strict", "none"].forEach((safe) => expect(normalizeConfig({ safeSearch: safe }).safeSearch).toBe(safe));
+  });
+
+  test("the catalogs are read through catalogs.js, in order", () => {
+    const n = normalizeConfig({ catalogs: [{ trending: "gaming" }, { q: "  lofi   hip hop " }, { nonsense: true }] });
+    expect(n.catalogs.map((c) => c.name)).toEqual(["Trending Gaming", "lofi hip hop"]);
+  });
+
+  test("normalizing a normalized config changes nothing, so a decoded URL can be read again", () => {
+    const once = normalizeConfig({
+      youtubeKey: "yt",
+      types: [],
+      search: true,
+      searchSort: "date",
+      safeSearch: "none",
+      catalogs: [
+        { channel: "UCBJycsmduvYEL83R_U4JriQ", name: "Marques Brownlee", show: "live" },
+        { playlist: "PLBCF2DAC6FFB574DE", name: "Lectures" },
+        { q: "news", sort: "date", within: "day" },
+        { trending: "all" }
+      ],
+      catalogRefresh: "45m"
+    });
+    expect(normalizeConfig(once)).toEqual(once);
+    expect(once.catalogs[0].name).toBe("Marques Brownlee · Live");
+  });
+
+  test("the default refresh interval is two hours and is not stored", () => {
+    expect(DEFAULT_CATALOG_REFRESH).toEqual({ value: 2, unit: "h" });
+    expect(decoded({ youtubeKey: "yt", catalogRefresh: "2h" }).catalogRefresh).toBeUndefined();
+    expect(decoded({ youtubeKey: "yt", catalogRefresh: "120m" }).catalogRefresh).toBe("120m");
   });
 });

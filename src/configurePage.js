@@ -22,8 +22,13 @@ const {
   MAX_RESULTS_LIMIT,
   DEFAULT_MIN_VIEWS,
   MAX_MIN_VIEWS,
-  MAX_QUERY_LENGTH
+  MAX_QUERY_LENGTH,
+  SAFE_SEARCH,
+  REFRESH_UNITS,
+  DEFAULT_CATALOG_REFRESH,
+  MIN_CATALOG_REFRESH
 } = require("./config");
+const catalogs = require("./catalogs");
 
 /** Where the addon's source lives, linked from the footer. */
 const REPO_URL = "https://github.com/deejay189393/YouStream";
@@ -62,6 +67,7 @@ const FIELD_HELP = [
   ["video.offset", "How far from the listed runtime: −51s, +2m 10s or exact"],
   ["video.language", "The language it is spoken in"],
   ["video.ageRestricted", "true for a video YouTube restricts by age"],
+  ["video.live", "true while a video is streaming live, which has no length yet"],
   ["video.id, video.url", "The video's id and link"],
   ["stream.filename", "The release-style name AIOStreams parses: title, year, episode, HD, WEB-DL, language"],
   ["stream.resolution", "720p for HD, 480p for SD: what AIOStreams reads"],
@@ -72,7 +78,7 @@ const FIELD_HELP = [
   ["stream.type", "youtube for in-app rows, external for the others"],
   ["stream.age", "How long ago it was uploaded: 365d"],
   ["stream.message", "A note, such as that a video is age-restricted"],
-  ["metadata.title, metadata.year", "The film or show the stream was found for"],
+  ["metadata.title, metadata.year", "The film or show the stream was found for; empty for a YouTube video opened from a catalog or search"],
   ["metadata.episodeTitle", "The episode's own title"],
   ["addon.name", identity().name]
 ];
@@ -188,6 +194,37 @@ function playbackRows(enabled) {
     .join("");
 }
 
+/** A select's options from a list of { id, label }. */
+function choiceOptions(list, selected) {
+  return list
+    .map((item) => `<option value="${escapeHtml(item.id)}"${item.id === selected ? " selected" : ""}>${escapeHtml(item.label)}</option>`)
+    .join("");
+}
+
+const SAFE_SEARCH_LABELS = { moderate: "Moderate (YouTube's default)", strict: "Strict", none: "Off" };
+
+/**
+ * What the page's YouTube card works from, as JSON for its script: the
+ * reader's catalogs, and the choices each kind of catalog offers.
+ */
+function youtubeData(entries) {
+  const pick = (list) => list.map(({ id, label, short }) => ({ id, label, short: short || "" }));
+  return {
+    catalogs: entries,
+    sorts: pick(catalogs.SORTS),
+    lengths: pick(catalogs.LENGTHS),
+    periods: pick(catalogs.PERIODS),
+    shows: pick(catalogs.CHANNEL_SHOWS),
+    channelSorts: pick(catalogs.CHANNEL_SORTS),
+    trending: catalogs.TRENDING.map(({ id, label, chip }) => ({ id, label, chip })),
+    maxCatalogs: catalogs.MAX_CATALOGS,
+    maxQuery: catalogs.MAX_QUERY_LENGTH,
+    refreshUnits: REFRESH_UNITS,
+    defaultRefresh: DEFAULT_CATALOG_REFRESH,
+    minRefresh: MIN_CATALOG_REFRESH
+  };
+}
+
 function options(list, selected, anyLabel) {
   const any = `<option value=""${selected ? "" : " selected"}>${escapeHtml(anyLabel)}</option>`;
   return (
@@ -215,6 +252,11 @@ function options(list, selected, anyLabel) {
 function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = [] }) {
   const isReconfigure = Boolean(existing);
   const s = normalizeConfig(existing);
+  // A new setup starts with search on and no catalogs, for the reader to
+  // add the rows they want. Reconfiguring shows exactly what was saved --
+  // for an addon installed before search existed, search off.
+  const searchOn = isReconfigure ? s.search : true;
+  const startCatalogs = isReconfigure ? s.catalogs : [];
 
   const tmdbNote = serverTmdb
     ? "This server already has a TMDB key that everyone shares, so you can leave this blank. Add your own only if you prefer to."
@@ -368,6 +410,47 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .fields-help td:first-child { white-space: nowrap; }
   .agree { margin: 18px 0 4px; font-size: 13px; color: var(--muted); }
   .agree a { color: var(--link); }
+  .sub-label { display: block; font-size: 12px; color: var(--muted); margin: 16px 0 8px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+  #catalog-list { display: flex; flex-direction: column; gap: 6px; }
+  .cat-row {
+    display: flex; align-items: flex-start; gap: 10px; background: #121318; border: 1px solid var(--border);
+    border-radius: 9px; padding: 9px 10px;
+  }
+  .cat-rank {
+    flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: #fff;
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 3px;
+  }
+  .cat-main { flex: 1 1 auto; min-width: 0; }
+  .cat-label { font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; padding-top: 3px; }
+  .cat-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+  .cat-opts select { width: auto; max-width: 100%; padding: 5px 8px; font-size: 12.5px; border-radius: 7px; }
+  .cat-empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
+  .cat-lead { margin: 0 0 10px; }
+  .cat-fixed { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+  .btns { flex: 0 0 auto; display: flex; gap: 4px; }
+  .btns button {
+    width: 28px; height: 28px; padding: 0; font-size: 11px; background: var(--field); border: 1px solid var(--border);
+    color: var(--muted); border-radius: 7px; cursor: pointer;
+  }
+  .btns button:disabled { opacity: .3; cursor: default; }
+  .btns button.remove { color: #ff6b6b; }
+  .add-row { display: flex; gap: 8px; margin-top: 10px; }
+  .add-row input { flex: 1 1 auto; min-width: 0; }
+  .add-btn {
+    flex: 0 0 auto; background: var(--field); border: 1px solid var(--border); color: var(--text);
+    padding: 0 16px; border-radius: 9px; font-size: 14px; cursor: pointer;
+  }
+  .add-btn:disabled { opacity: .5; cursor: progress; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button {
+    background: var(--field); border: 1px solid var(--border); color: var(--text); padding: 6px 11px;
+    font-size: 13px; border-radius: 999px; cursor: pointer;
+  }
+  .chips button:hover { border-color: var(--link); }
+  .inline-inputs { display: flex; gap: 8px; }
+  .inline-inputs input { flex: 1 1 auto; min-width: 0; }
+  .inline-inputs select { width: auto; flex: 0 0 auto; }
+  .note-warn { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -420,7 +503,69 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
         <label class="check"><input type="checkbox" id="type-series"${s.types.includes("series") ? " checked" : ""} />
           <span><strong>Series</strong><em>Episodes, including web series that only exist on YouTube, and anime from channels like Muse Asia and Ani-One.</em></span></label>
       </div>
-      <div class="hint">Each type you switch off saves your daily searches for the other.</div>
+      <div class="hint">Each type you switch off saves your daily searches for the rest. Switch both off to use ${ADDON_NAME} for YouTube alone.</div>
+    </div>
+
+    <div class="card" id="youtube-card">
+      <h2>YouTube in your app</h2>
+      <p class="lead">
+        Search YouTube from your app, and keep searches, channels, playlists and Trending as rows on its home
+        screen. A video you open there plays the ways you choose under &ldquo;When you press play&rdquo;, and one
+        you save to your library is listed under the type <strong>YouTube</strong>.
+      </p>
+      <div class="row-box">
+        <label class="check"><input type="checkbox" id="yt-search"${searchOn ? " checked" : ""} />
+          <span><strong>Search YouTube</strong><em>Your app's search shows a row of YouTube's own results, live. Each search costs one of your 100 a day, so ${ADDON_NAME} waits until you stop typing and skips anything under 3 letters.</em></span></label>
+      </div>
+      <div class="grid-2" style="margin-top:10px">
+        <label class="field">
+          <span class="label-text">Order search results by</span>
+          <select id="search-sort">${choiceOptions(catalogs.SORTS, s.searchSort)}</select>
+        </label>
+        <label class="field">
+          <span class="label-text">Video length</span>
+          <select id="search-length">${choiceOptions(catalogs.LENGTHS, s.searchLength)}</select>
+        </label>
+      </div>
+
+      <span class="sub-label">Catalogs</span>
+      <p class="hint cat-lead">
+        Each one is a row on your app's home screen, <strong>in this order</strong>: use the arrows to arrange
+        them. Type a search, or paste a channel or a playlist, then choose how its videos are ordered.
+      </p>
+      <div id="catalog-list"></div>
+      <div class="add-row">
+        <input type="text" id="catalog-input" maxlength="500" placeholder="lofi hip hop, @mkbhd, or a channel or playlist link" aria-label="A search, channel or playlist to add" spellcheck="false" />
+        <button type="button" class="add-btn" id="catalog-add">Add</button>
+      </div>
+      <div class="hint" id="catalog-note" role="status"></div>
+      <span class="sub-label">Trending in your country</span>
+      <div class="chips" id="trending-chips"></div>
+
+      <div class="grid-2" style="margin-top:16px">
+        <div class="field">
+          <span class="label-text">Refresh catalogs every</span>
+          <div class="inline-inputs">
+            <input type="number" id="refresh-value" min="0" step="any" inputmode="decimal" value="${escapeHtml(s.catalogRefresh.value)}" aria-label="Refresh catalogs every" />
+            <select id="refresh-unit" aria-label="Refresh unit">${Object.entries(REFRESH_UNITS)
+              .map(([unit, info]) => `<option value="${unit}"${unit === s.catalogRefresh.unit ? " selected" : ""}>${escapeHtml(info.label)}</option>`)
+              .join("")}</select>
+          </div>
+        </div>
+        <label class="field">
+          <span class="label-text">SafeSearch</span>
+          <select id="safe-search">${SAFE_SEARCH.map(
+            (id) => `<option value="${id}"${id === s.safeSearch ? " selected" : ""}>${escapeHtml(SAFE_SEARCH_LABELS[id])}</option>`
+          ).join("")}</select>
+        </label>
+      </div>
+      <div class="hint">
+        A search catalog costs one of your 100 daily searches each time it refreshes; a channel, a playlist or a
+        Trending row costs almost nothing. A row refreshes only when your app shows it after this long: every
+        ${DEFAULT_CATALOG_REFRESH.value} hours unless you change it, and at most every 30 minutes. YouTube's terms let a
+        server keep its data 30 days at most, so anything longer refreshes then. SafeSearch applies to searches.
+        <span id="quota-note"></span>
+      </div>
     </div>
 
     <div class="card">
@@ -465,7 +610,8 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
         </label>
       </div>
       <div class="hint" style="margin-top:0;margin-bottom:12px">
-        Your country hides videos that are blocked there and ranks results for it. An audio language drops
+        Your country hides videos that are blocked there and ranks results for it, YouTube search and Trending
+        included. An audio language drops
         videos in another one &mdash; going by what the title says (&ldquo;Hindi dub&rdquo;) before YouTube's own
         tag, which channels often get wrong &mdash; adds it to movie searches (good for dubbed films), and ranks
         it first. Videos with no language known are kept. The view minimum keeps out nearly unwatched lookalikes;
@@ -509,6 +655,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
             <div class="preview-tabs">
               <button type="button" class="preview-tab" data-sample="film" aria-pressed="true">Film</button>
               <button type="button" class="preview-tab" data-sample="episode" aria-pressed="false">Episode</button>
+              <button type="button" class="preview-tab" data-sample="video" aria-pressed="false">YouTube video</button>
             </div>
           </div>
           <ul id="format-preview" class="preview" aria-live="polite"></ul>
@@ -590,6 +737,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   </footer>
 </div>
 
+<script type="application/json" id="youtube-data">${jsonForScript(youtubeData(startCatalogs))}</script>
 <script type="application/json" id="format-data">${jsonForScript({
     presets: PRESETS,
     defaultFormat: DEFAULT_FORMAT,
@@ -856,6 +1004,292 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     }
   }
 
+  // The YouTube card: search, and the reader's catalogs in their order.
+  // CATALOGS is the source of truth for the list on screen and for what is
+  // saved; rows are built with createElement and textContent, so nothing a
+  // reader typed or YouTube named can be read as markup.
+  var YT = JSON.parse(document.getElementById("youtube-data").textContent);
+  var CATALOGS = YT.catalogs;
+  var catalogList = document.getElementById("catalog-list");
+  var catalogInput = document.getElementById("catalog-input");
+  var catalogAdd = document.getElementById("catalog-add");
+  var catalogNote = document.getElementById("catalog-note");
+  var trendingChips = document.getElementById("trending-chips");
+  var ytSearch = document.getElementById("yt-search");
+  var searchSort = document.getElementById("search-sort");
+  var searchLength = document.getElementById("search-length");
+  var refreshValue = document.getElementById("refresh-value");
+  var refreshUnit = document.getElementById("refresh-unit");
+  var quotaNote = document.getElementById("quota-note");
+
+  function node(tag, className, text) {
+    var el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+  function choice(list, id) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) return list[i];
+    }
+    return list[0];
+  }
+  // What a row is called: the names the server gives catalogs.
+  function catalogName(entry) {
+    if (entry.kind === "search") {
+      return [entry.q, choice(YT.sorts, entry.sort).short, choice(YT.lengths, entry.length).short, choice(YT.periods, entry.within).short]
+        .filter(Boolean)
+        .join(" · ");
+    }
+    if (entry.kind === "channel") {
+      return [entry.title, choice(YT.shows, entry.show).short, choice(YT.channelSorts, entry.sort).short].filter(Boolean).join(" · ");
+    }
+    if (entry.kind === "playlist") return entry.title;
+    return choice(YT.trending, entry.trending).label;
+  }
+  // Two rows that would list the same videos.
+  function sameCatalog(a, b) {
+    if (a.kind !== b.kind) return false;
+    if (a.kind === "search") {
+      return a.q.toLowerCase() === b.q.toLowerCase() && a.sort === b.sort && a.length === b.length && a.within === b.within;
+    }
+    if (a.kind === "channel") return a.channel === b.channel && a.show === b.show && a.sort === b.sort;
+    if (a.kind === "playlist") return a.playlist === b.playlist;
+    return a.trending === b.trending;
+  }
+  // The compact form the install link carries, defaults left out.
+  function storedCatalog(entry) {
+    if (entry.kind === "search") {
+      var search = { q: entry.q };
+      if (entry.sort !== "relevance") search.sort = entry.sort;
+      if (entry.length !== "any") search.length = entry.length;
+      if (entry.within !== "any") search.within = entry.within;
+      return search;
+    }
+    if (entry.kind === "channel") {
+      var channel = { channel: entry.channel, name: entry.title };
+      if (entry.show !== "videos") channel.show = entry.show;
+      if (entry.sort !== "date") channel.sort = entry.sort;
+      return channel;
+    }
+    if (entry.kind === "playlist") return { playlist: entry.playlist, name: entry.title };
+    return { trending: entry.trending };
+  }
+  function note(text, warn) {
+    catalogNote.textContent = text;
+    catalogNote.className = warn ? "hint note-warn" : "hint";
+  }
+  function smallButton(text, className, title, onClick) {
+    var b = node("button", className, text);
+    b.type = "button";
+    b.title = title;
+    b.setAttribute("aria-label", title);
+    b.addEventListener("click", onClick);
+    return b;
+  }
+  function optionSelect(list, value, label, onChange) {
+    var select = node("select");
+    select.setAttribute("aria-label", label);
+    list.forEach(function (item) {
+      var option = node("option", "", item.label);
+      option.value = item.id;
+      if (item.id === value) option.selected = true;
+      select.appendChild(option);
+    });
+    select.addEventListener("change", function () { onChange(select); });
+    return select;
+  }
+  function moveCatalog(from, to) {
+    if (to < 0 || to >= CATALOGS.length) return;
+    var moved = CATALOGS.splice(from, 1)[0];
+    CATALOGS.splice(to, 0, moved);
+    renderCatalogs();
+  }
+  // A row's option changed: kept, unless the row would then repeat another.
+  function changeCatalog(index, field, select, nameEl) {
+    var entry = CATALOGS[index];
+    var changed = {};
+    Object.keys(entry).forEach(function (key) { changed[key] = entry[key]; });
+    changed[field] = select.value;
+    for (var i = 0; i < CATALOGS.length; i++) {
+      if (i !== index && sameCatalog(CATALOGS[i], changed)) {
+        select.value = entry[field];
+        note("You already have that catalog.", true);
+        return;
+      }
+    }
+    CATALOGS[index] = changed;
+    nameEl.textContent = catalogName(changed);
+    note("");
+    renderQuota();
+  }
+  function renderCatalogs() {
+    catalogList.textContent = "";
+    if (!CATALOGS.length) {
+      catalogList.appendChild(node("div", "cat-empty", "No catalogs yet. Add a search, a channel, a playlist or a Trending row below."));
+    }
+    CATALOGS.forEach(function (entry, index) {
+      var title = catalogName(entry);
+      var row = node("div", "cat-row");
+      row.setAttribute("data-kind", entry.kind);
+      row.appendChild(node("div", "cat-rank", String(index + 1)));
+      var main = node("div", "cat-main");
+      var label = node("div", "cat-label");
+      var name = node("span", "cat-name", title);
+      label.appendChild(name);
+      label.appendChild(node("span", "chip", entry.kind));
+      main.appendChild(label);
+      var opts = node("div", "cat-opts");
+      var addOption = function (list, field, what) {
+        opts.appendChild(optionSelect(list, entry[field], what, function (select) { changeCatalog(index, field, select, name); }));
+      };
+      if (entry.kind === "search") {
+        addOption(YT.sorts, "sort", "Order of " + title);
+        addOption(YT.lengths, "length", "Length of videos in " + title);
+        addOption(YT.periods, "within", "Upload date of videos in " + title);
+      } else if (entry.kind === "channel") {
+        addOption(YT.shows, "show", "What to list from " + title);
+        addOption(YT.channelSorts, "sort", "Order of " + title);
+      }
+      if (opts.childNodes.length) main.appendChild(opts);
+      // The rest have one order, which YouTube keeps.
+      if (entry.kind === "playlist") main.appendChild(node("div", "cat-fixed", "In the playlist's own order"));
+      if (entry.kind === "trending") main.appendChild(node("div", "cat-fixed", "Ranked by YouTube, for your country"));
+      row.appendChild(main);
+      var btns = node("div", "btns");
+      var up = smallButton("▲", "cat-up", "Move " + title + " up", function () { moveCatalog(index, index - 1); });
+      var down = smallButton("▼", "cat-down", "Move " + title + " down", function () { moveCatalog(index, index + 1); });
+      up.disabled = index === 0;
+      down.disabled = index === CATALOGS.length - 1;
+      btns.appendChild(up);
+      btns.appendChild(down);
+      btns.appendChild(smallButton("×", "remove", "Remove " + title, function () {
+        CATALOGS.splice(index, 1);
+        renderCatalogs();
+      }));
+      row.appendChild(btns);
+      catalogList.appendChild(row);
+    });
+    renderTrendingChips();
+    renderQuota();
+  }
+  // Only the Trending rows not added yet.
+  function renderTrendingChips() {
+    trendingChips.textContent = "";
+    YT.trending.forEach(function (chart) {
+      for (var i = 0; i < CATALOGS.length; i++) {
+        if (CATALOGS[i].kind === "trending" && CATALOGS[i].trending === chart.id) return;
+      }
+      trendingChips.appendChild(smallButton("+ " + chart.chip, "", "Add " + chart.label, function () {
+        addCatalog({ kind: "trending", trending: chart.id });
+      }));
+    });
+    if (!trendingChips.childNodes.length) trendingChips.appendChild(node("div", "cat-empty", "Every Trending row is added."));
+  }
+  function addCatalog(entry) {
+    if (CATALOGS.length >= YT.maxCatalogs) return note("You can have at most " + YT.maxCatalogs + " catalogs.", true);
+    for (var i = 0; i < CATALOGS.length; i++) {
+      if (sameCatalog(CATALOGS[i], entry)) return note("You already have that catalog.", true);
+    }
+    CATALOGS.push(entry);
+    catalogInput.value = "";
+    note("");
+    renderCatalogs();
+  }
+  function addSearch(q) {
+    if (q.length > YT.maxQuery) return note("A search can be at most " + YT.maxQuery + " characters long.", true);
+    addCatalog({ kind: "search", q: q, sort: "relevance", length: "any", within: "any" });
+  }
+  // A channel or a playlist rather than a search: an @handle, a YouTube
+  // link, or a channel or playlist id. The server has the final say.
+  function looksLikeSource(text) {
+    if (text.indexOf(" ") !== -1) return false;
+    if (text.charAt(0) === "@") return true;
+    if (text.indexOf("youtube.com") !== -1 || text.indexOf("youtu.be") !== -1) return true;
+    if (text.length === 24 && text.indexOf("UC") === 0) return true;
+    return (text.indexOf("PL") === 0 && text.length >= 18) || (text.indexOf("OLAK5uy_") === 0 && text.length >= 41);
+  }
+  // Runs of whitespace as single spaces, by character code: this script
+  // cannot hold the escape a whitespace regex needs.
+  function collapseSpaces(text) {
+    var words = [];
+    var word = "";
+    for (var i = 0; i < text.length; i++) {
+      if (text.charCodeAt(i) <= 32) {
+        if (word) words.push(word);
+        word = "";
+      } else {
+        word += text.charAt(i);
+      }
+    }
+    if (word) words.push(word);
+    return words.join(" ");
+  }
+  function addFromInput() {
+    var text = collapseSpaces(catalogInput.value);
+    if (!text) return;
+    if (!looksLikeSource(text)) return addSearch(text);
+    var key = document.getElementById("youtube-key").value.trim();
+    if (!key) return note("Enter your YouTube API key above first: it is used to look the link up.", true);
+    if (typeof fetch !== "function") return note("This browser cannot look links up.", true);
+    catalogAdd.disabled = true;
+    note("Looking it up...");
+    fetch("/api/youtube-source", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ youtubeKey: key, input: text })
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (answer) {
+        catalogAdd.disabled = false;
+        if (answer.entry) return addCatalog(answer.entry);
+        if (answer.search) return addSearch(text);
+        note(answer.error || "That could not be looked up.", true);
+      })
+      .catch(function () {
+        catalogAdd.disabled = false;
+        note("The link could not be looked up. Check your connection and try again.", true);
+      });
+  }
+  catalogAdd.addEventListener("click", addFromInput);
+  // Enter in the box adds what was typed rather than submitting the form.
+  catalogInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addFromInput();
+    }
+  });
+  // Minutes between refreshes as typed, or NaN.
+  function refreshMinutes() {
+    var text = refreshValue.value.trim();
+    if (!isDecimal(text)) return NaN;
+    return (parseFloat(text) * YT.refreshUnits[refreshUnit.value].ms) / 60000;
+  }
+  // What the search catalogs could cost a day at this interval, shown all day.
+  function renderQuota() {
+    var searches = CATALOGS.filter(function (c) { return c.kind === "search"; }).length;
+    var minutes = refreshMinutes();
+    quotaNote.className = "";
+    quotaNote.textContent = "";
+    if (!searches || !(minutes >= 30)) return;
+    var most = Math.ceil(1440 / minutes) * searches;
+    if (most >= 100) {
+      quotaNote.className = "note-warn";
+      quotaNote.textContent = "Shown all day, your search catalogs could spend all 100 of your daily searches, leaving none for films and episodes: refresh them less often, or use channels and playlists.";
+    } else {
+      quotaNote.textContent = "Shown all day, your search catalogs would spend at most " + most + " of your 100 daily searches.";
+    }
+  }
+  refreshValue.addEventListener("input", renderQuota);
+  refreshUnit.addEventListener("change", renderQuota);
+  function syncSearch() {
+    searchSort.disabled = !ytSearch.checked;
+    searchLength.disabled = !ytSearch.checked;
+  }
+  ytSearch.addEventListener("change", syncSearch);
+  syncSearch();
+  renderCatalogs();
+
   // Reads the form into a config, or returns an error message.
   function readConfig() {
     var youtubeKey = document.getElementById("youtube-key").value.trim();
@@ -867,7 +1301,9 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     var types = [];
     if (document.getElementById("type-movie").checked) types.push("movie");
     if (document.getElementById("type-series").checked) types.push("series");
-    if (!types.length) return "Choose movies, series, or both.";
+    if (!types.length && !ytSearch.checked && !CATALOGS.length) {
+      return "Choose something for YouStream to do: movies, series, YouTube search, or a catalog.";
+    }
 
     var config = { youtubeKey: youtubeKey };
     if (tmdbKey) config.tmdbKey = tmdbKey;
@@ -893,7 +1329,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     config.playback = playback;
     config.playbackVersion = PLAYBACK_VERSION;
 
-    if (types.length === 1) config.types = types;
+    if (types.length < 2) config.types = types;
 
     var maxText = document.getElementById("max-results").value.trim();
     if (!isWholeNumber(maxText) || parseInt(maxText, 10) < 1 || parseInt(maxText, 10) > MAX_RESULTS_LIMIT) {
@@ -940,6 +1376,18 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     if (exclude.join(",") !== DEFAULT_EXCLUDE.join(",")) config.exclude = exclude;
     var excludeDescription = readList("exclude-description");
     if (excludeDescription.join(",") !== DEFAULT_EXCLUDE_DESCRIPTION.join(",")) config.excludeDescription = excludeDescription;
+
+    if (ytSearch.checked) config.search = true;
+    if (searchSort.value !== "relevance") config.searchSort = searchSort.value;
+    if (searchLength.value !== "any") config.searchLength = searchLength.value;
+    var safeSearch = document.getElementById("safe-search").value;
+    if (safeSearch !== "moderate") config.safeSearch = safeSearch;
+    if (CATALOGS.length) config.catalogs = CATALOGS.map(storedCatalog);
+    var minutes = refreshMinutes();
+    if (!(minutes > 0)) return "Refresh catalogs every: enter a number.";
+    if (minutes < 30) return "Refresh catalogs every: at least 30 minutes.";
+    var refresh = parseFloat(refreshValue.value.trim()) + refreshUnit.value;
+    if (refresh !== YT.defaultRefresh.value + YT.defaultRefresh.unit) config.catalogRefresh = refresh;
 
     if (!document.getElementById("agree").checked) {
       return "To install YouStream, agree to the YouTube Terms of Service and YouStream's terms of use and privacy policy.";

@@ -1,19 +1,30 @@
 const { normalizeConfig, isConfigured, effectiveTmdbKey } = require("./config");
+const { ITEM_TYPE, ITEM_PREFIX } = require("./items");
+const { SKIP_OPTIONS } = require("./catalogs");
 
 /**
- * The addon's manifest: a stream-only addon for films and shows.
+ * The addon's manifest. Two things in one addon:
  *
- * It serves no catalogs and no metadata. It sits beside whatever already
- * provides those (Cinemeta, TMDB, Kitsu), and when the reader opens a film or
- * an episode, the app asks it, along with every other stream addon, for ways
- * to play it.
+ *   Films and shows. Streams only: YouStream sits beside whatever provides
+ *   their catalogs and metadata (Cinemeta, TMDB, Kitsu), and when the reader
+ *   opens a film or an episode, the app asks it, with every other stream
+ *   addon, for ways to play it.
+ *
+ *   YouTube itself. Catalogs (the reader's searches, channels, playlists and
+ *   Trending), a search row, and metadata and streams for every video they
+ *   list, as items of the type "YouTube" (items.js). Metadata is claimed for
+ *   that type and its "youstream:" ids alone, per resource, so the app never
+ *   asks YouStream about a film.
  */
 const ADDON_ID = "org.deejay189393.youstream";
-const ADDON_VERSION = "0.6.0";
+const ADDON_VERSION = "0.7.0";
 const ADDON_NAME = "YouStream";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION =
-  "Movies and episodes that are on YouTube, playable from Stremio and Nuvio. Matches full uploads by runtime, so you get the film or the episode, never its trailer.";
+  "Movies and episodes that are on YouTube, playable from Stremio and Nuvio, matched by runtime so you get the film or the episode, never its trailer. Plus YouTube itself: search it, and keep searches, channels, playlists and Trending as catalogs.";
+
+/** The catalog that answers the app's search; never shown on its own. */
+const SEARCH_CATALOG_ID = "search";
 
 /**
  * The beta deployment runs the same code from another branch. Marking it
@@ -60,11 +71,51 @@ function idPrefixes(settings) {
 const UNCONFIGURED_PREFIX = "youstream-not-configured:";
 
 /**
- * Kitsu-backed anime addons file their titles under "anime" as well as the
- * usual types, so that type is claimed alongside them.
+ * The types films and shows are streamed for. Kitsu-backed anime addons
+ * file their titles under "anime" as well as the usual types, so that type
+ * is claimed alongside them -- unless the reader turned films and shows off.
  */
 function typesFor(settings) {
-  return [...settings.types, "anime"];
+  return settings.types.length ? [...settings.types, "anime"] : [];
+}
+
+/**
+ * The reader's catalogs, in their order, then the one that answers search.
+ *
+ * Search is a single catalog, so a search shows one row of YouTube results,
+ * named for the addon. Its `search` extra is required, which keeps it off
+ * the home screen and out of Discover, where it would be an empty row.
+ * Every catalog declares its page steps (catalogs.SKIP_OPTIONS).
+ */
+function catalogsFor(settings) {
+  const skip = { name: "skip", options: SKIP_OPTIONS };
+  return [
+    ...settings.catalogs.map((entry) => ({ type: ITEM_TYPE, id: entry.id, name: entry.name, extra: [skip] })),
+    ...(settings.search
+      ? [{ type: ITEM_TYPE, id: SEARCH_CATALOG_ID, name: identity().name, extra: [{ name: "search", isRequired: true }, skip] }]
+      : [])
+  ];
+}
+
+/**
+ * What a configured addon serves. Metadata only for YouTube items; streams
+ * for those and for films and shows, each resource with its own types and
+ * id prefixes, so neither is asked about the other's ids.
+ */
+function configuredParts(settings) {
+  const types = typesFor(settings);
+  const prefixes = types.length ? idPrefixes(settings) : [];
+  const catalogs = catalogsFor(settings);
+  return {
+    resources: [
+      ...(catalogs.length ? ["catalog"] : []),
+      { name: "meta", types: [ITEM_TYPE], idPrefixes: [ITEM_PREFIX] },
+      { name: "stream", types: [...types, ITEM_TYPE], idPrefixes: [...prefixes, ITEM_PREFIX] }
+    ],
+    types: [...types, ITEM_TYPE],
+    idPrefixes: [...prefixes, ITEM_PREFIX],
+    catalogs
+  };
 }
 
 /**
@@ -77,6 +128,9 @@ function buildManifest(config, baseUrl) {
   const settings = normalizeConfig(config);
   const configured = isConfigured(config);
   const signed = stremioAddonsConfig();
+  const parts = configured
+    ? configuredParts(settings)
+    : { resources: ["stream"], types: typesFor(settings), idPrefixes: [UNCONFIGURED_PREFIX], catalogs: [] };
   return {
     ...identity(),
     version: ADDON_VERSION,
@@ -86,10 +140,7 @@ function buildManifest(config, baseUrl) {
     logo: `${baseUrl}/logo.png?v=${ADDON_VERSION}`,
     background: `${baseUrl}/background.png?v=${ADDON_VERSION}`,
     contactEmail: CONTACT_EMAIL,
-    resources: ["stream"],
-    types: typesFor(settings),
-    idPrefixes: configured ? idPrefixes(settings) : [UNCONFIGURED_PREFIX],
-    catalogs: [],
+    ...parts,
     behaviorHints: { configurable: true, configurationRequired: !configured },
     ...(signed ? { stremioAddonsConfig: signed } : {})
   };
@@ -102,8 +153,10 @@ function getUnconfiguredManifest(baseUrl) {
 
 /**
  * The manifest the SDK's router is built from. Never served: it exists
- * because the SDK builds one static interface at startup, and it needs a
- * non-empty `config` to prefix its routes with the optional `/:config?`.
+ * because the SDK builds one static interface at startup. It needs a
+ * non-empty `config` to prefix its routes with the optional `/:config?`, and
+ * a catalog for the router to serve catalogs at all; which catalog ids exist
+ * is each reader's own (catalogs.js), read from their config per request.
  */
 function buildInterfaceManifest() {
   return {
@@ -111,10 +164,10 @@ function buildInterfaceManifest() {
     version: ADDON_VERSION,
     name: ADDON_NAME,
     description: "Internal routing manifest (not served).",
-    resources: ["stream"],
-    types: ["movie", "series", "anime"],
-    idPrefixes: ["tt", "kitsu:", "tmdb:"],
-    catalogs: [],
+    resources: ["catalog", "meta", "stream"],
+    types: ["movie", "series", "anime", ITEM_TYPE],
+    idPrefixes: ["tt", "kitsu:", "tmdb:", ITEM_PREFIX],
+    catalogs: [{ type: ITEM_TYPE, id: SEARCH_CATALOG_ID, name: ADDON_NAME, extra: [{ name: "search", isRequired: true }] }],
     config: [{ key: "youtubeKey", type: "password", title: "YouTube API key" }],
     behaviorHints: { configurable: true, configurationRequired: true }
   };
@@ -124,11 +177,14 @@ module.exports = {
   buildManifest,
   getUnconfiguredManifest,
   buildInterfaceManifest,
+  catalogsFor,
+  typesFor,
   identity,
   releaseChannel,
   stremioAddonsConfig,
   idPrefixes,
   UNCONFIGURED_PREFIX,
+  SEARCH_CATALOG_ID,
   ADDON_ID,
   ADDON_VERSION,
   ADDON_NAME,

@@ -139,9 +139,15 @@ describe("clearAllCaches, cacheStats and closeCache", () => {
     await searchCache.set("a", []);
     await metadataCache.set("b", {});
     await keyCooldown.set("c", true);
-    expect(await cache.cacheStats()).toMatchObject({ store: "memory", prefix: "youstream", entries: { search: 1, metadata: 1, cooldown: 1 } });
-    expect(await cache.clearAllCaches()).toBe(3);
-    expect((await cache.cacheStats()).entries).toEqual({ search: 0, metadata: 0, cooldown: 0 });
+    await cache.browseCache.set("d", { items: [], next: null });
+    await cache.videoCache.set("e", {});
+    expect(await cache.cacheStats()).toMatchObject({
+      store: "memory",
+      prefix: "youstream",
+      entries: { search: 1, metadata: 1, cooldown: 1, browse: 1, video: 1 }
+    });
+    expect(await cache.clearAllCaches()).toBe(5);
+    expect((await cache.cacheStats()).entries).toEqual({ search: 0, metadata: 0, cooldown: 0, browse: 0, video: 0 });
   });
 
   test("closing twice is harmless, and the next use starts again", async () => {
