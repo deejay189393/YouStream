@@ -15,6 +15,7 @@ const { hostConfig, describeCache } = require("./src/hostConfig");
 const { NAMESPACES, cacheSettings, cacheStats, clearAllCaches } = require("./src/cache");
 const imdb = require("./src/metadata/imdb");
 const { resolveSource } = require("./src/browse");
+const { SOURCE_KINDS } = require("./src/catalogs");
 const { trackRequest } = require("./src/requestContext");
 
 const app = express();
@@ -143,15 +144,16 @@ app.post("/api/check-keys", express.json({ limit: "4kb" }), async (req, res) => 
 });
 
 /**
- * Looks up a channel or playlist the reader pasted on the configure page --
- * a link, an @handle or an id -- so it can become a catalog: { entry },
- * { error }, or { search: true } for text that is a search instead. POST for
- * the same reason as above; costs the reader 1 unit.
+ * Looks up a playlist or a channel the reader pasted on the configure page
+ * -- a link, an @handle or an id -- so it can become a catalog: { entry } or
+ * { error }. `kind` is the source they chose, "playlist" or "channel". POST
+ * for the same reason as above; costs the reader 1 unit.
  */
 app.post("/api/youtube-source", express.json({ limit: "4kb" }), async (req, res) => {
   const youtubeKey = cleanKey(req.body.youtubeKey);
+  if (!SOURCE_KINDS.includes(req.body.kind)) return res.json({ error: "Choose YouTube playlist or YouTube channel to look a link up." });
   if (!youtubeKey) return res.json({ error: "Enter your YouTube API key above first: it is used to look the link up." });
-  res.json(await resolveSource(youtubeKey, typeof req.body.input === "string" ? req.body.input.slice(0, 500) : ""));
+  res.json(await resolveSource(youtubeKey, typeof req.body.input === "string" ? req.body.input.slice(0, 500) : "", req.body.kind));
 });
 
 // --- Manifest routes are served here rather than by the SDK router, because

@@ -203,6 +203,13 @@ function choiceOptions(list, selected) {
 
 const SAFE_SEARCH_LABELS = { moderate: "Moderate (YouTube's default)", strict: "Strict", none: "Off" };
 
+/** Where a catalog's videos can come from, and what the add row then asks for. */
+const CATALOG_SOURCES = [
+  { id: "search", label: "YouTube search", placeholder: "A search, such as lofi hip hop", prompt: "What to search YouTube for" },
+  { id: "playlist", label: "YouTube playlist", placeholder: "A playlist's link or ID", prompt: "A YouTube playlist's link or ID" },
+  { id: "channel", label: "YouTube channel", placeholder: "A channel's link or @handle", prompt: "A YouTube channel's link or @handle" }
+];
+
 /**
  * What the page's YouTube card works from, as JSON for its script: the
  * reader's catalogs, and the choices each kind of catalog offers.
@@ -217,6 +224,7 @@ function youtubeData(entries) {
     shows: pick(catalogs.CHANNEL_SHOWS),
     channelSorts: pick(catalogs.CHANNEL_SORTS),
     trending: catalogs.TRENDING.map(({ id, label, chip }) => ({ id, label, chip })),
+    sources: CATALOG_SOURCES,
     maxCatalogs: catalogs.MAX_CATALOGS,
     maxQuery: catalogs.MAX_QUERY_LENGTH,
     refreshUnits: REFRESH_UNITS,
@@ -435,7 +443,9 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .btns button:disabled { opacity: .3; cursor: default; }
   .btns button.remove { color: #ff6b6b; }
   .add-row { display: flex; gap: 8px; margin-top: 10px; }
-  .add-row input { flex: 1 1 auto; min-width: 0; }
+  .add-row input { flex: 1 1 0; min-width: 0; }
+  #catalog-source { width: auto; flex: 0 0 auto; }
+  @media (max-width: 480px) { .source-row { flex-wrap: wrap; } #catalog-source { flex: 1 1 100%; } }
   .add-btn {
     flex: 0 0 auto; background: var(--field); border: 1px solid var(--border); color: var(--text);
     padding: 0 16px; border-radius: 9px; font-size: 14px; cursor: pointer;
@@ -531,11 +541,13 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       <span class="sub-label">Catalogs</span>
       <p class="hint cat-lead">
         Each one is a row on your app's home screen, <strong>in this order</strong>: use the arrows to arrange
-        them. Type a search, or paste a channel or a playlist, then choose how its videos are ordered.
+        them. Choose where a row's videos come from, type the search or paste the playlist or channel, then choose
+        how its videos are ordered.
       </p>
       <div id="catalog-list"></div>
-      <div class="add-row">
-        <input type="text" id="catalog-input" maxlength="500" placeholder="lofi hip hop, @mkbhd, or a channel or playlist link" aria-label="A search, channel or playlist to add" spellcheck="false" />
+      <div class="add-row source-row">
+        <select id="catalog-source" aria-label="Where the catalog's videos come from">${choiceOptions(CATALOG_SOURCES, CATALOG_SOURCES[0].id)}</select>
+        <input type="text" id="catalog-input" maxlength="500" placeholder="${escapeHtml(CATALOG_SOURCES[0].placeholder)}" aria-label="${escapeHtml(CATALOG_SOURCES[0].prompt)}" spellcheck="false" />
         <button type="button" class="add-btn" id="catalog-add">Add</button>
       </div>
       <div class="hint" id="catalog-note" role="status"></div>
@@ -1012,6 +1024,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   var CATALOGS = YT.catalogs;
   var catalogList = document.getElementById("catalog-list");
   var catalogInput = document.getElementById("catalog-input");
+  var catalogSource = document.getElementById("catalog-source");
   var catalogAdd = document.getElementById("catalog-add");
   var catalogNote = document.getElementById("catalog-note");
   var trendingChips = document.getElementById("trending-chips");
@@ -1200,14 +1213,17 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     if (q.length > YT.maxQuery) return note("A search can be at most " + YT.maxQuery + " characters long.", true);
     addCatalog({ kind: "search", q: q, sort: "relevance", length: "any", within: "any" });
   }
-  // A channel or a playlist rather than a search: an @handle, a YouTube
-  // link, or a channel or playlist id. The server has the final say.
-  function looksLikeSource(text) {
-    if (text.indexOf(" ") !== -1) return false;
-    if (text.charAt(0) === "@") return true;
-    if (text.indexOf("youtube.com") !== -1 || text.indexOf("youtu.be") !== -1) return true;
-    if (text.length === 24 && text.indexOf("UC") === 0) return true;
-    return (text.indexOf("PL") === 0 && text.length >= 18) || (text.indexOf("OLAK5uy_") === 0 && text.length >= 41);
+  // The add row asks for what the chosen source needs.
+  function syncSource() {
+    var source = choice(YT.sources, catalogSource.value);
+    catalogInput.placeholder = source.placeholder;
+    catalogInput.setAttribute("aria-label", source.prompt);
+    note("");
+  }
+  catalogSource.addEventListener("change", syncSource);
+  // A link added as a search is a slip: YouTube would be searched for it.
+  function isYoutubeLink(text) {
+    return text.indexOf("youtube.com/") !== -1 || text.indexOf("youtu.be/") !== -1;
   }
   // Runs of whitespace as single spaces, by character code: this script
   // cannot hold the escape a whitespace regex needs.
@@ -1228,7 +1244,11 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   function addFromInput() {
     var text = collapseSpaces(catalogInput.value);
     if (!text) return;
-    if (!looksLikeSource(text)) return addSearch(text);
+    var kind = catalogSource.value;
+    if (kind === "search") {
+      if (isYoutubeLink(text)) return note("That is a YouTube link. To add it, choose YouTube playlist or YouTube channel.", true);
+      return addSearch(text);
+    }
     var key = document.getElementById("youtube-key").value.trim();
     if (!key) return note("Enter your YouTube API key above first: it is used to look the link up.", true);
     if (typeof fetch !== "function") return note("This browser cannot look links up.", true);
@@ -1237,13 +1257,12 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     fetch("/api/youtube-source", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ youtubeKey: key, input: text })
+      body: JSON.stringify({ youtubeKey: key, input: text, kind: kind })
     })
       .then(function (res) { return res.json(); })
       .then(function (answer) {
         catalogAdd.disabled = false;
         if (answer.entry) return addCatalog(answer.entry);
-        if (answer.search) return addSearch(text);
         note(answer.error || "That could not be looked up.", true);
       })
       .catch(function () {

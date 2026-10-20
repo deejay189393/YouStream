@@ -530,27 +530,30 @@ describe("live search", () => {
 });
 
 describe("resolveSource", () => {
-  test("text that is no link is a search", async () => {
-    expect(await browse.resolveSource(KEY, "lofi hip hop")).toEqual({ search: true });
-  });
-
-  test("a YouTube link that is no channel or playlist says why, without asking YouTube", async () => {
+  test("what is not of the kind chosen says why, without asking YouTube", async () => {
     const fetch = routeFetch([]);
-    expect((await browse.resolveSource(KEY, "https://youtu.be/abcdefghijk")).error).toContain("one video");
+    expect((await browse.resolveSource(KEY, "https://youtu.be/abcdefghijk", "playlist")).error).toContain("one video, not a playlist");
+    expect((await browse.resolveSource(KEY, "lofi hip hop", "channel")).error).toContain("@handle");
+    expect((await browse.resolveSource(KEY, "PLBCF2DAC6FFB574DE", "channel")).error).toContain("Choose YouTube playlist");
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  test("a channel by @handle becomes a channel catalog", async () => {
+  test("a channel by its @handle, or the handle typed without it, becomes a channel catalog", async () => {
     const fetch = routeFetch([["/channels?", { items: [{ id: "UCBJycsmduvYEL83R_U4JriQ", snippet: { title: "Marques Brownlee" } }] }]]);
-    expect(await browse.resolveSource(KEY, "@mkbhd")).toEqual({ entry: normalizeEntry({ channel: "UCBJycsmduvYEL83R_U4JriQ", name: "Marques Brownlee" }) });
+    expect(await browse.resolveSource(KEY, "@mkbhd", "channel")).toEqual({ entry: normalizeEntry({ channel: "UCBJycsmduvYEL83R_U4JriQ", name: "Marques Brownlee" }) });
     expect(params(fetch, 0).forHandle).toBe("@mkbhd");
+    expect((await browse.resolveSource(KEY, "mkbhd", "channel")).entry.channel).toBe("UCBJycsmduvYEL83R_U4JriQ");
+    expect(params(fetch, 1).forHandle).toBe("@mkbhd");
   });
 
-  test("a playlist link becomes a playlist catalog", async () => {
-    routeFetch([["/playlists?", { items: [{ id: "PLBCF2DAC6FFB574DE", snippet: { title: "Stories" } }] }]]);
-    expect(await browse.resolveSource(KEY, "https://www.youtube.com/playlist?list=PLBCF2DAC6FFB574DE")).toEqual({
+  test("a playlist link, or a YouTube Music list's, becomes a playlist catalog", async () => {
+    const fetch = routeFetch([["/playlists?", (url) => ({ items: [{ id: new URL(url).searchParams.get("id"), snippet: { title: "Stories" } }] })]]);
+    expect(await browse.resolveSource(KEY, "https://www.youtube.com/playlist?list=PLBCF2DAC6FFB574DE", "playlist")).toEqual({
       entry: normalizeEntry({ playlist: "PLBCF2DAC6FFB574DE", name: "Stories" })
     });
+    const music = await browse.resolveSource(KEY, "https://music.youtube.com/playlist?list=RDCLAK5uy_lBNUteBRencHzKelu5iDHwLF6mYqjL-JU", "playlist");
+    expect(music.entry).toMatchObject({ kind: "playlist", playlist: "RDCLAK5uy_lBNUteBRencHzKelu5iDHwLF6mYqjL-JU" });
+    expect(params(fetch, 1).id).toBe("RDCLAK5uy_lBNUteBRencHzKelu5iDHwLF6mYqjL-JU");
   });
 
   test("no such channel or playlist", async () => {
@@ -558,21 +561,21 @@ describe("resolveSource", () => {
       ["/channels?", {}],
       ["/playlists?", { items: [] }]
     ]);
-    expect((await browse.resolveSource(KEY, "@nobodyatall")).error).toContain("no channel");
-    expect((await browse.resolveSource(KEY, "PLBCF2DAC6FFB574DE")).error).toContain("no public playlist");
+    expect((await browse.resolveSource(KEY, "@nobodyatall", "channel")).error).toContain("no channel");
+    expect((await browse.resolveSource(KEY, "PLBCF2DAC6FFB574DE", "playlist")).error).toContain("no public playlist");
     // An answer YouTube gives that is not a usable id is no catalog either.
     routeFetch([["/channels?", { items: [{ id: "not-a-channel-id" }] }]]);
-    expect((await browse.resolveSource(KEY, "@odd")).error).toContain("no channel");
+    expect((await browse.resolveSource(KEY, "@odd", "channel")).error).toContain("no channel");
   });
 
   test("YouTube refusing says why in the reader's terms", async () => {
     routeFetch([["/channels?", googleError(403, "quotaExceeded")]]);
-    expect((await browse.resolveSource(KEY, "@mkbhd")).error).toContain("spent today's quota");
-    expect((await browse.resolveSource(KEY, "@mkbhd")).error).toContain("spent today's quota");
+    expect((await browse.resolveSource(KEY, "@mkbhd", "channel")).error).toContain("spent today's quota");
+    expect((await browse.resolveSource(KEY, "@mkbhd", "channel")).error).toContain("spent today's quota");
     routeFetch([["/channels?", googleError(400, "keyInvalid")]]);
-    expect((await browse.resolveSource("AIzaOther", "@mkbhd")).error).toContain("not valid");
+    expect((await browse.resolveSource("AIzaOther", "@mkbhd", "channel")).error).toContain("not valid");
     routeFetch([["/channels?", googleError(400, "somethingElse")]]);
-    expect((await browse.resolveSource("AIzaOther", "@mkbhd")).error).toBe("YouTube could not look that up: somethingElse");
+    expect((await browse.resolveSource("AIzaOther", "@mkbhd", "channel")).error).toBe("YouTube could not look that up: somethingElse");
     expect(await keyCooldown.get(youtube.keyId("AIzaOther"))).toBeUndefined();
   });
 });

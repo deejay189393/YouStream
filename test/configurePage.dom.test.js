@@ -576,6 +576,7 @@ const pick = (p, select, value) => {
   select.value = value;
   select.dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
 };
+const source = (p, kind) => pick(p, p.$("#catalog-source"), kind);
 const lookups = (answer) =>
   jest.fn(async (url, init) => {
     if (url === "/api/check-keys") return { json: async () => ({ youtube: "ok", tmdb: "absent" }) };
@@ -623,57 +624,78 @@ describe("the YouTube card", () => {
     expect(note(p)).toBe("A search can be at most 100 characters long.");
   });
 
-  test("a channel or playlist link is looked up with the reader's key", async () => {
+  test("the box asks for what the chosen source needs", () => {
+    const p = loadPage();
+    const box = p.$("#catalog-input");
+    expect([...p.$("#catalog-source").options].map((o) => [o.value, o.textContent])).toEqual([
+      ["search", "YouTube search"],
+      ["playlist", "YouTube playlist"],
+      ["channel", "YouTube channel"]
+    ]);
+    expect([box.placeholder, box.getAttribute("aria-label")]).toEqual(["A search, such as lofi hip hop", "What to search YouTube for"]);
+    source(p, "playlist");
+    expect([box.placeholder, box.getAttribute("aria-label")]).toEqual(["A playlist's link or ID", "A YouTube playlist's link or ID"]);
+    source(p, "channel");
+    expect([box.placeholder, box.getAttribute("aria-label")]).toEqual(["A channel's link or @handle", "A YouTube channel's link or @handle"]);
+  });
+
+  test("a playlist or a channel is looked up with the reader's key, as the source chosen", async () => {
     const fetch = lookups((body) =>
-      body.input.indexOf("@") === 0
+      body.kind === "channel"
         ? { entry: { kind: "channel", id: `channel.${CHANNEL}.videos`, name: "Marques Brownlee", title: "Marques Brownlee", channel: CHANNEL, show: "videos", sort: "date" } }
         : { entry: { kind: "playlist", id: "playlist.PLBCF2DAC6FFB574DE", name: "Stories", title: "Stories", playlist: "PLBCF2DAC6FFB574DE" } }
     );
     const p = loadPage({ fetch });
     p.set("youtube-key", " AIzaKey ");
-    add(p, "@mkbhd");
+    source(p, "channel");
+    add(p, "mkbhd");
     expect(note(p)).toBe("Looking it up...");
     expect(p.$("#catalog-add").disabled).toBe(true);
     await flush();
     expect(p.$("#catalog-add").disabled).toBe(false);
+    source(p, "playlist");
     add(p, "https://www.youtube.com/playlist?list=PLBCF2DAC6FFB574DE");
     await flush();
     expect(names(p)).toEqual(["Marques Brownlee", "Stories"]);
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ youtubeKey: "AIzaKey", input: "@mkbhd" });
+    expect(kinds(p)).toEqual(["channel", "playlist"]);
     expect(fetch.mock.calls[0][0]).toBe("/api/youtube-source");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ youtubeKey: "AIzaKey", input: "mkbhd", kind: "channel" });
+    expect(JSON.parse(fetch.mock.calls[1][1].body).kind).toBe("playlist");
+    // The source stays chosen, for the next one.
+    expect(p.$("#catalog-source").value).toBe("playlist");
   });
 
-  test.each([
-    [CHANNEL],
-    ["PLBCF2DAC6FFB574DE"],
-    ["OLAK5uy_kVr2k8bnUgIoA0xDoGd5OaVg2JqHBO4vY"],
-    ["youtu.be/abcdefghijk"]
-  ])("%s is sent to be looked up", async (text) => {
-    const fetch = lookups({ error: "no" });
-    const p = loadPage({ fetch });
-    p.set("youtube-key", "k");
-    add(p, text);
-    await flush();
-    expect(fetch).toHaveBeenCalled();
-  });
-
-  test.each([["PLAYSTATION5"], ["UCLA basketball"], ["UC"]])("%s is a search, with no lookup", (text) => {
+  test.each([["PLAYSTATION5"], ["@mkbhd"], [CHANNEL], ["UCLA basketball"]])("as a search, %s is searched for, with no lookup", (text) => {
     const fetch = lookups({});
     const p = loadPage({ fetch });
     p.set("youtube-key", "k");
     add(p, text);
     expect(fetch).not.toHaveBeenCalled();
-    expect(names(p)).toContain(text);
+    expect(names(p)).toEqual([text]);
+    expect(kinds(p)).toEqual(["search"]);
   });
 
-  test("what the server finds is no link is added as a search; what it cannot find, or cannot reach, is said", async () => {
-    let answer = { search: true };
+  test.each([["https://www.youtube.com/playlist?list=PLBCF2DAC6FFB574DE"], ["youtu.be/abcdefghijk"], ["m.youtube.com/@mkbhd"]])(
+    "a YouTube link added as a search, %s, says which source to choose and is kept to add",
+    (text) => {
+      const fetch = lookups({});
+      const p = loadPage({ fetch });
+      add(p, text);
+      expect(note(p)).toBe("That is a YouTube link. To add it, choose YouTube playlist or YouTube channel.");
+      expect(p.$("#catalog-note").className).toContain("note-warn");
+      expect(names(p)).toEqual([]);
+      expect(p.$("#catalog-input").value).toBe(text);
+      expect(fetch).not.toHaveBeenCalled();
+      source(p, "playlist");
+      expect(note(p)).toBe("");
+    }
+  );
+
+  test("what YouTube does not have, or what cannot be reached, is said", async () => {
+    let answer = { error: "YouTube has no channel at that link." };
     const p = loadPage({ fetch: lookups(() => answer) });
     p.set("youtube-key", "k");
-    add(p, "PLAYSTATIONPORTALREVIEW");
-    await flush();
-    expect(names(p)).toContain("PLAYSTATIONPORTALREVIEW");
-    answer = { error: "YouTube has no channel at that link." };
+    source(p, "channel");
     add(p, "@nobody");
     await flush();
     expect(note(p)).toBe("YouTube has no channel at that link.");
@@ -686,16 +708,19 @@ describe("the YouTube card", () => {
     await flush();
     expect(note(p)).toContain("could not be looked up");
     expect(p.$("#catalog-add").disabled).toBe(false);
+    expect(names(p)).toEqual([]);
   });
 
   test("a link needs the key first, and a browser that can ask", () => {
     const p = loadPage({ fetch: lookups({}) });
+    source(p, "channel");
     add(p, "@mkbhd");
     expect(note(p)).toContain("Enter your YouTube API key above first");
     const old = loadPage();
     delete old.dom.window.fetch;
     old.set("youtube-key", "k");
-    add(old, "@mkbhd");
+    source(old, "playlist");
+    add(old, "PLBCF2DAC6FFB574DE");
     expect(note(old)).toBe("This browser cannot look links up.");
   });
 
@@ -897,7 +922,7 @@ describe("editing an installed addon", () => {
 
   test("every setting changed, YouTube's too, is shown as saved and comes back as the very same link", async () => {
     const fetch = lookups((body) =>
-      body.input.indexOf("@") === 0
+      body.kind === "channel"
         ? { entry: { kind: "channel", id: `channel.${CHANNEL}.videos`, name: "Marques Brownlee", title: "Marques Brownlee", channel: CHANNEL, show: "videos", sort: "date" } }
         : { entry: { kind: "playlist", id: "playlist.PLBCF2DAC6FFB574DE", name: "Stories", title: "Stories", playlist: "PLBCF2DAC6FFB574DE" } }
     );
@@ -927,8 +952,10 @@ describe("editing an installed addon", () => {
     first.set("refresh-value", "1.5");
     first.set("refresh-unit", "d");
     add(first, "lofi hip hop");
+    source(first, "channel");
     add(first, "@mkbhd");
     await flush();
+    source(first, "playlist");
     add(first, "https://www.youtube.com/playlist?list=PLBCF2DAC6FFB574DE");
     await flush();
     first.click([...first.document.querySelectorAll("#trending-chips button")].find((b) => b.textContent === "+ Music"));

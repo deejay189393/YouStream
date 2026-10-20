@@ -3,6 +3,7 @@ const {
   normalizeCatalogs,
   toStoredCatalogs,
   parseSourceLink,
+  SOURCE_KINDS,
   tidy,
   slug,
   SORTS,
@@ -204,47 +205,71 @@ test("the stored form leaves every default out", () => {
 
 describe("parseSourceLink", () => {
   test.each([
-    ["@mkbhd", { handle: "@mkbhd" }],
-    ["@कोई_चैनल", { handle: "@कोई_चैनल" }],
-    [CHANNEL, { id: CHANNEL }],
     [PLAYLIST, { playlistId: PLAYLIST }],
+    ["PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG", { playlistId: "PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG" }],
     ["OLAK5uy_kVr2k8bnUgIoA0xDoGd5OaVg2JqHBO4vY", { playlistId: "OLAK5uy_kVr2k8bnUgIoA0xDoGd5OaVg2JqHBO4vY" }],
+    ["RDCLAK5uy_lBNUteBRencHzKelu5iDHwLF6mYqjL-JU", { playlistId: "RDCLAK5uy_lBNUteBRencHzKelu5iDHwLF6mYqjL-JU" }],
+    ["UULFBJycsmduvYEL83R_U4JriQ", { playlistId: "UULFBJycsmduvYEL83R_U4JriQ" }],
+    [` https://www.youtube.com/playlist?list=${PLAYLIST} `, { playlistId: PLAYLIST }],
+    [`https://music.youtube.com/playlist?list=${PLAYLIST}&si=x`, { playlistId: PLAYLIST }],
+    ["music.youtube.com/playlist?list=RDCLAK5uy_lBNUteBRencHzKelu5iDHwLF6mYqjL-JU", { playlistId: "RDCLAK5uy_lBNUteBRencHzKelu5iDHwLF6mYqjL-JU" }],
+    [`https://www.youtube.com/watch?v=abcdefghijk&list=${PLAYLIST}&index=2`, { playlistId: PLAYLIST }],
+    [`https://youtu.be/abcdefghijk?list=${PLAYLIST}`, { playlistId: PLAYLIST }]
+  ])("as a playlist, %s is one", (text, expected) => {
+    expect(parseSourceLink(text, "playlist")).toEqual(expected);
+  });
+
+  test.each([
+    ["@mkbhd", { handle: "@mkbhd" }],
+    // A handle typed without its @, in any script.
+    ["mkbhd", { handle: "@mkbhd" }],
+    ["PLAYSTATION5", { handle: "@PLAYSTATION5" }],
+    ["@कोई_चैनल", { handle: "@कोई_चैनल" }],
+    ["कोई_चैनल", { handle: "@कोई_चैनल" }],
+    [CHANNEL, { id: CHANNEL }],
     ["https://www.youtube.com/@mkbhd", { handle: "@mkbhd" }],
     ["youtube.com/@mkbhd/videos", { handle: "@mkbhd" }],
     ["https://m.youtube.com/%40%E0%A4%95%E0%A5%8B%E0%A4%88", { handle: "@कोई" }],
     [`https://www.youtube.com/channel/${CHANNEL}`, { id: CHANNEL }],
     [`www.youtube.com/channel/${CHANNEL}/featured`, { id: CHANNEL }],
-    ["https://www.youtube.com/user/marquesbrownlee", { username: "marquesbrownlee" }],
-    [`https://www.youtube.com/playlist?list=${PLAYLIST}`, { playlistId: PLAYLIST }],
-    [`https://music.youtube.com/playlist?list=${PLAYLIST}&si=x`, { playlistId: PLAYLIST }],
-    [`https://www.youtube.com/watch?v=abcdefghijk&list=${PLAYLIST}&index=2`, { playlistId: PLAYLIST }],
-    [`https://youtu.be/abcdefghijk?list=${PLAYLIST}`, { playlistId: PLAYLIST }]
-  ])("%s is a channel or a playlist", (text, expected) => {
-    expect(parseSourceLink(text)).toEqual(expected);
+    ["https://www.youtube.com/user/marquesbrownlee", { username: "marquesbrownlee" }]
+  ])("as a channel, %s is one", (text, expected) => {
+    expect(parseSourceLink(text, "channel")).toEqual(expected);
   });
 
   test.each([
-    ["https://www.youtube.com/watch?v=abcdefghijk&list=RDabcdefghijk", "made for you"],
-    ["https://www.youtube.com/playlist?list=LL", "made for you"],
-    ["https://www.youtube.com/playlist?list=WL", "made for you"],
-    ["https://youtu.be/abcdefghijk", "one video"],
-    ["https://www.youtube.com/shorts/abcdefghijk", "one video"],
-    ["https://www.youtube.com/watch?v=abcdefghijk", "one video"],
-    ["https://www.youtube.com/live/abcdefghijk", "one video"],
-    ["https://www.youtube.com/c/SomeName", "old /c/ link"],
-    ["https://www.youtube.com/feed/trending", "not a channel or a playlist"],
-    ["https://www.youtube.com/playlist?list=short", "not a channel or a playlist"],
-    ["https://www.youtube.com/%E0%A4%A", "not a channel or a playlist"]
-  ])("%s is a YouTube link that is neither", (text, says) => {
-    expect(parseSourceLink(text).error).toContain(says);
+    ["https://www.youtube.com/watch?v=abcdefghijk&list=RDabcdefghijk", "playlist", "made for you"],
+    ["https://www.youtube.com/playlist?list=LL", "playlist", "made for you"],
+    ["https://www.youtube.com/playlist?list=WL", "channel", "made for you"],
+    ["https://www.youtube.com/c/SomeName", "channel", "old /c/ link"],
+    ["https://youtu.be/abcdefghijk", "playlist", "one video, not a playlist"],
+    ["https://www.youtube.com/watch?v=abcdefghijk", "playlist", "one video, not a playlist"],
+    ["https://www.youtube.com/shorts/abcdefghijk", "channel", "one video, not a channel"],
+    ["https://www.youtube.com/live/abcdefghijk", "channel", "one video, not a channel"],
+    ["https://www.youtube.com/feed/trending", "playlist", "That YouTube link is not a playlist."],
+    ["https://www.youtube.com/feed/trending", "channel", "That YouTube link is not a channel."],
+    ["https://www.youtube.com/playlist?list=short", "playlist", "That YouTube link is not a playlist."],
+    ["https://www.youtube.com/%E0%A4%A", "channel", "That YouTube link is not a channel."],
+    [CHANNEL, "playlist", "That is a channel, not a playlist. Choose YouTube channel to add it."],
+    ["@mkbhd", "playlist", "Choose YouTube channel"],
+    [`https://www.youtube.com/playlist?list=${PLAYLIST}`, "channel", "That is a playlist, not a channel. Choose YouTube playlist to add it."],
+    [PLAYLIST, "channel", "Choose YouTube playlist"],
+    ["documentaries", "playlist", "Paste a playlist's link, or its ID: the part after list= in the link."],
+    ["PLAYSTATION5", "playlist", "the part after list="],
+    ["", "playlist", "the part after list="],
+    ["lofi hip hop", "channel", "Paste a channel's link or its @handle."],
+    ["https://example.com/@mkbhd", "channel", "link or its @handle"],
+    ["http://[::1", "channel", "link or its @handle"],
+    [null, "channel", "link or its @handle"],
+    ["@ab", "channel", "link or its @handle"],
+    ["ab", "channel", "link or its @handle"]
+  ])("%p as a %s says why it is none: %s", (text, kind, says) => {
+    expect(parseSourceLink(text, kind)).toEqual({ error: expect.stringContaining(says) });
   });
 
-  test.each([["lofi hip hop"], ["minecraft"], ["PLAYSTATION5"], ["https://example.com/@mkbhd"], ["http://[::1"], [""], [null], ["@ab"]])(
-    "%p is no link, so a search",
-    (text) => {
-      expect(parseSourceLink(text)).toBeNull();
-    }
-  );
+  test("the kinds a link can add", () => {
+    expect(SOURCE_KINDS).toEqual(["playlist", "channel"]);
+  });
 });
 
 test("the paging steps are YouTube's page, five deep", () => {

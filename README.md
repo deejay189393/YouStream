@@ -384,16 +384,17 @@ and ten more as a fallback. What you search is not logged.
 
 ### Catalogs
 
-Rows on the home screen, in your order, up to 20:
+Rows on the home screen, in your order, up to 20. You choose where a row's
+videos come from, then type or paste what that source needs:
 
-| Kind | Add it with | Lists | One page costs |
+| Source | You give it | Lists | One page costs |
 |---|---|---|---|
-| Search | any text | YouTube's results, by relevance or newest, most viewed or top rated; length and upload date optional | 101 units |
-| Channel | an `@handle`, a channel link or a `UC…` id | its videos without Shorts, or its Shorts, its live streams, or everything; newest or most viewed first | 2 units |
-| Playlist | a playlist link (also a watch link with `list=`) or a `PL…` id | the playlist, in its order | 2 units |
+| YouTube search | what to search for | YouTube's results, by relevance or newest, most viewed or top rated; length and upload date optional | 101 units |
+| YouTube playlist | its link (a watch link with `list=` too, and YouTube Music's), or its ID | the playlist, in its order | 2 units |
+| YouTube channel | its link, its `@handle` (the @ is optional) or its `UC…` ID | its videos without Shorts, or its Shorts, its live streams, or everything; newest or most viewed first | 2 units |
 | Trending | a chip | YouTube's most popular in your country, all or one category (Music, Gaming, Film & Animation, Sports, News…) | 1 unit |
 
-A new setup starts with **no rows**. Add a search, a channel, a playlist or
+A new setup starts with **no rows**. Add a search, a playlist, a channel or
 a Trending row, choose how its videos are ordered, and arrange the rows with
 the arrows. A search orders by relevance, newest, most viewed or top rated,
 and a channel by newest or most viewed. A playlist keeps its own order and
@@ -406,9 +407,15 @@ id's `UC`). Beside each it keeps the same list most viewed first, its top
 200 (`UULP`, `UUPS`, `UUPV`, and `PU` for everything). YouStream reads
 those, so either order costs the same. They are not in YouTube's
 documentation; should YouTube stop keeping one, its row comes back empty
-rather than failing. A pasted link is looked up once, at 1 unit, on the
-configure page (`POST /api/youtube-source`). An old `/c/` link, a single
-video, or a mix YouTube makes per viewer is explained rather than added.
+rather than failing.
+
+A pasted playlist or channel is looked up once, at 1 unit, on the configure
+page (`POST /api/youtube-source`), as the source you chose. Something else
+is explained rather than added: a channel pasted as a playlist or the other
+way round, a single video, an old `/c/` link, or a mix YouTube makes per
+viewer. A YouTube link added as a search is caught too, so YouTube is never
+searched for a link. YouTube Music's own curated playlists (`RDCLAK…`) are
+public and can be added.
 
 **Refresh.** A row's results are kept for **two hours** by default and you
 can choose any interval from 30 minutes up, in minutes, hours or days, with
@@ -576,7 +583,7 @@ https://<host>/<your config>/explain/series/<imdb id>:<season>:<episode>.json
 | `GET /:config/stream/:type/:id.json` | Streams for films, episodes and YouTube videos |
 | `GET /:config/explain/:type/:id.json` | The working behind one lookup |
 | `POST /api/check-keys` | Key check for the configure page |
-| `POST /api/youtube-source` | Looks up a pasted channel or playlist for the configure page (1 unit) |
+| `POST /api/youtube-source` | Looks up a pasted playlist or channel, as the `kind` chosen, for the configure page (1 unit) |
 | `GET /terms` | Terms of use and privacy policy |
 | `GET /health` | Health check used by Railway; also names the cache store |
 | `GET /admin/cache` | What the cache holds (only with `CACHE_ADMIN_TOKEN`) |

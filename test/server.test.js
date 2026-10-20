@@ -172,23 +172,26 @@ describe("POST /api/check-keys", () => {
 });
 
 describe("POST /api/youtube-source", () => {
-  test("a channel link becomes a catalog the page can add", async () => {
+  test("a channel link, as a channel, becomes a catalog the page can add", async () => {
     routeFetch([["googleapis.com/youtube/v3/channels", { items: [{ id: "UCBJycsmduvYEL83R_U4JriQ", snippet: { title: "Marques Brownlee" } }] }]]);
-    const res = await request(app).post("/api/youtube-source").send({ youtubeKey: "KEY", input: "https://www.youtube.com/@mkbhd" });
+    const res = await request(app).post("/api/youtube-source").send({ youtubeKey: "KEY", input: "https://www.youtube.com/@mkbhd", kind: "channel" });
     expect(res.body.entry).toMatchObject({ kind: "channel", channel: "UCBJycsmduvYEL83R_U4JriQ", name: "Marques Brownlee" });
   });
 
-  test("text that is no link is a search, and needs no lookup", async () => {
-    const fetch = routeFetch([]);
-    const res = await request(app).post("/api/youtube-source").send({ youtubeKey: "KEY", input: "lofi hip hop" });
-    expect(res.body).toEqual({ search: true });
-    expect(fetch).not.toHaveBeenCalled();
+  test("a playlist's id, as a playlist, too", async () => {
+    routeFetch([["googleapis.com/youtube/v3/playlists", { items: [{ id: "PLBCF2DAC6FFB574DE", snippet: { title: "Stories" } }] }]]);
+    const res = await request(app).post("/api/youtube-source").send({ youtubeKey: "KEY", input: "PLBCF2DAC6FFB574DE", kind: "playlist" });
+    expect(res.body.entry).toMatchObject({ kind: "playlist", playlist: "PLBCF2DAC6FFB574DE", name: "Stories" });
   });
 
-  test("without a key, or with no text, it says what is missing", async () => {
+  test("without a kind to look up, a key, or anything pasted, it says what is missing and asks YouTube nothing", async () => {
     const fetch = routeFetch([]);
-    expect((await request(app).post("/api/youtube-source").send({ input: "@mkbhd" })).body.error).toContain("API key");
-    expect((await request(app).post("/api/youtube-source").send({ youtubeKey: "KEY", input: 5 })).body).toEqual({ search: true });
+    const post = (body) => request(app).post("/api/youtube-source").send(body);
+    expect((await post({ youtubeKey: "KEY", input: "@mkbhd" })).body.error).toBe("Choose YouTube playlist or YouTube channel to look a link up.");
+    expect((await post({ youtubeKey: "KEY", input: "@mkbhd", kind: "search" })).body.error).toContain("Choose YouTube playlist");
+    expect((await post({ youtubeKey: "KEY", input: "@mkbhd", kind: "constructor" })).body.error).toContain("Choose YouTube playlist");
+    expect((await post({ input: "@mkbhd", kind: "channel" })).body.error).toContain("API key");
+    expect((await post({ youtubeKey: "KEY", input: 5, kind: "playlist" })).body.error).toContain("the part after list=");
     expect(fetch).not.toHaveBeenCalled();
   });
 });

@@ -246,25 +246,30 @@ function toStoredEntry(entry) {
 const toStoredCatalogs = (entries) => entries.map(toStoredEntry);
 
 /**
- * What a reader pasted to add a channel or a playlist: { id }, { handle } or
- * { username } for a channel, { playlistId } for a playlist, { error } for a
- * YouTube link that is neither, or null for text that is no link at all --
- * which is then a search.
+ * A playlist's id on its own -- the part after list= in its link -- in the
+ * shapes YouTube makes them: PL and 16 or 32 more, an album's OLAK5uy_ or a
+ * YouTube Music list's RDCLAK5uy_ and 33, or a channel's own lists (UU,
+ * UULF, PU...) and its id's 22. Exactly, so a handle such as PLAYSTATION5
+ * stays one.
+ */
+const PLAYLIST_ALONE = /^(PL[A-Za-z0-9_-]{16}([A-Za-z0-9_-]{16})?|(OLAK5uy_|RDCLAK5uy_)[A-Za-z0-9_-]{33}|(UU|PU)[A-Z]{0,2}[A-Za-z0-9_-]{22})$/;
+
+/**
+ * What a YouTube link or id points at: { id }, { handle } or { username }
+ * for a channel, { playlistId } for a playlist, { problem } for a YouTube
+ * link that is neither, or null for text that is no YouTube link at all.
  *
  *   @mkbhd                                   youtube.com/@mkbhd/videos
  *   youtube.com/channel/UC...                UC... on its own
  *   youtube.com/playlist?list=PL...          PL... on its own
  *   youtube.com/watch?v=...&list=PL...       youtube.com/user/name
  */
-function parseSourceLink(raw) {
-  const text = typeof raw === "string" ? raw.trim() : "";
+function readLink(text) {
   if (!text || /\s/.test(text)) return null;
   let match = /^@([^/?#@]{3,100})$/.exec(text);
   if (match) return { handle: `@${match[1]}` };
   if (CHANNEL_ID.test(text)) return { id: text };
-  // A playlist's id on its own is PL and 16 or 32 more, or an album's
-  // OLAK5uy_ and 33: exactly, so a search such as PLAYSTATION5 stays one.
-  if (/^(PL[A-Za-z0-9_-]{16}([A-Za-z0-9_-]{16})?|OLAK5uy_[A-Za-z0-9_-]{33})$/.test(text)) return { playlistId: text };
+  if (PLAYLIST_ALONE.test(text)) return { playlistId: text };
 
   let url;
   try {
@@ -277,8 +282,9 @@ function parseSourceLink(raw) {
 
   const list = url.searchParams.get("list");
   if (list) {
-    // Mixes are made per viewer, and Liked and Watch later are private.
-    if (/^(RD|LL|WL|LM)/.test(list)) return { error: "That is one of YouTube's own lists made for you, which it shares with nobody. Save the videos to a public playlist and add that." };
+    // Mixes are made per viewer, and Liked and Watch later are private;
+    // YouTube Music's own curated lists (RDCLAK) are public.
+    if (/^(RD(?!CLAK)|LL|WL|LM)/.test(list)) return { problem: "personal" };
     if (PLAYLIST_ID.test(list)) return { playlistId: list };
   }
   let path;
@@ -290,13 +296,55 @@ function parseSourceLink(raw) {
   if ((match = /^\/channel\/(UC[A-Za-z0-9_-]{22})(?:\/|$)/.exec(path))) return { id: match[1] };
   if ((match = /^\/(@[^/]{3,100})(?:\/|$)/.exec(path))) return { handle: match[1] };
   if ((match = /^\/user\/([^/]+)/.exec(path))) return { username: match[1] };
-  if (/^\/c\//.test(path)) {
-    return { error: "YouTube cannot look up an old /c/ link. Paste the channel's @handle, or its link from the channel's About page." };
+  if (/^\/c\//.test(path)) return { problem: "custom" };
+  if (host === "youtu.be" || /^\/(watch|shorts|live|embed)\b/.test(path)) return { problem: "video" };
+  return { problem: "other" };
+}
+
+/**
+ * A handle typed without its @: letters in any script (with their vowel
+ * signs and accents), digits, dots, dashes and underscores.
+ */
+const BARE_HANDLE = /^[\p{L}\p{M}\p{N}._-]{3,100}$/u;
+
+/** The kinds of catalog a pasted link can add. */
+const SOURCE_KINDS = ["playlist", "channel"];
+
+const SOURCE_TEXT = {
+  personal: "That is one of YouTube's own lists made for you, which it shares with nobody. Save the videos to a public playlist and add that.",
+  custom: "YouTube cannot look up an old /c/ link. Paste the channel's @handle, or its link from the channel's About page.",
+  playlist: {
+    video: "That is a link to one video, not a playlist. Open the playlist on YouTube and copy its link.",
+    other: "That YouTube link is not a playlist.",
+    channel: "That is a channel, not a playlist. Choose YouTube channel to add it.",
+    none: "Paste a playlist's link, or its ID: the part after list= in the link."
+  },
+  channel: {
+    video: "That is a link to one video, not a channel. Paste the channel's link or its @handle.",
+    other: "That YouTube link is not a channel.",
+    playlist: "That is a playlist, not a channel. Choose YouTube playlist to add it.",
+    none: "Paste a channel's link or its @handle."
   }
-  if (host === "youtu.be" || /^\/(watch|shorts|live|embed)\b/.test(path)) {
-    return { error: "That is a link to one video. Paste a channel or a playlist, or type a search." };
+};
+
+/**
+ * What a reader pasted to add a catalog of the kind they chose, "playlist"
+ * or "channel": { playlistId }, or { id }, { handle } or { username } for a
+ * channel, or { error } saying what is wrong with it. A channel's handle may
+ * be typed without its @.
+ */
+function parseSourceLink(raw, kind) {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  const found = readLink(text);
+  const say = SOURCE_TEXT[kind];
+  if (found && found.problem) return { error: SOURCE_TEXT[found.problem] || say[found.problem] };
+  if (kind === "playlist") {
+    if (found && found.playlistId) return found;
+    return { error: found ? say.channel : say.none };
   }
-  return { error: "That YouTube link is not a channel or a playlist." };
+  if (found && found.playlistId) return { error: say.playlist };
+  if (found) return found;
+  return BARE_HANDLE.test(text) ? { handle: `@${text}` } : { error: say.none };
 }
 
 module.exports = {
@@ -317,6 +365,7 @@ module.exports = {
   toStoredEntry,
   toStoredCatalogs,
   parseSourceLink,
+  SOURCE_KINDS,
   tidy,
   slug
 };

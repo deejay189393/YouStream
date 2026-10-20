@@ -351,13 +351,12 @@ const SOURCE_PROBLEMS = {
 };
 
 /**
- * A channel or playlist link, @handle or id, looked up so its catalog can be
- * added: { entry }, { error }, or { search: true } for text that is no link
- * at all and so a search. Costs the reader 1 unit.
+ * A playlist or a channel the reader pasted, a link, @handle or id, looked
+ * up so its catalog can be added: { entry } or { error }. `kind` is the
+ * source they chose, "playlist" or "channel". Costs the reader 1 unit.
  */
-async function resolveSource(apiKey, input) {
-  const link = parseSourceLink(input);
-  if (!link) return { search: true };
+async function resolveSource(apiKey, input, kind) {
+  const link = parseSourceLink(input, kind);
   if (link.error) return { error: link.error };
   try {
     if (link.playlistId) {
