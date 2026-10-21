@@ -131,6 +131,8 @@ describe("streams through the SDK router", () => {
     expect(res.headers["access-control-allow-origin"]).toBe("*");
     expect(res.headers["cache-control"]).toContain("max-age=21600");
     expect(res.body.streams[0].ytId).toBe("notld000001");
+    // A film's rows say when the video went up: AIOStreams has the film's release to weigh it against.
+    expect(res.body.streams[0].behaviorHints.publishDate).toBe("2021-05-01T00:00:00Z");
   });
 
   test("a series id with its season and episode", async () => {
@@ -212,6 +214,9 @@ describe("YouTube items over HTTP", () => {
     expect(meta.body.meta).toMatchObject({ id: "youstream:abcdefghijk", name: "Trending One" });
     const streams = await request(app).get(`/${KEYED()}/stream/YouTube/youstream:abcdefghijk.json`);
     expect(streams.body.streams[0].ytId).toBe("abcdefghijk");
+    // No upload date: AIOStreams has no release for a YouTube item, and would drop it as a fake.
+    streams.body.streams.forEach((stream) => expect(stream.behaviorHints).not.toHaveProperty("publishDate"));
+    expect(streams.body.streams[0].behaviorHints).toMatchObject({ indexer: "YouTube", duration: expect.any(Number) });
   });
 
   test("a video that is gone is a 404, with the protocol's CORS header, which Nuvio takes as final", async () => {

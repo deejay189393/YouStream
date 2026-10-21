@@ -287,7 +287,7 @@ text (its docs: Addon protocol → Streams), so YouStream sends:
 |---|---|---|
 | `filename` | `Example Film (1968) HD WEB-DL English`, `Example Show (2019) S01E03 HD WEB-DL Hindi` | title, year, season and episode matching; resolution (HD reads as 720p, SD as 480p); quality (WEB-DL); language |
 | `duration` | `5709` (seconds) | the runtime |
-| `publishDate` | `2023-10-16T00:00:09Z` | the age |
+| `publishDate` | `2023-10-16T00:00:09Z` | the age; sent for films and episodes only |
 | `indexer` | `YouTube` | the source |
 
 The filename is built from the title the video was matched to, not from the
@@ -323,6 +323,16 @@ release group), and its SELect step keeps the first few of each resolution and
 quality, in YouStream's order, best first. AIOStreams writes its own name and
 description from what it parsed; to show YouStream's instead, turn on
 **Format Passthrough** for it.
+
+A video opened as a YouTube item, from a catalog, search or the library,
+carries no `publishDate`. AIOStreams weighs a stream's age against the
+title's release date, which it looks up itself in TMDB and TVDB; a
+`youstream:` id is neither, so for an item it has no date and takes the title
+to come out tomorrow. Tamtaro's "Info & Other Unwanted" then drops every
+stream published over a week before that as a fake release, which for a
+YouTube item meant any video more than a week old. With no age to weigh, the
+in-app row comes through without passthrough. Films and episodes keep the
+date: AIOStreams has their real release dates.
 
 ## YouTube in your app: search, catalogs and your library
 

@@ -17,7 +17,7 @@ const { SKIP_OPTIONS } = require("./catalogs");
  *   asks YouStream about a film.
  */
 const ADDON_ID = "org.deejay189393.youstream";
-const ADDON_VERSION = "0.7.2";
+const ADDON_VERSION = "0.7.3";
 const ADDON_NAME = "YouStream";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION =

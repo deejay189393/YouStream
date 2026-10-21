@@ -51,6 +51,13 @@ describe("buildStream", () => {
     });
   });
 
+  test("a film's or an episode's row says when the video went up, for AIOStreams to weigh against the release", () => {
+    expect(buildStream("app", match(), context({}, FILM)).behaviorHints.publishDate).toBe("2019-04-30T10:28:12Z");
+    expect(buildStream("youtube", match(), context({}, EPISODE)).behaviorHints.publishDate).toBe("2019-04-30T10:28:12Z");
+    // A video YouTube gave no date for has none to give.
+    expect(buildStream("app", match({ publishedAt: null }), context({}, FILM)).behaviorHints).not.toHaveProperty("publishDate");
+  });
+
   test("the YouTube app gets a watch URL", () => {
     const stream = buildStream("youtube", match(), context());
     expect(stream.externalUrl).toBe("https://www.youtube.com/watch?v=abcdefghijk");
@@ -173,9 +180,18 @@ describe("toItemStreams: a YouTube video opened from a catalog, search or the li
       bingeGroup: "youstream-app-UCscience",
       filename: "How Example Engines Work HD WEB-DL English",
       duration: 754,
-      publishDate: "2020-01-01T00:00:00Z",
       indexer: "YouTube"
     });
+  });
+
+  test("no row says when the video went up: AIOStreams has no release to weigh it against, and would take it for a fake", () => {
+    // The item has an upload date, and every way of watching leaves it out.
+    expect(item().publishedAt).toBe("2020-01-01T00:00:00Z");
+    const streams = toItemStreams(item(), normalizeConfig({ playback: ["app", "youtube", "smarttube"] }));
+    expect(streams).toHaveLength(3);
+    streams.forEach((stream) => expect(stream.behaviorHints).not.toHaveProperty("publishDate"));
+    // The same video found for a film still says it.
+    expect(buildStream("app", { video: item() }, context({}, FILM)).behaviorHints.publishDate).toBe("2020-01-01T00:00:00Z");
   });
 
   test("an age-restricted video gets no in-app row", () => {

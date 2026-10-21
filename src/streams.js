@@ -37,7 +37,12 @@ function buildStream(optionId, match, { title, settings }) {
       filename: scope.stream.filename,
       // A live stream has no length yet.
       ...(scope.stream.duration ? { duration: video.durationSeconds } : {}),
-      ...(video.publishedAt ? { publishDate: video.publishedAt } : {}),
+      // When the video went up, for a film or an episode only. AIOStreams
+      // reads it as the stream's age and weighs it against the title's
+      // release, which it looks up itself. A YouTube item has none it can
+      // find, so it takes it to come out tomorrow, and filters such as
+      // Tamtaro's then drop any upload over a week old as a fake.
+      ...(title && video.publishedAt ? { publishDate: video.publishedAt } : {}),
       indexer: "YouTube"
     }
   };
