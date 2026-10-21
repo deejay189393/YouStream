@@ -260,10 +260,9 @@ function options(list, selected, anyLabel) {
 function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = [] }) {
   const isReconfigure = Boolean(existing);
   const s = normalizeConfig(existing);
-  // A new setup starts with search on and no catalogs, for the reader to
-  // add the rows they want. Reconfiguring shows exactly what was saved --
-  // for an addon installed before search existed, search off.
-  const searchOn = isReconfigure ? s.search : true;
+  // A new setup starts with no catalogs, for the reader to add the rows
+  // they want; reconfiguring shows exactly what was saved. Search is on
+  // unless switched off, either way.
   const startCatalogs = isReconfigure ? s.catalogs : [];
 
   const tmdbNote = serverTmdb
@@ -524,7 +523,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
         you save to your library is listed under the type <strong>YouTube</strong>.
       </p>
       <div class="row-box">
-        <label class="check"><input type="checkbox" id="yt-search"${searchOn ? " checked" : ""} />
+        <label class="check"><input type="checkbox" id="yt-search"${s.search ? " checked" : ""} />
           <span><strong>Search YouTube</strong><em>Your app's search shows a row of YouTube's own results, live. Each search costs one of your 100 a day, so ${ADDON_NAME} waits until you stop typing and skips anything under 3 letters.</em></span></label>
       </div>
       <div class="grid-2" style="margin-top:10px">
@@ -1396,7 +1395,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     var excludeDescription = readList("exclude-description");
     if (excludeDescription.join(",") !== DEFAULT_EXCLUDE_DESCRIPTION.join(",")) config.excludeDescription = excludeDescription;
 
-    if (ytSearch.checked) config.search = true;
+    if (!ytSearch.checked) config.search = false;
     if (searchSort.value !== "relevance") config.searchSort = searchSort.value;
     if (searchLength.value !== "any") config.searchLength = searchLength.value;
     var safeSearch = document.getElementById("safe-search").value;

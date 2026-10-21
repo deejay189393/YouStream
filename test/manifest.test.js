@@ -93,13 +93,13 @@ describe("the served manifest", () => {
     expect(SKIP_OPTIONS).toEqual(["0", "50", "100", "150", "200"]);
   });
 
-  test("search alone is a catalog too, and with search off and no catalogs there is none", () => {
-    expect(buildManifest({ youtubeKey: "k", search: true }, BASE).catalogs.map((c) => c.id)).toEqual([SEARCH_CATALOG_ID]);
-    // An addon installed before search existed: as it was.
-    const quiet = buildManifest({ youtubeKey: "k" }, BASE);
+  test("search alone is a catalog too, on unless switched off, and with search off and no catalogs there is none", () => {
+    // An addon installed before search existed has it too.
+    expect(buildManifest({ youtubeKey: "k" }, BASE).catalogs.map((c) => c.id)).toEqual([SEARCH_CATALOG_ID]);
+    expect(buildManifest({ youtubeKey: "k" }, BASE).resources[0]).toBe("catalog");
+    const quiet = buildManifest({ youtubeKey: "k", search: false }, BASE);
     expect(quiet.catalogs).toEqual([]);
     expect(quiet.resources[0]).toEqual({ name: "meta", types: ["YouTube"], idPrefixes: ["youstream:"] });
-    expect(buildManifest({ youtubeKey: "k", search: false }, BASE).catalogs).toEqual([]);
   });
 
   test("YouTube alone: with films and shows off, only YouTube items are claimed", () => {

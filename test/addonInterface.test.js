@@ -168,7 +168,7 @@ describe("YouTube catalogs", () => {
 });
 
 describe("YouTube search", () => {
-  const search = (query, config = { youtubeKey: "KEY", search: true }, extra = {}) =>
+  const search = (query, config = { youtubeKey: "KEY" }, extra = {}) =>
     handleCatalog({ type: "YouTube", id: "search", extra: { search: query, ...extra }, config });
 
   test("the app's search, answered live from YouTube", async () => {
@@ -185,9 +185,8 @@ describe("YouTube search", () => {
     expect(await search("in")).toEqual({ metas: [], cacheMaxAge: 0 });
   });
 
-  test("with search off -- as it is unless saved on -- nothing, and nothing asked", async () => {
+  test("with search switched off, nothing, and nothing asked", async () => {
     const fetch = routeFetch([]);
-    expect(await search("interstellar", { youtubeKey: "KEY" })).toEqual({ metas: [] });
     expect(await search("interstellar", { youtubeKey: "KEY", search: false })).toEqual({ metas: [] });
     expect(fetch).not.toHaveBeenCalled();
   });

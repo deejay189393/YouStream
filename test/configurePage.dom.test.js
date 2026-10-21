@@ -96,13 +96,12 @@ describe("building the install link", () => {
     p.submit();
     expect(p.error()).toBeNull();
     expect(p.shown()).toBe(true);
-    // A new setup starts with search on and no catalogs.
+    // A new setup starts with search on, which is the default and not stored, and no catalogs.
     expect(p.rawGenerated()).toEqual({
       youtubeKey: "AIzaKey_1",
       playback: ["app", "youtube"],
       playbackVersion: 1,
-      region: "US",
-      search: true
+      region: "US"
     });
     expect(p.$("#install-link").href).toMatch(/^stremio:\/\/youstream\.up\.railway\.app\/%7B/);
     expect(p.$("#warning").style.display).toBe("none");
@@ -146,8 +145,7 @@ describe("building the install link", () => {
       movieQuery: "{title} film",
       episodeQuery: "{title} {s00e00}",
       exclude: ["trailer", "reaction"],
-      excludeDescription: ["fan movie"],
-      search: true
+      excludeDescription: ["fan movie"]
     });
     expect(p.generated()).toMatchObject({ movieMargin: { value: 12.5, unit: "%" }, types: ["series"] });
   });
@@ -488,7 +486,7 @@ describe("the stream name and description", () => {
     expect(rows(p)[0].name).toBe("▶️ YouStream HD");
     p.set("youtube-key", "k");
     p.submit();
-    expect(p.rawGenerated()).toEqual({ youtubeKey: "k", playback: ["app", "youtube"], playbackVersion: 1, region: "US", search: true });
+    expect(p.rawGenerated()).toEqual({ youtubeKey: "k", playback: ["app", "youtube"], playbackVersion: 1, region: "US" });
   });
 
   test("the episode tab previews an episode", () => {
@@ -601,10 +599,11 @@ describe("the YouTube card", () => {
     expect(names(p)).toEqual(["Marques Brownlee · Shorts · Most viewed", "lofi · Newest"]);
     expect(kinds(p)).toEqual(["channel", "search"]);
     expect(p.$("#yt-search").checked).toBe(true);
-    // An addon installed before search and catalogs existed, as it was.
+    // An addon installed before search and catalogs existed: no rows, search on.
     const old = loadPage({ existing: normalizeConfig({ youtubeKey: "k" }) });
     expect(names(old)).toEqual([]);
-    expect(old.$("#yt-search").checked).toBe(false);
+    expect(old.$("#yt-search").checked).toBe(true);
+    expect(loadPage({ existing: normalizeConfig({ youtubeKey: "k", search: false }) }).$("#yt-search").checked).toBe(false);
   });
 
   test("a search is added as typed, by the button or by Enter, and never twice", () => {
@@ -852,13 +851,12 @@ describe("the YouTube card", () => {
     p.$("#yt-search").dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
     expect(p.$("#search-sort").disabled).toBe(true);
     p.submit();
-    expect(p.rawGenerated()).toMatchObject({ searchSort: "date", searchLength: "long", safeSearch: "strict", catalogRefresh: "3h" });
-    expect(p.rawGenerated()).not.toHaveProperty("search");
+    expect(p.rawGenerated()).toMatchObject({ search: false, searchSort: "date", searchLength: "long", safeSearch: "strict", catalogRefresh: "3h" });
     p.check("yt-search", true);
     p.$("#yt-search").dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
     expect(p.$("#search-length").disabled).toBe(false);
     p.submit();
-    expect(p.rawGenerated().search).toBe(true);
+    expect(p.rawGenerated()).not.toHaveProperty("search");
   });
 
   test("films and shows can both be off when YouTube is used", () => {
@@ -882,8 +880,7 @@ describe("the YouTube card", () => {
     expect(p.$("#refresh-value").value).toBe("45");
     expect(p.$("#refresh-unit").value).toBe("m");
     p.submit();
-    expect(p.rawGenerated()).toMatchObject({ searchSort: "rating", searchLength: "short", safeSearch: "none", catalogRefresh: "45m" });
-    expect(p.rawGenerated()).not.toHaveProperty("search");
+    expect(p.rawGenerated()).toMatchObject({ search: false, searchSort: "rating", searchLength: "short", safeSearch: "none", catalogRefresh: "45m" });
     expect(p.rawGenerated().catalogs).toBeUndefined();
   });
 
@@ -913,7 +910,8 @@ describe("editing an installed addon", () => {
   test.each(Object.entries(OLD_LINKS))("an addon installed before search and catalogs, %s, comes back as the very same link", (_, segment) => {
     const p = loadPage({ existing: decodeConfig(segment) });
     expect(p.errors).toEqual([]);
-    expect(p.$("#yt-search").checked).toBe(false);
+    // Search is on for it, as the default it is, so the link need not change.
+    expect(p.$("#yt-search").checked).toBe(true);
     expect(names(p)).toEqual([]);
     p.submit();
     expect(p.error()).toBeNull();
@@ -972,7 +970,6 @@ describe("editing an installed addon", () => {
     expect(JSON.parse(decodeURIComponent(segment))).toMatchObject({
       typicalMargin: "3m",
       playback: ["app", "smarttube", "youtube"],
-      search: true,
       searchSort: "viewCount",
       safeSearch: "strict",
       catalogs: [

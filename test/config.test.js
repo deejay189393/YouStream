@@ -100,7 +100,7 @@ describe("normalizeConfig", () => {
       format: "youstream",
       nameTemplate: PRESETS.youstream.name,
       descriptionTemplate: PRESETS.youstream.description,
-      search: false,
+      search: true,
       searchSort: "relevance",
       searchLength: "any",
       safeSearch: "moderate",
@@ -196,7 +196,7 @@ describe("normalizeConfig", () => {
       movieMargin: DEFAULT_MARGINS.movieMargin,
       // A list is a choice, and none of it named a type.
       types: [],
-      search: false,
+      search: true,
       searchSort: "relevance",
       searchLength: "any",
       safeSearch: "moderate",
@@ -312,7 +312,7 @@ describe("encodeConfig", () => {
         excludeDescription: ["fan movie"],
         movieQuery: "{title} movie",
         episodeQuery: "{title} {s00e00}",
-        search: true,
+        search: false,
         searchSort: "viewCount",
         searchLength: "long",
         safeSearch: "strict",
@@ -339,7 +339,7 @@ describe("encodeConfig", () => {
       excludeDescription: ["fan movie"],
       movieQuery: "{title} movie",
       episodeQuery: "{title} {s00e00}",
-      search: true,
+      search: false,
       searchSort: "viewCount",
       searchLength: "long",
       safeSearch: "strict",
@@ -439,12 +439,15 @@ describe("YouTube browsing settings", () => {
     expect(refreshMs({ value: 1.5, unit: "d" })).toBe(36 * 60 * 60 * 1000);
   });
 
-  test("search is off unless saved on, so an addon installed before it existed works as it did", () => {
-    expect(normalizeConfig({}).search).toBe(false);
+  test("search is on unless switched off, so an addon installed before it existed has it too", () => {
+    expect(normalizeConfig({}).search).toBe(true);
+    expect(normalizeConfig({ search: false }).search).toBe(false);
+    // Only false itself switches it off.
+    expect(normalizeConfig({ search: 0 }).search).toBe(true);
+    // A link saved while search was off unless saved on still reads as on.
     expect(normalizeConfig({ search: true }).search).toBe(true);
-    expect(normalizeConfig({ search: 1 }).search).toBe(false);
-    expect(decoded({ youtubeKey: "yt", search: true }).search).toBe(true);
-    expect(decoded({ youtubeKey: "yt", search: false }).search).toBeUndefined();
+    expect(decoded({ youtubeKey: "yt", search: false }).search).toBe(false);
+    expect(decoded({ youtubeKey: "yt", search: true }).search).toBeUndefined();
   });
 
   test("each search order, length and SafeSearch YouTube offers", () => {

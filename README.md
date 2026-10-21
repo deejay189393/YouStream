@@ -349,9 +349,8 @@ included.
 ### Search
 
 The app's search gets one row of YouTube results, named after the addon
-(**YouStream**). It is on for a new setup. An addon installed before search
-existed keeps working as it did, with search off, until you switch it on
-under Configure. It is live: each new search asks YouTube, ranked the way
+(**YouStream**). It is on unless you switch it off under Configure, also for
+an addon installed before search existed. It is live: each new search asks YouTube, ranked the way
 YouTube ranks it unless you choose newest, most viewed or top rated. It can
 be kept to under 4 minutes, 4 to 20, or over 20. **SafeSearch** is YouTube's
 moderate by default, or strict, or off. Your country and audio language are
@@ -518,7 +517,7 @@ encodeURIComponent(JSON.stringify({
   format: "youstream",                  // stream text preset: youstream, compact, tamtaro, classic
   nameTemplate: "…",                    // or your own templates, in AIOStreams' formatter syntax
   descriptionTemplate: "…",
-  search: true,                         // the app's search searches YouTube too (absent: off)
+  search: true,                         // the app's search searches YouTube too; false switches it off
   searchSort: "relevance",              // YouTube's ranking; or date, viewCount, rating
   searchLength: "any",                  // or short (under 4 min), medium, long (over 20 min)
   safeSearch: "moderate",               // YouTube's default; or strict, none

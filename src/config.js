@@ -39,10 +39,9 @@ const { normalizeCatalogs, toStoredCatalogs, SORTS, LENGTHS } = require("./catal
  *
  * YouTube itself, browsed in the app (catalogs.js, browse.js):
  *
- *   search          false  the app's search searches YouTube too. Off
- *                   unless saved on, so an addon installed before search
- *                   existed works as it did; the configure page switches
- *                   it on for a new setup
+ *   search          true   the app's search searches YouTube too. On
+ *                   unless switched off, so an addon installed before
+ *                   search existed has it as well
  *   searchSort      "relevance"  YouTube's own ranking; or date, viewCount,
  *                   rating
  *   searchLength    "any"  or short (under 4 minutes), medium, long
@@ -327,7 +326,7 @@ function normalizeConfig(config) {
     format: presetFor(nameTemplate, descriptionTemplate) || "custom",
     nameTemplate,
     descriptionTemplate,
-    search: c.search === true,
+    search: c.search !== false,
     searchSort: optionIdOf(SORTS, c.searchSort),
     searchLength: optionIdOf(LENGTHS, c.searchLength),
     safeSearch: SAFE_SEARCH.includes(c.safeSearch) ? c.safeSearch : SAFE_SEARCH[0],
@@ -365,7 +364,7 @@ function encodeConfig(config) {
   } else if (n.format !== DEFAULT_FORMAT) {
     out.format = n.format;
   }
-  if (n.search) out.search = true;
+  if (!n.search) out.search = false;
   if (n.searchSort !== SORTS[0].id) out.searchSort = n.searchSort;
   if (n.searchLength !== LENGTHS[0].id) out.searchLength = n.searchLength;
   if (n.safeSearch !== SAFE_SEARCH[0]) out.safeSearch = n.safeSearch;
