@@ -27,13 +27,37 @@ jobs:
       # those suites are skipped and everything else still runs.
       FIXTURES_TOKEN: ${{ secrets.FIXTURES_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check out the real-data fixtures
         if: env.FIXTURES_TOKEN != ''
         run: git clone --depth 1 "https://x-access-token:${FIXTURES_TOKEN}@github.com/deejay189393/youstream-fixtures.git" test/fixtures/private
-      - uses: actions/setup-node@v4
+      - name: Say so when the real-data tests are skipped
+        if: env.FIXTURES_TOKEN == ''
+        run: echo "::warning title=Real-data tests skipped::FIXTURES_TOKEN is not set, so the corpus, realWorld and liveApi suites did not run."
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          # The Node the Dockerfile runs in production.
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run test:coverage
+
+  # The image Railway builds, started the way Railway starts it. A runtime
+  # dependency listed only under devDependencies, or a broken Dockerfile,
+  # fails here rather than in a deploy.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build the production image
+        run: docker build -t youstream .
+      - name: Start it and check that it answers
+        run: |
+          docker run -d --name youstream -p 3000:3000 -e IMDB_DATASETS=off youstream
+          for i in $(seq 1 30); do curl -fsS http://localhost:3000/health && break; sleep 1; done
+          curl -fsS http://localhost:3000/health
+          curl -fsS http://localhost:3000/manifest.json -o manifest.json
+          grep -qF '"id":"org.deejay189393.youstream"' manifest.json
+      - name: The server's output, when it did not
+        if: failure()
+        run: docker logs youstream

@@ -618,7 +618,7 @@ has, so an app that installs it anyway never asks it about anything.
 ```bash
 npm install
 npm start                 # http://localhost:3000/configure
-npm test                  # about 700 tests
+npm test                  # about 1,300 tests
 npm run test:coverage     # pinned at 100% statements, branches, functions, lines
 ```
 
@@ -645,8 +645,8 @@ npm test                  # the real-data suites now run too
 ```
 
 CI checks the fixtures out when the repository has a `FIXTURES_TOKEN` secret
-(a token with read access to `youstream-fixtures`), and skips those suites
-otherwise.
+(a token with read access to `youstream-fixtures`). Without it, CI skips those
+suites and marks the run with a warning that says so.
 
 ## Caching
 
@@ -703,7 +703,9 @@ project, `youstream`, with a service per release channel.
 | `youstream-beta` | `dev` | [youstream-beta.up.railway.app](https://youstream-beta.up.railway.app/configure) | Singapore | the same, plus `RELEASE_CHANNEL=beta` |
 
 Work happens on `dev`, which beta deploys on every push; `main` moves only
-when a release goes to prod. CI runs on both.
+when a release goes to prod. CI runs on both: the tests, on Node 24 like the
+image, and a build of the production image, started and asked for `/health`
+and its manifest.
 
 For a cache that survives redeploys, add Railway's Redis to the project and
 set `REDIS_URL=${{Redis.REDIS_URL}}` on each service. Railway's private
