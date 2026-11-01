@@ -40,3 +40,8 @@ test("the privacy policy says what browsing YouTube keeps, and under what", () =
   expect(html).toContain("YouStream does not log what you search for");
   expect(html).toContain("catalogs of the searches, channels, playlists and Trending lists you choose");
 });
+
+test("the privacy policy says what the dislike estimate sends, and to whom", () => {
+  const html = renderTermsPage({ contact: "a@b.c", credits: [] });
+  expect(html).toContain('<a href="https://returnyoutubedislike.com" target="_blank" rel="noopener">Return YouTube Dislike</a>, with nothing but the video\'s id');
+});

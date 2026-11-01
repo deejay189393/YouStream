@@ -646,7 +646,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
           <p class="hint" style="margin:0 0 10px">
             How each stream reads in your app. Templates use AIOStreams' formatter syntax, which PenguPlay uses too,
             so one made for either works here: <code>{video.channel::upper}</code>,
-            <code>{video.official::istrue["✓"||""]}</code>, and <code>{? … ?}</code> for a part shown only when its
+            <code>{video.live::istrue["🔴 Live"||""]}</code>, and <code>{? … ?}</code> for a part shown only when its
             fields have values. <a href="${FORMATTER_DOCS_URL}" target="_blank" rel="noopener">The syntax</a>
           </p>
           <label class="field">

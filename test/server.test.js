@@ -57,8 +57,8 @@ describe("basic routes", () => {
     expect(html).not.toContain("TheTVDB");
   });
 
-  test("credits follow the sources in use; TMDB's and TVmaze's always, since a reader may use either", () => {
-    const always = ["https://www.themoviedb.org", "https://www.tvmaze.com"];
+  test("credits follow the sources in use; TMDB's, TVmaze's and Return YouTube Dislike's always, since every reader may use them", () => {
+    const always = ["https://www.themoviedb.org", "https://www.tvmaze.com", "https://returnyoutubedislike.com"];
     expect(credits({ imdbDatasets: false, tvdbKey: null }).map((c) => c.href)).toEqual(always);
     expect(credits({ imdbDatasets: false, tvdbKey: "k" })[0]).toEqual({ text: "Episode data from TheTVDB.com", href: "https://thetvdb.com" });
     expect(credits().map((c) => c.href)).toEqual(["https://www.imdb.com", ...always]);
@@ -211,7 +211,7 @@ describe("YouTube items over HTTP", () => {
     const more = await request(app).get(`/${KEYED()}/catalog/YouTube/trending.all/skip=1.json`);
     expect(more.body.metas).toEqual([]);
     const meta = await request(app).get(`/${KEYED()}/meta/YouTube/youstream%3Aabcdefghijk.json`);
-    expect(meta.body.meta).toMatchObject({ id: "youstream:abcdefghijk", name: "Trending One" });
+    expect(meta.body.meta).toMatchObject({ id: "youstream:abcdefghijk", name: "Trending One", description: "Channel\n12.3K views" });
     const streams = await request(app).get(`/${KEYED()}/stream/YouTube/youstream:abcdefghijk.json`);
     expect(streams.body.streams[0].ytId).toBe("abcdefghijk");
     // No upload date: AIOStreams has no release for a YouTube item, and would drop it as a fake.
@@ -404,7 +404,7 @@ describe("/admin/cache", () => {
     test("names the namespaces when given another", async () => {
       const res = await request(app).delete("/admin/cache/videos").set(auth("s3cret"));
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe("Unknown namespace; one of search, metadata, cooldown, browse, video, all");
+      expect(res.body.error).toBe("Unknown namespace; one of search, metadata, cooldown, browse, video, dislikes, all");
     });
   });
 });

@@ -42,7 +42,7 @@ const serverHasTmdbKey = () => Boolean(cleanKey(process.env.TMDB_API_KEY));
  * The data sources this server uses whose terms ask to be credited where
  * their data is used: IMDb's statement, TMDB's notice with its logo (a
  * reader may add a TMDB key even when the server has none), TheTVDB's link,
- * and TVmaze's, whose data is CC BY-SA.
+ * TVmaze's, whose data is CC BY-SA, and Return YouTube Dislike's.
  */
 function credits(metadata = hostConfig.metadata) {
   const out = [];
@@ -55,6 +55,7 @@ function credits(metadata = hostConfig.metadata) {
     imageAlt: "TMDB"
   });
   out.push({ text: "Episode runtimes from TVmaze.com (CC BY-SA 4.0)", href: "https://www.tvmaze.com" });
+  out.push({ text: "Dislike estimates from Return YouTube Dislike", href: "https://returnyoutubedislike.com" });
   return out;
 }
 

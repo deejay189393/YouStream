@@ -110,6 +110,7 @@ function toVideo(detail) {
   const stats = detail.statistics || {};
   const restriction = content.regionRestriction || {};
   const views = Number(stats.viewCount);
+  const likes = Number(stats.likeCount);
   return {
     id: detail.id,
     title: typeof snippet.title === "string" ? snippet.title : "",
@@ -122,6 +123,8 @@ function toVideo(detail) {
     durationSeconds: durationToSeconds(content.duration),
     definition: content.definition === "hd" ? "hd" : "sd",
     views: Number.isFinite(views) ? views : null,
+    // Left out of the API's answer when the uploader hides it.
+    likes: Number.isFinite(likes) ? likes : null,
     language: primaryLanguage(snippet.defaultAudioLanguage || snippet.defaultLanguage),
     live: snippet.liveBroadcastContent && snippet.liveBroadcastContent !== "none" ? snippet.liveBroadcastContent : null,
     embeddable: status.embeddable !== false,

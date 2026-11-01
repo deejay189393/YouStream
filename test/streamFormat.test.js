@@ -214,7 +214,7 @@ describe("the presets", () => {
         "🍿 Example Film (1968)",
         "🎬 Example Film (1968) | Full Movie | Restored",
         "🎞️ HD • ⏱️ 1h 35m 09s (−51s)",
-        "📺 Classic Films ✓ • 👁 338K • 📅 16 Oct 2023",
+        "📺 Classic Films • 👁 338K • 📅 16 Oct 2023",
         "🎧 English",
         "▶️ Play in app"
       ].join("\n")

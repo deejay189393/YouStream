@@ -7,6 +7,8 @@ const {
   toPreview,
   toMetaPreview,
   toFullMeta,
+  itemDescription,
+  AGE_NOTE,
   runtimeText,
   itemGenres,
   titleCaseTag,
@@ -123,11 +125,16 @@ describe("toMetaPreview", () => {
       poster: "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg",
       posterShape: "landscape",
       background: "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg",
-      description: "An engine, explained.",
+      description: "Example Science\n1.2M views\n\nAn engine, explained.",
       releaseInfo: "2025-03-14",
       runtime: "13 min",
       behaviorHints: { defaultVideoId: "youstream:abcdefghijk" }
     });
+  });
+
+  test("a card has the views and likes, never a dislike estimate: that is looked up for the page only", () => {
+    const card = toMetaPreview(toPreview(toItem(detail({ statistics: { likeCount: "45000" } }))));
+    expect(card.description).toBe("Example Science\n1.2M views · 👍🏻 45K\n\nAn engine, explained.");
   });
 
   test("a live stream says so on its name, and an untitled, undated video still shows", () => {
@@ -140,7 +147,7 @@ describe("toMetaPreview", () => {
 });
 
 describe("toFullMeta", () => {
-  test("the description, who uploaded it and how widely it has been seen, the tags and the channel", () => {
+  test("the channel, how widely it has been seen, then the description; the tags and the channel's link", () => {
     expect(toFullMeta(toItem(detail({ status: {}, contentDetails: { licensedContent: true } })))).toEqual({
       id: "youstream:abcdefghijk",
       type: "YouTube",
@@ -148,7 +155,7 @@ describe("toFullMeta", () => {
       poster: "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg",
       posterShape: "landscape",
       background: "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg",
-      description: "An engine, explained.\n\nExample Science ✓ · 1.2M views",
+      description: "Example Science\n1.2M views\n\nAn engine, explained.",
       releaseInfo: "2025-03-14",
       runtime: "13 min",
       released: "2025-03-14T15:00:00Z",
@@ -159,13 +166,45 @@ describe("toFullMeta", () => {
     });
   });
 
-  test("an age-restricted video says where it plays; one with nothing known still reads", () => {
+  test("the dislike estimate goes beside the likes, marked as one", () => {
+    const meta = toFullMeta(toItem(detail({ statistics: { likeCount: "45000" } })), 1300);
+    expect(meta.description).toBe("Example Science\n1.2M views · 👍🏻 45K · 👎🏻 ~1.3K\n\nAn engine, explained.");
+  });
+
+  test("an age-restricted video says where it plays, between the counts and the description; one with nothing known still reads", () => {
     const restricted = toFullMeta(toItem(detail({ contentDetails: { contentRating: { ytRating: "ytAgeRestricted" } } })));
-    expect(restricted.description).toContain("🔞 Age-restricted");
+    expect(restricted.description).toBe(`Example Science\n1.2M views\n\n${AGE_NOTE}\n\nAn engine, explained.`);
     const bare = toFullMeta(toItem({ id: "abcdefghijk" }));
-    expect(bare).toMatchObject({ description: "YouTube", links: [], genres: undefined, released: undefined });
+    expect(bare).toMatchObject({ description: undefined, links: [], genres: undefined, released: undefined });
     const unnamed = toFullMeta(toItem({ id: "abcdefghijk", snippet: { channelId: "UCsomeone" } }));
     expect(unnamed.links).toEqual([{ name: "YouTube", category: "Channel", url: "https://www.youtube.com/channel/UCsomeone" }]);
+  });
+});
+
+describe("itemDescription", () => {
+  const item = (fields) => ({ channelTitle: "Example Science", views: 1200000, likes: 45000, ageRestricted: false, description: "An engine, explained.", ...fields });
+
+  test.each([
+    ["every part", {}, 26237, "Example Science\n1.2M views · 👍🏻 45K · 👎🏻 ~26.2K\n\nAn engine, explained."],
+    ["likes hidden by the uploader", { likes: null }, 26237, "Example Science\n1.2M views · 👎🏻 ~26.2K\n\nAn engine, explained."],
+    ["no estimate", {}, null, "Example Science\n1.2M views · 👍🏻 45K\n\nAn engine, explained."],
+    ["no view count", { views: null }, null, "Example Science\n👍🏻 45K\n\nAn engine, explained."],
+    ["no counts at all", { views: null, likes: null }, null, "Example Science\n\nAn engine, explained."],
+    ["counts of nought are still counts", { views: 0, likes: 0 }, 0, "Example Science\n0 views · 👍🏻 0 · 👎🏻 ~0\n\nAn engine, explained."],
+    ["no channel name", { channelTitle: "" }, null, "1.2M views · 👍🏻 45K\n\nAn engine, explained."],
+    ["no description", { description: "" }, null, "Example Science\n1.2M views · 👍🏻 45K"],
+    ["age-restricted", { ageRestricted: true }, null, `Example Science\n1.2M views · 👍🏻 45K\n\n${AGE_NOTE}\n\nAn engine, explained.`],
+    ["only the description", { channelTitle: "", views: null, likes: null }, null, "An engine, explained."]
+  ])("%s", (_, fields, dislikes, text) => {
+    expect(itemDescription(item(fields), dislikes)).toBe(text);
+  });
+
+  test("nothing known is no description at all", () => {
+    expect(itemDescription({ channelTitle: "", views: null, likes: null, description: "" })).toBeUndefined();
+  });
+
+  test("the channel is named plainly: no mark beside it, whatever YouTube says of its licence", () => {
+    expect(itemDescription(item({ licensed: true }))).not.toContain("✓");
   });
 });
 

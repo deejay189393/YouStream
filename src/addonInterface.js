@@ -7,6 +7,7 @@ const { hostConfig } = require("./hostConfig");
 const { searchMsFor } = require("./cache");
 const { catalogItems, searchItems, getItem } = require("./browse");
 const { ITEM_TYPE, videoIdOf, toMetaPreview, toFullMeta } = require("./items");
+const { dislikeEstimate } = require("./dislikes");
 
 /**
  * The catalog, meta and stream handlers, wired into the official
@@ -138,15 +139,16 @@ async function handleCatalog({ type, id, extra, config }) {
 /**
  * A YouTube video's details, for its page and for an app's library, however
  * long after it was saved. A video YouTube no longer has is a 404; YouTube
- * failing to answer is an error, which the app asks again about.
+ * failing to answer is an error, which the app asks again about. The dislike
+ * estimate is asked for alongside, and never fails the page.
  */
 async function handleMeta({ type, id, config }) {
   const settings = normalizeConfig(config);
   const videoId = videoIdOf(id);
   if (!settings.youtubeKey || type !== ITEM_TYPE || !videoId) throw notFound();
-  const item = await getItem(videoId, settings.youtubeKey);
+  const [item, dislikes] = await Promise.all([getItem(videoId, settings.youtubeKey), dislikeEstimate(videoId)]);
   if (!item || isBlocked(item)) throw notFound();
-  return { meta: toFullMeta(item), cacheMaxAge: META_MAX_AGE_SECONDS };
+  return { meta: toFullMeta(item, dislikes), cacheMaxAge: META_MAX_AGE_SECONDS };
 }
 
 function createAddonInterface() {

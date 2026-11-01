@@ -452,10 +452,31 @@ non-embeddable videos when you asked for embeddable only.
 
 ### Metadata and streams
 
-A video's page has its title, its whole description, who uploaded it (✓ for
-a YouTube content partner) and how widely it has been seen, the upload date,
-the length, its category and its uploader's tags, a link to the channel, and
-16:9 artwork. Tags are cleaned the way Newsio cleans publishers' keywords:
+A video's page has its title, the upload date, the length, its category and
+its uploader's tags, a link to the channel, 16:9 artwork, and a description
+that leads with the channel and how the video has been received:
+
+```
+Example Science
+1.2M views · 👍🏻 45K · 👎🏻 ~1.3K
+
+How an engine works, explained in thirteen minutes. …
+```
+
+Views and likes are YouTube's own counts. Dislikes are an estimate, marked
+with a `~`: YouTube stopped publishing dislike counts in December 2021 and
+its API gives them only to a video's owner, so the count comes from
+[Return YouTube Dislike](https://returnyoutubedislike.com), which builds it
+from its own users' votes and counts archived before the change. It is asked
+for a video's page only, with nothing but the video's id, and kept as long
+as the video's details. After a refusal or an error that service is left
+alone for a minute, and the page goes without a dislike count. An
+age-restricted video says where it plays, between the counts and the
+description. A count YouTube does not give, such as likes an uploader hid,
+is left out with its separator. A row's cards say the same without the
+dislikes, which would take a lookup per card.
+
+Tags are cleaned the way Newsio cleans publishers' keywords:
 - generic words, the channel's own name, handles, hashtags and slug families
   are dropped;
 - rewordings of one phrase are kept once;
@@ -596,7 +617,7 @@ https://<host>/<your config>/explain/series/<imdb id>:<season>:<episode>.json
 | `GET /terms` | Terms of use and privacy policy |
 | `GET /health` | Health check used by Railway; also names the cache store |
 | `GET /admin/cache` | What the cache holds (only with `CACHE_ADMIN_TOKEN`) |
-| `DELETE /admin/cache/:namespace` | Empty `search`, `metadata`, `cooldown`, `browse`, `video` or `all` (only with `CACHE_ADMIN_TOKEN`) |
+| `DELETE /admin/cache/:namespace` | Empty `search`, `metadata`, `cooldown`, `browse`, `video`, `dislikes` or `all` (only with `CACHE_ADMIN_TOKEN`) |
 
 Catalogs, metadata and streams go through the official `stremio-addon-sdk`
 router. The manifest claims, per resource:
@@ -673,6 +694,7 @@ redeploys, one instance.
 | A YouTube catalog's page | your refresh interval, 2 hours by default | per reader, under a fingerprint of the key |
 | A YouTube search's page | 2 minutes, then 10 more for outages only | per reader |
 | A YouTube video's details | 1 day (the search lifetime) | shared: every video a row lists, and any opened by id |
+| A video's dislike estimate | 1 day (the search lifetime) | shared; after a refusal or an error, none is asked for a minute |
 | Kept past that, for outages | 7 days | answered with **only** when the service it came from fails (a spent quota, an outage): yesterday's results beat none |
 | A key with its quota spent | until the quota resets, an hour at most | |
 
@@ -757,6 +779,7 @@ shared by every reader would run out within hours.
 | [TVmaze](https://www.tvmaze.com) | episodes' runtimes without a TheTVDB or TMDB key | free, no key; data under CC BY-SA 4.0, credited |
 | [TMDB](https://www.themoviedb.org) | `tmdb:` ids, cast, other names | free API key; credited with its logo and "This product uses the TMDB API but is not endorsed or certified by TMDB." |
 | [Kitsu](https://kitsu.io) | anime | free, no key |
+| [Return YouTube Dislike](https://returnyoutubedislike.com) | a YouTube video's dislike estimate, on its page | free, no key; at most 100 requests a minute and 10,000 a day; credited with a link |
 
 The configure page and the terms page show the credits these terms ask for.
 

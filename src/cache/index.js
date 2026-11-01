@@ -151,7 +151,8 @@ class Namespace {
  * One YouTube search and its enrichment, by query, shared by everyone on
  * this server: the results are the same whoever asks, and a search is the
  * scarcest thing the addon spends, 100 of a key's 10,000 daily units.
- * Version 1 is youtube.toVideo's shape.
+ * Version 1 is youtube.toVideo's shape; entries made before it kept the
+ * like count have none, and nothing that reads this cache uses it.
  */
 const searchCache = new Namespace("search", 1, {
   freshMs: (s) => s.searchMs,
@@ -179,10 +180,10 @@ const keyCooldown = new Namespace("cooldown", 1, {
  * their key, what the page lists and which page it is. Kept apart per
  * reader and for as long as that reader chose (their refresh interval, or
  * a couple of minutes for a search), then kept a while longer only to
- * answer with when YouTube cannot be asked. Version 1 is browse.js's page
- * shape.
+ * answer with when YouTube cannot be asked. Version 2 is browse.js's page
+ * shape, with each video's like count.
  */
-const browseCache = new Namespace("browse", 1, {
+const browseCache = new Namespace("browse", 2, {
   freshMs: () => 2 * 60 * 60 * 1000,
   staleMs: (s, freshMs) => Math.min(s.staleMs, MAX_YOUTUBE_DATA_MS - freshMs)
 });
@@ -190,9 +191,21 @@ const browseCache = new Namespace("browse", 1, {
 /**
  * One video's details by id, shared by everyone on this server, for the
  * metadata and streams of a video opened from a catalog, from search or
- * from an app's library. Version 1 is items.toItem's shape.
+ * from an app's library. Version 2 is items.toItem's shape, with the like
+ * count.
  */
-const videoCache = new Namespace("video", 1, {
+const videoCache = new Namespace("video", 2, {
+  freshMs: (s) => s.searchMs,
+  staleMs: (s, freshMs) => Math.min(s.staleMs, MAX_YOUTUBE_DATA_MS - freshMs)
+});
+
+/**
+ * Return YouTube Dislike's estimate for one video, by id, shared by everyone
+ * on this server and kept as long as the video's own details, so a page
+ * opened again asks that service nothing (dislikes.js). Version 1 is a count,
+ * or null when it has none for the video.
+ */
+const dislikeCache = new Namespace("dislikes", 1, {
   freshMs: (s) => s.searchMs,
   staleMs: (s, freshMs) => Math.min(s.staleMs, MAX_YOUTUBE_DATA_MS - freshMs)
 });
@@ -202,7 +215,8 @@ const NAMESPACES = {
   metadata: metadataCache,
   cooldown: keyCooldown,
   browse: browseCache,
-  video: videoCache
+  video: videoCache,
+  dislikes: dislikeCache
 };
 
 /**
@@ -247,6 +261,7 @@ module.exports = {
   keyCooldown,
   browseCache,
   videoCache,
+  dislikeCache,
   NAMESPACES,
   Namespace,
   isNewRelease,

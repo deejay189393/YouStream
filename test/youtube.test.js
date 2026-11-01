@@ -268,7 +268,7 @@ describe("toVideo", () => {
           contentRating: { ytRating: "ytAgeRestricted" },
           regionRestriction: { blocked: ["US"] }
         },
-        statistics: { viewCount: "1500" },
+        statistics: { viewCount: "1500", likeCount: "120" },
         status: { embeddable: false }
       })
     );
@@ -282,6 +282,7 @@ describe("toVideo", () => {
       durationSeconds: 2211,
       definition: "sd",
       views: 1500,
+      likes: 120,
       language: "hi",
       live: null,
       embeddable: false,
@@ -303,6 +304,7 @@ describe("toVideo", () => {
       durationSeconds: null,
       definition: "sd",
       views: null,
+      likes: null,
       language: null,
       live: null,
       embeddable: true,

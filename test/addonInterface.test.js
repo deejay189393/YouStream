@@ -210,6 +210,27 @@ describe("YouTube items: metadata and streams", () => {
     expect(res.meta).toMatchObject({ id: "youstream:abcdefghijk", type: "YouTube", name: "How Example Engines Work", genres: ["Science & Technology", "Engines"] });
   });
 
+  test("the page leads with the channel and its counts, the dislikes being Return YouTube Dislike's estimate", async () => {
+    const liked = apiVideo("abcdefghijk", { snippet: { channelTitle: "Example Science", description: "An engine, explained." }, statistics: { viewCount: "1200000", likeCount: "45000" } });
+    const fetch = routeFetch([["/videos?", { items: [liked] }], ["returnyoutubedislikeapi.com/votes?videoId=abcdefghijk", { dislikes: 1300 }]]);
+    const res = await handleMeta({ type: "YouTube", id: "youstream:abcdefghijk", config: { youtubeKey: "KEY" } });
+    expect(res.meta.description).toBe("Example Science\n1.2M views · 👍🏻 45K · 👎🏻 ~1.3K\n\nAn engine, explained.");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test("an estimate that cannot be had leaves the dislikes out, and the page is served all the same", async () => {
+    routeFetch([["/videos?", { items: [VIDEO] }], ["returnyoutubedislikeapi.com", response({}, { status: 503 })]]);
+    const res = await handleMeta({ type: "YouTube", id: "youstream:abcdefghijk", config: { youtubeKey: "KEY" } });
+    expect(res.meta.description).toBe("Channel\n12.3K views");
+  });
+
+  test("a catalog card carries no estimate: nothing is asked of Return YouTube Dislike for a row", async () => {
+    const fetch = routeFetch([["/videos?", { items: [VIDEO] }]]);
+    const res = await handleCatalog({ type: "YouTube", id: "trending.all", extra: {}, config: { youtubeKey: "KEY", catalogs: [{ trending: "all" }] } });
+    expect(res.metas[0].description).toBe("Channel\n12.3K views");
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("returnyoutubedislike"))).toBe(false);
+  });
+
   test.each([
     ["an id that is not an item", "YouTube", "tt0063350", { youtubeKey: "KEY" }],
     ["another type", "movie", "youstream:abcdefghijk", { youtubeKey: "KEY" }],

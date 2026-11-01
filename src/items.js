@@ -94,6 +94,29 @@ const itemName = (item) => `${item.live === "live" ? "🔴 " : ""}${item.title |
 
 const releaseInfo = (item) => (item.publishedAt ? item.publishedAt.slice(0, 10) : undefined);
 
+const AGE_NOTE = "🔞 Age-restricted: it plays in the YouTube app, where you are signed in.";
+
+/**
+ * What a video's card and page say about it: the channel, then how widely it
+ * has been seen, liked and disliked, a note when it is age-restricted, then
+ * the uploader's own description. A count YouTube does not give is left out
+ * with its separator: likes are hidden when the uploader turns them off, and
+ * dislikes are an estimate (dislikes.js), looked up for a video's page only.
+ *
+ *   Example Science
+ *   1.2M views · 👍🏻 45K · 👎🏻 ~1.3K
+ *
+ *   How an engine works, explained in thirteen minutes. ...
+ */
+function itemDescription(item, dislikes = null) {
+  const views = formatCount(item.views);
+  const likes = formatCount(item.likes);
+  const disliked = formatCount(dislikes);
+  const counts = [views && `${views} views`, likes && `👍🏻 ${likes}`, disliked && `👎🏻 ~${disliked}`].filter(Boolean).join(" · ");
+  const heading = [item.channelTitle, counts].filter(Boolean).join("\n");
+  return [heading, item.ageRestricted ? AGE_NOTE : null, item.description].filter(Boolean).join("\n\n") || undefined;
+}
+
 /** One video in a catalog or in search results. */
 function toMetaPreview(item) {
   const id = itemId(item.id);
@@ -104,7 +127,7 @@ function toMetaPreview(item) {
     poster: item.poster,
     posterShape: "landscape",
     background: item.background,
-    description: item.description || undefined,
+    description: itemDescription(item),
     releaseInfo: releaseInfo(item),
     runtime: runtimeText(item.durationSeconds),
     // Opens the video's own streams rather than a list of episodes.
@@ -112,21 +135,11 @@ function toMetaPreview(item) {
   };
 }
 
-/** The description, then who uploaded it and how widely it has been seen. */
-function fullDescription(item) {
-  const views = formatCount(item.views);
-  const credit = [`${item.channelTitle || "YouTube"}${item.licensed ? " ✓" : ""}`, views ? `${views} views` : null]
-    .filter(Boolean)
-    .join(" · ");
-  const notes = item.ageRestricted ? "🔞 Age-restricted: it plays in the YouTube app, where you are signed in." : null;
-  return [item.description, credit, notes].filter(Boolean).join("\n\n");
-}
-
-/** Everything the detail page shows. */
-function toFullMeta(item) {
+/** Everything the detail page shows, with the dislike estimate when there is one. */
+function toFullMeta(item, dislikes = null) {
   return {
     ...toMetaPreview(item),
-    description: fullDescription(item),
+    description: itemDescription(item, dislikes),
     released: item.publishedAt || undefined,
     genres: itemGenres(item),
     website: `${WATCH_URL}${item.id}`,
@@ -269,7 +282,8 @@ module.exports = {
   toPreview,
   toMetaPreview,
   toFullMeta,
-  fullDescription,
+  itemDescription,
+  AGE_NOTE,
   runtimeText,
   itemGenres,
   titleCaseTag,

@@ -389,7 +389,7 @@ const PRESETS = {
       `{?{metadata.type::=series["📡"||"🍿"]} {metadata.title}{? ({metadata.year})?}{? • {stream.seasonEpisode::join('')}?}{? • {metadata.episodeTitle}?}?}`,
       "🎬 {video.title}",
       `🎞️ {video.definition}{? • ⏱️ {stream.duration::time('[%-Hh ]%-Mm %Ss')}?}{video.live::istrue[" • 🔴 Live"||""]}{? ({video.offset})?}`,
-      `📺 {video.channel}{video.official::istrue[" ✓"||""]}{? • 👁 {video.views}?}{? • 📅 {video.uploaded::date('%-d %b %Y')}?}`,
+      `📺 {video.channel}{? • 👁 {video.views}?}{? • 📅 {video.uploaded::date('%-d %b %Y')}?}`,
       "{?🎧 {stream.languages::join(', ')}?}",
       "{?🔞 {stream.message}?}",
       "{play.icon} {play.label}"

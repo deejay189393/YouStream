@@ -88,7 +88,7 @@ describe("buildStream", () => {
       "🍿 Example Film (1968)",
       "🎬 Example Film (1968)",
       "🎞️ HD • ⏱️ 36m 51s (exact)",
-      "📺 Indie Series ✓ • 👁 4.5M • 📅 30 Apr 2019"
+      "📺 Indie Series • 👁 4.5M • 📅 30 Apr 2019"
     ]);
     expect(behaviorHints.filename).toBe("Example Film (1968) HD WEB-DL English");
   });
