@@ -8,6 +8,8 @@ const { searchMsFor } = require("./cache");
 const { catalogItems, searchItems, getItem } = require("./browse");
 const { LEGACY_TYPE, LEGACY_PREFIX, videoIdOf, isItemType, toMetaPreview, toFullMeta } = require("./items");
 const { dislikeEstimate } = require("./dislikes");
+const { channelSubscribers } = require("./youtube");
+const { dependsOnChannel, cameOutFor } = require("./resolution");
 
 /**
  * The catalog, meta and stream handlers, wired into the official
@@ -89,8 +91,21 @@ async function handleStream({ id, config }) {
   const result = await findVideos(id, settings);
   logResult(id, result);
 
-  const streams = result.status === "ok" ? toStreams(result.matches, settings, result.title) : [];
+  const streams = result.status === "ok" ? toStreams(await withChannelSizes(result.matches, settings, result.title), settings, result.title) : [];
   return { streams, cacheMaxAge: maxAgeFor(result, streams) };
+}
+
+/**
+ * The matches, each video with its channel's subscriber count where the
+ * resolution estimate turns on it (resolution.js): one lookup for all of
+ * them, and none when no video needs it.
+ */
+async function withChannelSizes(matches, settings, title) {
+  const cameOut = cameOutFor(title);
+  const channels = matches.filter((m) => dependsOnChannel(m.video, cameOut)).map((m) => m.video.channelId);
+  if (!channels.length) return matches;
+  const counts = await channelSubscribers(settings.youtubeKey, channels);
+  return matches.map((m) => (m.video.channelId in counts ? { ...m, video: { ...m.video, subscribers: counts[m.video.channelId] } } : m));
 }
 
 /** The rows for a YouTube video opened from a catalog, search or the library. */
@@ -103,7 +118,8 @@ async function itemStreams(videoId, settings) {
     return { streams: [], cacheMaxAge: RETRY_SECONDS };
   }
   if (!item || isBlocked(item)) return { streams: [], cacheMaxAge: hostConfig.streams.emptyMaxAgeSeconds };
-  return { streams: toItemStreams(item, settings), cacheMaxAge: hostConfig.streams.maxAgeSeconds };
+  const [sized] = await withChannelSizes([{ video: item }], settings, null);
+  return { streams: toItemStreams(sized.video, settings), cacheMaxAge: hostConfig.streams.maxAgeSeconds };
 }
 
 /**

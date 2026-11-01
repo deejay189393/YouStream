@@ -262,13 +262,14 @@ per way of watching you turned on.
 
 | Preset | Name | Description |
 |---|---|---|
-| **YouStream** (default) | `▶️ YouStream HD` | what it is, the video's title, its definition and length (and how far from the listed runtime), the channel with views and upload date, the language, how it plays |
-| **Compact** | `YouStream HD` | the video's title, then length, views and language |
-| **Tamtaro style** | `720P ⁽ʸᵗ⁾` / `〈Web-dl〉` | the look of Tamtaro's AIOStreams formatter, for YouStream rows that sit beside an AIOStreams list using it |
-| **Classic (Torrentio)** | `YouStream` / `720p` | the release name, then the numbers, then flags |
+| **YouStream** (default) | `▶️ YouStream 4K` | what it is, the video's title, its resolution and length (and how far from the listed runtime), the channel with views and upload date, the language, how it plays |
+| **Compact** | `YouStream 1080p` | the video's title, then length, views and language |
+| **Tamtaro style** | `4K ⁽ʸᵗ⁾` / `〈Web-dl〉` | the look of Tamtaro's AIOStreams formatter, for YouStream rows that sit beside an AIOStreams list using it |
+| **Classic (Torrentio)** | `YouStream` / `4K` | the release name, then the numbers, then flags |
 
 The fields are YouTube's own, `{video.title}`, `{video.channel}`,
-`{video.official}`, `{video.definition}`, `{video.views}`,
+`{video.official}`, `{video.definition}` (HD or SD), `{video.resolution}`
+(the estimate below: 4K, 1440p, 1080p, 720p or 480p), `{video.views}`,
 `{video.uploaded}`, `{video.length}`, `{video.offset}`, `{video.language}`,
 `{video.ageRestricted}`, `{video.id}`, `{video.url}`, and how the row plays,
 `{play.icon}` and `{play.label}`, beside AIOStreams' own: `{stream.*}`,
@@ -276,6 +277,35 @@ The fields are YouTube's own, `{video.title}`, `{video.channel}`,
 AIOStreams documents exists, empty where YouTube has nothing for it (sizes,
 seeders, codecs), so a template written for AIOStreams renders rather than
 erring.
+
+### How sharp a stream is said to be
+
+The YouTube Data API says only whether a video is HD (720p or better) or SD.
+The formats YouTube actually serves, and their frame rate and bitrate, are in
+its private player data, which its developer policies forbid an API client to
+read. So for an HD video, or a live one, YouStream estimates, and the first
+of these that applies decides:
+
+1. **The title names a resolution**: 4K, 8K, UHD or 2160p, 1440p, 1080p, FHD
+   or Full HD, 720p, the highest it names. ("4K subscribers" is a count.)
+2. **It is live**: 1080p.
+3. **It came out in 2019 or later, on a channel of 300,000 subscribers or
+   more**: 4K (2160p).
+4. **Otherwise** 1080p.
+
+YouTube calls every stream SD while it is live, which tells nothing, so a live
+stream goes by its title or is 1080p; any other SD video is 480p. "Came out"
+is the film's or episode's own release date when the video was found for
+one, since official channels upload old films that are rarely 4K, and the
+upload date for a YouTube video opened from a catalog or search. 8K counts as 4K, the sharpest AIOStreams knows. A channel's
+subscriber count costs 1 unit per fifty channels, asked only when the estimate
+turns on it and kept for everyone for a day; when YouTube cannot be asked, the
+video is 1080p.
+
+It is an estimate. A big channel that uploads in 1080p shows 4K, and so does
+a re-upload channel past 300,000 subscribers; a small channel that uploads in
+4K shows 1080p. Playback is not affected: the app plays the best quality the
+upload has.
 
 ### With AIOStreams
 
@@ -285,7 +315,7 @@ text (its docs: Addon protocol → Streams), so YouStream sends:
 
 | Hint | Example | What AIOStreams uses it for |
 |---|---|---|
-| `filename` | `Example Film (1968) HD WEB-DL English`, `Example Show (2019) S01E03 HD WEB-DL Hindi` | title, year, season and episode matching; resolution (HD reads as 720p, SD as 480p); quality (WEB-DL); language |
+| `filename` | `Example Film (1968) 1080p WEB-DL English`, `Example Show (2019) S01E03 2160p WEB-DL Hindi` | title, year, season and episode matching; resolution (the estimate below; SD reads as 480p); quality (WEB-DL); language |
 | `duration` | `5709` (seconds) | the runtime |
 | `publishDate` | `2023-10-16T00:00:09Z` | the age; sent for films and episodes only |
 | `indexer` | `YouTube` | the source |
@@ -317,10 +347,11 @@ In AIOStreams an in-app row (`ytId`) is stream type `youtube`, and a
 YouTube-app or SmartTube row (`externalUrl`) is `external`. Tamtaro's
 template removes every `external` stream ("Info & Other Unwanted"), so with it
 only the in-app rows appear; to keep the others, turn on **Result Passthrough**
-for YouStream. Under that template an in-app row sorts in its "HD+" tier (720p,
-WEB-DL), scores +4 on the ranked expressions it pulls in (+5 for HD, −1 for no
-release group), and its SELect step keeps the first few of each resolution and
-quality, in YouStream's order, best first. AIOStreams writes its own name and
+for YouStream. Under that template an in-app row sorts by its estimated
+resolution, as a WEB-DL, and its SELect step keeps the first few of each
+resolution and quality, in YouStream's order, best first. A stream with no
+debrid service counts as instant, like a cached one, so a 4K estimate sits
+with your cached 4K files. AIOStreams writes its own name and
 description from what it parsed; to show YouStream's instead, turn on
 **Format Passthrough** for it.
 
@@ -526,8 +557,9 @@ key can **search 100 times a day**. Enrichment is 1 unit. Browsing YouTube
 spends from the same allowance (see
 [YouTube in your app](#youtube-in-your-app-search-catalogs-and-your-library)):
 a search, typed or as a row, is one of those 100 searches; a channel,
-playlist or Trending row is 1 or 2 units. For films and episodes YouStream
-spends **one search per title looked up**:
+playlist or Trending row is 1 or 2 units. A stream list can cost 1 more, for
+the subscriber counts the resolution estimate needs, once a day per channel.
+For films and episodes YouStream spends **one search per title looked up**:
 
 - Results are cached and **shared by everyone on the server** (see
   [Caching](#caching)). The same query returns the same videos whoever asks,
@@ -643,7 +675,7 @@ https://<host>/<your config>/explain/series/<imdb id>:<season>:<episode>.json
 | `GET /terms` | Terms of use and privacy policy |
 | `GET /health` | Health check used by Railway; also names the cache store |
 | `GET /admin/cache` | What the cache holds (only with `CACHE_ADMIN_TOKEN`) |
-| `DELETE /admin/cache/:namespace` | Empty `search`, `metadata`, `cooldown`, `browse`, `video`, `dislikes` or `all` (only with `CACHE_ADMIN_TOKEN`) |
+| `DELETE /admin/cache/:namespace` | Empty `search`, `metadata`, `cooldown`, `browse`, `video`, `dislikes`, `channel` or `all` (only with `CACHE_ADMIN_TOKEN`) |
 
 Catalogs, metadata and streams go through the official `stremio-addon-sdk`
 router. The manifest claims, per resource:
@@ -722,6 +754,7 @@ redeploys, one instance.
 | A YouTube search's page | 2 minutes, then 10 more for outages only | per reader |
 | A YouTube video's details | 1 day (the search lifetime); 2 minutes for a stream that is live | shared: every video a row lists, and any opened by id |
 | A video's dislike estimate | 1 day (the search lifetime) | shared; after a refusal or an error, none is asked for a minute |
+| A channel's subscriber count | 1 day (the search lifetime) | shared; for the resolution estimate |
 | Kept past that, for outages | 7 days | answered with **only** when the service it came from fails (a spent quota, an outage): yesterday's results beat none |
 | A key with its quota spent | until the quota resets, an hour at most | |
 
@@ -830,10 +863,11 @@ The configure page and the terms page show the credits these terms ask for.
 - **Films split into parts** ("Part 1/2") are not stitched together. Each
   part is too short to match.
 - **MAL ids** (`mal:`) are not read yet. Kitsu ids are.
-- **Resolution is HD or SD, nothing finer.** YouTube's API says only which a
-  video is, so an HD video is labelled 720p for AIOStreams, the least HD
-  means, though in-app playback picks the best quality YouTube has, often
-  1080p or more.
+- **Resolution is an estimate.** YouTube's API says only HD or SD, so an HD
+  video's resolution comes from its title, whether it is live, when it came
+  out and its channel's size (see
+  [How sharp a stream is said to be](#how-sharp-a-stream-is-said-to-be)).
+  In-app playback picks the best quality YouTube has either way.
 - **YouTube search here is not your YouTube.** With an API key, search is
   YouTube's ranking for anyone, not personalised. It has no subscriptions,
   history or recommendations, which need you to sign in with Google.

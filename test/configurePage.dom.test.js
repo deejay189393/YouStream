@@ -429,7 +429,7 @@ describe("the stream name and description", () => {
     expect(p.$("#name-template").value).toBe(PRESETS.youstream.name);
     expect(p.$("#description-template").value).toBe(PRESETS.youstream.description);
     const preview = rows(p);
-    expect(preview.map((r) => r.name)).toEqual(["▶️ YouStream HD", "📱 YouStream HD"]);
+    expect(preview.map((r) => r.name)).toEqual(["▶️ YouStream 1080p", "📱 YouStream 1080p"]);
     expect(preview[0].description.split("\n")[0]).toBe("🍿 Example Film (1968)");
     expect(preview[1].description.split("\n").pop()).toBe("📱 YouTube app");
     expect(warnings(p)).toEqual([]);
@@ -441,8 +441,8 @@ describe("the stream name and description", () => {
     p.set("format-preset", "tamtaro");
     fire(p, "format-preset", "change");
     expect(p.$("#name-template").value).toBe(PRESETS.tamtaro.name);
-    expect(rows(p)[0].name).toBe("720P ⁽ʸᵗ⁾\n  〈Web-dl〉");
-    expect(rows(p)[1].name).toBe("720P ⁽ᵉˣᵗ⁾\n  〈Web-dl〉");
+    expect(rows(p)[0].name).toBe("1080P ⁽ʸᵗ⁾\n  〈Web-dl〉");
+    expect(rows(p)[1].name).toBe("1080P ⁽ᵉˣᵗ⁾\n  〈Web-dl〉");
     p.set("youtube-key", "k");
     p.submit();
     expect(p.rawGenerated()).toMatchObject({ format: "tamtaro" });
@@ -483,7 +483,7 @@ describe("the stream name and description", () => {
     p.set("description-template", "");
     fire(p, "name-template", "input");
     expect(p.$("#format-preset").value).toBe("youstream");
-    expect(rows(p)[0].name).toBe("▶️ YouStream HD");
+    expect(rows(p)[0].name).toBe("▶️ YouStream 1080p");
     p.set("youtube-key", "k");
     p.submit();
     expect(p.rawGenerated()).toEqual({ youtubeKey: "k", playback: ["app", "youtube"], playbackVersion: 1, region: "US" });
@@ -502,14 +502,14 @@ describe("the stream name and description", () => {
     const option = (id) => p.$(`.pb-option[data-option="${id}"]`);
     option("smarttube").querySelector(".pb-on").checked = true;
     option("smarttube").querySelector(".pb-on").dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
-    expect(rows(p).map((r) => r.name)).toEqual(["▶️ YouStream HD", "📱 YouStream HD", "📺 YouStream HD"]);
+    expect(rows(p).map((r) => r.name)).toEqual(["▶️ YouStream 1080p", "📱 YouStream 1080p", "📺 YouStream 1080p"]);
     p.click(option("smarttube").querySelector(".pb-up"));
-    expect(rows(p).map((r) => r.name)).toEqual(["▶️ YouStream HD", "📺 YouStream HD", "📱 YouStream HD"]);
+    expect(rows(p).map((r) => r.name)).toEqual(["▶️ YouStream 1080p", "📺 YouStream 1080p", "📱 YouStream 1080p"]);
     ["app", "youtube", "smarttube"].forEach((id) => {
       option(id).querySelector(".pb-on").checked = false;
       option(id).querySelector(".pb-on").dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
     });
-    expect(rows(p).map((r) => r.name)).toEqual(["▶️ YouStream HD"]);
+    expect(rows(p).map((r) => r.name)).toEqual(["▶️ YouStream 1080p"]);
   });
 
   test("what AIOStreams would misread is pointed out, and so is an unknown field", () => {
@@ -548,7 +548,7 @@ describe("the stream name and description", () => {
     expect(rows(own)[0]).toEqual({ name: "N <b>", description: "D & Example Film (1968) | Full Movie | Restored" });
     const preset = loadPage({ existing: normalizeConfig({ youtubeKey: "k", format: "classic" }) });
     expect(preset.$("#format-preset").value).toBe("classic");
-    expect(rows(preset)[0].name).toBe("YouStream\n720p");
+    expect(rows(preset)[0].name).toBe("YouStream\n1080p");
   });
 
   test("the fields are listed, with the syntax a link away", () => {

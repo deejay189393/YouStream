@@ -34,18 +34,19 @@ const scopeFor = (overrides = {}, extra = {}, title = FILM, settings = {}, optio
   });
 
 describe("releaseName", () => {
-  test("a film: its title, its year, HD or SD, WEB-DL, the language", () => {
-    expect(releaseName(FILM, { definition: "hd" }, "en")).toBe("Example Film (1968) HD WEB-DL English");
-    expect(releaseName({ ...FILM, year: null }, { definition: "sd" }, null)).toBe("Example Film SD WEB-DL");
+  test("a film: its title, its year, the resolution YouStream reckons (SD for an SD video), WEB-DL, the language", () => {
+    expect(releaseName(FILM, "en", "1080p")).toBe("Example Film (1968) 1080p WEB-DL English");
+    expect(releaseName(FILM, "en", "2160p")).toBe("Example Film (1968) 2160p WEB-DL English");
+    expect(releaseName({ ...FILM, year: null }, null, "480p")).toBe("Example Film SD WEB-DL");
   });
 
   test("an episode carries the show's first year and its number", () => {
-    expect(releaseName(EPISODE, { definition: "hd" }, "hi")).toBe("Example Show (2019) S01E03 HD WEB-DL Hindi");
-    expect(releaseName({ ...EPISODE, season: 12, episode: 104 }, { definition: "hd" }, "xx")).toBe("Example Show (2019) S12E104 HD WEB-DL");
+    expect(releaseName(EPISODE, "hi", "2160p")).toBe("Example Show (2019) S01E03 2160p WEB-DL Hindi");
+    expect(releaseName({ ...EPISODE, season: 12, episode: 104 }, "xx", "1080p")).toBe("Example Show (2019) S12E104 1080p WEB-DL");
   });
 
   test("a title with anything AIOStreams could misread is cleared first", () => {
-    expect(releaseName({ ...FILM, title: "Two  Sizes 2 GB 🇬🇧" }, { definition: "hd" }, null)).toBe("Two Sizes 2 \u2060GB (1968) HD WEB-DL");
+    expect(releaseName({ ...FILM, title: "Two  Sizes 2 GB 🇬🇧" }, null, "1080p")).toBe("Two Sizes 2 \u2060GB (1968) 1080p WEB-DL");
   });
 });
 
@@ -104,10 +105,10 @@ describe("streamScope", () => {
     expect(s.stream).toMatchObject({
       type: "youtube",
       indexer: "YouTube",
-      filename: "Example Film (1968) HD WEB-DL English",
+      filename: "Example Film (1968) 1080p WEB-DL English",
       title: "Example Film",
       year: "1968",
-      resolution: "720p",
+      resolution: "1080p",
       quality: "WEB-DL",
       duration: 5709000,
       languages: ["English"],
@@ -209,11 +210,11 @@ describe("the presets", () => {
     expect(DEFAULT_FORMAT).toBe("youstream");
     const settings = { nameTemplate: PRESETS.youstream.name, descriptionTemplate: PRESETS.youstream.description };
     expect(renderStreamText(sample("film"), settings)).toEqual({
-      name: "▶️ YouStream HD",
+      name: "▶️ YouStream 1080p",
       description: [
         "🍿 Example Film (1968)",
         "🎬 Example Film (1968) | Full Movie | Restored",
-        "🎞️ HD • ⏱️ 1h 35m 09s (−51s)",
+        "🎞️ 1080p • ⏱️ 1h 35m 09s (−51s)",
         "📺 Classic Films • 👁 338K • 📅 16 Oct 2023",
         "🎧 English",
         "▶️ Play in app"
@@ -224,8 +225,10 @@ describe("the presets", () => {
 
   test("Tamtaro style marks a YouTube row and an external one", () => {
     const settings = { nameTemplate: PRESETS.tamtaro.name, descriptionTemplate: PRESETS.tamtaro.description };
-    expect(renderStreamText(sample("film"), settings).name).toBe("720P ⁽ʸᵗ⁾\n  〈Web-dl〉");
-    expect(renderStreamText(sample("film", "youtube"), settings).name).toBe("720P ⁽ᵉˣᵗ⁾\n  〈Web-dl〉");
+    expect(renderStreamText(sample("film"), settings).name).toBe("1080P ⁽ʸᵗ⁾\n  〈Web-dl〉");
+    expect(renderStreamText(sample("film", "youtube"), settings).name).toBe("1080P ⁽ᵉˣᵗ⁾\n  〈Web-dl〉");
+    // A 4K estimate reads as Tamtaro's own formatter writes it.
+    expect(renderStreamText(sample("episode"), settings).name).toBe("4K ⁽ʸᵗ⁾\n  〈Web-dl〉");
     expect(renderStreamText(sample("episode"), settings).description.split("\n")[0]).toBe("✎  Example Show (2019)  s₀₁·ᴇ₀₃");
   });
 });
@@ -298,7 +301,7 @@ describe("a YouTube video opened as an item of its own", () => {
   });
 
   test("its release name is the video's own title, then the same tags", () => {
-    expect(itemScope().stream.filename).toBe("How Example Engines Work HD WEB-DL English");
+    expect(itemScope().stream.filename).toBe("How Example Engines Work 1080p WEB-DL English");
     expect(itemScope({ definition: "sd", language: null, title: "Big 🇬🇧 Upload 2 GB" }).stream.filename).toBe("Big Upload 2 ⁠GB SD WEB-DL");
   });
 
@@ -325,7 +328,7 @@ describe("a YouTube video opened as an item of its own", () => {
   test("the default reads like a film's, without the line naming the film", () => {
     const settings = normalizeConfig({});
     expect(renderStreamText(itemScope(), settings).description).toBe(
-      ["🎬 How Example Engines Work", "🎞️ HD • ⏱️ 2h 22m 00s", "📺 A Channel • 👁 10K • 📅 1 Jan 2020", "🎧 English", "▶️ Play in app"].join("\n")
+      ["🎬 How Example Engines Work", "🎞️ 1080p • ⏱️ 2h 22m 00s", "📺 A Channel • 👁 10K • 📅 1 Jan 2020", "🎧 English", "▶️ Play in app"].join("\n")
     );
   });
 });

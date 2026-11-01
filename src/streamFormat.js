@@ -3,6 +3,7 @@ const { languageName, LANGUAGES } = require("./regions");
 const { WATCH_URL } = require("./playback");
 const { createFormatter } = require("./formatter");
 const { ITEM_TYPE } = require("./items");
+const { estimateResolution, resolutionLabel, cameOutFor } = require("./resolution");
 
 /**
  * What a stream row says, for two readers.
@@ -102,23 +103,24 @@ const pad = (n) => String(n).padStart(2, "0");
  * video's own title, so it carries exactly what AIOStreams' title, year and
  * episode filters look for and nothing they could misread:
  *
- *   Night of the Living Dead (1968) HD WEB-DL English
- *   Example Show (2019) S01E03 HD WEB-DL Hindi
+ *   Night of the Living Dead (1968) 1080p WEB-DL English
+ *   Example Show (2019) S01E03 2160p WEB-DL Hindi
  *
- * HD and SD are YouTube's own words for a video's definition (HD is 720p or
- * better; AIOStreams reads it as 720p, SD as 480p). WEB-DL is the scene
- * term for a stream taken from a streaming service as it is served. The
+ * The resolution is YouStream's estimate (resolution.js), since YouTube says
+ * only HD or SD; an SD video is "SD", which AIOStreams reads as 480p. WEB-DL
+ * is the scene term for a stream taken from a streaming service as it is
+ * served. The
  * year is the film's, or the year the show began: AIOStreams' year filter
  * drops a film without one, and for an episode it checks the show's first
  * year (with the season's and the episode's), which also tells apart two
  * shows of one name. No extension: community filters drop names ending in
  * one they do not know.
  */
-function releaseName(title, video, language) {
+function releaseName(title, language, resolution) {
   const parts = [plainText(title.title)];
   if (title.year) parts.push(`(${title.year})`);
   if (title.isEpisode) parts.push(`S${pad(title.season)}E${pad(title.episode)}`);
-  parts.push(video.definition === "hd" ? "HD" : "SD", "WEB-DL");
+  parts.push(resolution === "480p" ? "SD" : resolution, "WEB-DL");
   const spoken = languageName(language);
   if (spoken) parts.push(spoken);
   return parts.join(" ");
@@ -128,8 +130,8 @@ function releaseName(title, video, language) {
  * The same for a YouTube video opened as an item of its own, which no film
  * or show stands behind: its own title, then the same tags.
  */
-function itemReleaseName(video, language) {
-  return releaseName({ title: video.title }, video, language);
+function itemReleaseName(video, language, resolution) {
+  return releaseName({ title: video.title }, language, resolution);
 }
 
 /**
@@ -209,7 +211,8 @@ function streamScope({ optionId, match, title, settings, addonName, now = Date.n
   const released = title && title.released ? Date.parse(title.released) : NaN;
   const hasOffset = match.offsetSeconds !== null && match.offsetSeconds !== undefined;
   const runtimeMinutes = title && title.runtimeSeconds ? Math.round(title.runtimeSeconds / 60) : null;
-  const filename = title ? releaseName(title, video, languageCodeOf) : itemReleaseName(video, languageCodeOf);
+  const resolution = estimateResolution(video, cameOutFor(title));
+  const filename = title ? releaseName(title, languageCodeOf, resolution) : itemReleaseName(video, languageCodeOf, resolution);
   const message = video.ageRestricted ? "Age-restricted: opens in YouTube, where you are signed in" : null;
   const empty = () => [];
 
@@ -226,6 +229,7 @@ function streamScope({ optionId, match, title, settings, addonName, now = Date.n
       official: video.licensed === true,
       ageRestricted: video.ageRestricted === true,
       definition: video.definition === "hd" ? "HD" : "SD",
+      resolution: resolutionLabel(resolution),
       views: formatCount(video.views),
       viewCount: Number.isFinite(video.views) ? video.views : null,
       uploaded: video.publishedAt ? video.publishedAt.slice(0, 10) : null,
@@ -252,7 +256,7 @@ function streamScope({ optionId, match, title, settings, addonName, now = Date.n
       container: null,
       extension: null,
       quality: "WEB-DL",
-      resolution: video.definition === "hd" ? "720p" : "480p",
+      resolution,
       visualTags: empty(),
       encode: null,
       network: null,
@@ -384,11 +388,11 @@ function streamScope({ optionId, match, title, settings, addonName, now = Date.n
 const PRESETS = {
   youstream: {
     label: "YouStream",
-    name: "{play.icon} {addon.name} {video.definition}",
+    name: "{play.icon} {addon.name} {video.resolution}",
     description: [
       `{?{metadata.type::=series["📡"||"🍿"]} {metadata.title}{? ({metadata.year})?}{? • {stream.seasonEpisode::join('')}?}{? • {metadata.episodeTitle}?}?}`,
       "🎬 {video.title}",
-      `🎞️ {video.definition}{? • ⏱️ {stream.duration::time('[%-Hh ]%-Mm %Ss')}?}{video.live::istrue[" • 🔴 Live"||""]}{? ({video.offset})?}`,
+      `🎞️ {video.resolution}{? • ⏱️ {stream.duration::time('[%-Hh ]%-Mm %Ss')}?}{video.live::istrue[" • 🔴 Live"||""]}{? ({video.offset})?}`,
       `📺 {video.channel}{? • 👁 {video.views}?}{? • 📅 {video.uploaded::date('%-d %b %Y')}?}`,
       "{?🎧 {stream.languages::join(', ')}?}",
       "{?🔞 {stream.message}?}",
@@ -397,7 +401,7 @@ const PRESETS = {
   },
   compact: {
     label: "Compact",
-    name: "{addon.name} {video.definition}",
+    name: "{addon.name} {video.resolution}",
     description: [
       "{play.icon} {video.title}",
       `{?⏱️ {stream.duration::time('[%-Hh ]%-Mm')}?}{video.live::istrue["🔴 Live"||""]}{? • 👁 {video.views}?}{? • 🎧 {stream.languages::join(', ')}?}{video.ageRestricted::istrue[" • 🔞 18+"||""]}`
@@ -405,7 +409,7 @@ const PRESETS = {
   },
   tamtaro: {
     label: "Tamtaro style",
-    name: `{stream.resolution::replace('p','P')}{stream.type::=youtube[" ⁽ʸᵗ⁾"||" ⁽ᵉˣᵗ⁾"]}\n  〈{stream.quality::title}〉`,
+    name: `{stream.resolution::replace('2160p','4K')::replace('1440p','2K')::replace('p','P')}{stream.type::=youtube[" ⁽ʸᵗ⁾"||" ⁽ᵉˣᵗ⁾"]}\n  〈{stream.quality::title}〉`,
     description: [
       "{?✎  {metadata.title::title::truncate(25)}{? ({metadata.year})?}{?  {stream.seasonEpisode::join('·')::replace('E','ᴇ')::replace('S','s')::translate('0123456789','₀₁₂₃₄₅₆₇₈₉')}?}?}",
       "▦  {?{video.uploaded::date('%-d %b %Y')}  ▪  ?}{video.channel::smallcaps}",
@@ -416,7 +420,7 @@ const PRESETS = {
   },
   classic: {
     label: "Classic (Torrentio)",
-    name: "{addon.name}\n{stream.resolution}",
+    name: "{addon.name}\n{video.resolution}",
     description: [
       "{stream.filename}",
       `{?👁 {video.views} ?}{?⏱️ {stream.duration::time('[%-Hh ]%-Mm')} ?}{video.live::istrue["🔴 Live "||""]}⚙️ {video.channel}`,
@@ -445,7 +449,7 @@ const SAMPLES = {
       video: {
         id: "aaaaaaaaaaa", title: "Example Film (1968) | Full Movie | Restored", channelTitle: "Classic Films", channelId: "UCexample1",
         durationSeconds: 5709, definition: "hd", views: 338000, language: "en", publishedAt: "2023-10-16T00:00:09Z", licensed: true,
-        ageRestricted: false
+        ageRestricted: false, subscribers: 1500000
       }
     }
   },
@@ -460,7 +464,7 @@ const SAMPLES = {
       video: {
         id: "bbbbbbbbbbb", title: "Example Show | S01E03 - The Exam", channelTitle: "Indie Series", channelId: "UCexample2",
         durationSeconds: 2211, definition: "hd", views: 5100000, language: "hi", publishedAt: "2019-04-30T10:28:12Z", licensed: true,
-        ageRestricted: false
+        ageRestricted: false, subscribers: 2400000
       }
     }
   },
@@ -470,7 +474,7 @@ const SAMPLES = {
       video: {
         id: "ccccccccccc", title: "How Example Engines Work", channelTitle: "Example Science", channelId: "UCexample3",
         durationSeconds: 754, definition: "hd", views: 1200000, language: "en", publishedAt: "2025-03-14T15:00:00Z",
-        licensed: false, ageRestricted: false, live: null
+        licensed: false, ageRestricted: false, live: null, subscribers: 180000
       }
     }
   }

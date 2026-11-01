@@ -414,7 +414,7 @@ describe("/admin/cache", () => {
     test("names the namespaces when given another", async () => {
       const res = await request(app).delete("/admin/cache/videos").set(auth("s3cret"));
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe("Unknown namespace; one of search, metadata, cooldown, browse, video, dislikes, all");
+      expect(res.body.error).toBe("Unknown namespace; one of search, metadata, cooldown, browse, video, dislikes, channel, all");
     });
   });
 });

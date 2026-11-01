@@ -528,3 +528,64 @@ describe("withKey", () => {
     expect(await keyCooldown.get(youtube.keyId("KEY2"))).toBeUndefined();
   });
 });
+
+describe("channelSubscribers", () => {
+  const channels = (stats) => ({ items: Object.entries(stats).map(([id, statistics]) => ({ id, statistics })) });
+
+  test("one channels.list for every channel not known, each count kept for everyone", async () => {
+    const fetch = routeFetch([
+      ["/channels?", channels({ UCbig: { subscriberCount: "8500000" }, UCsmall: { subscriberCount: "71200" }, UChidden: { hiddenSubscriberCount: true } })]
+    ]);
+    const counts = await youtube.channelSubscribers("KEY", ["UCbig", "UCsmall", "UCbig", "UChidden", "UCgone", null, ""]);
+    expect(counts).toEqual({ UCbig: 8500000, UCsmall: 71200 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const params = Object.fromEntries(new URL(fetch.mock.calls[0][0]).searchParams);
+    expect(params).toMatchObject({ part: "statistics", id: "UCbig,UCsmall,UChidden,UCgone" });
+    // Hidden and gone are known too: none, so they are not asked about again.
+    expect(await youtube.channelSubscribers("AIzaSomeoneElse", ["UCbig", "UChidden", "UCgone"])).toEqual({ UCbig: 8500000 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("no channels, no call", async () => {
+    const fetch = routeFetch([]);
+    expect(await youtube.channelSubscribers("KEY", [])).toEqual({});
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test("fifty to a call", async () => {
+    const ids = Array.from({ length: 51 }, (_, i) => `UC${String(i).padStart(3, "0")}`);
+    const fetch = routeFetch([["/channels?", (url) => channels(Object.fromEntries(new URL(url).searchParams.get("id").split(",").map((id) => [id, { subscriberCount: "5" }])))]]);
+    const counts = await youtube.channelSubscribers("KEY", ids);
+    expect(Object.keys(counts)).toHaveLength(51);
+    expect(fetch.mock.calls.map(([url]) => new URL(url).searchParams.get("id").split(",").length)).toEqual([50, 1]);
+  });
+
+  test("YouTube failing leaves the counts out, or answers with an older one still kept, and never throws", async () => {
+    jest.spyOn(console, "log").mockImplementation(() => {});
+    routeFetch([["/channels?", channels({ UCbig: { subscriberCount: "8500000" } })]]);
+    await youtube.channelSubscribers("KEY", ["UCbig"]);
+    jest.spyOn(Date, "now").mockReturnValue(Date.now() + TEST_CACHE.searchMs + 1000);
+    routeFetch([["/channels?", googleError(403, ["quotaExceeded"])]]);
+    expect(await youtube.channelSubscribers("KEY", ["UCbig", "UCnew"])).toEqual({ UCbig: 8500000 });
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("[channels] 2 subscriber counts: quota"));
+    // The key is now known to have spent its quota: not asked again.
+    const fetch = routeFetch([]);
+    expect(await youtube.channelSubscribers("KEY", ["UCnew"])).toEqual({});
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test("YouTube unreachable: nothing known, and said so", async () => {
+    jest.spyOn(console, "log").mockImplementation(() => {});
+    routeFetch([["/channels?", new Error("socket hang up")]]);
+    expect(await youtube.channelSubscribers("KEY", ["UCx"])).toEqual({});
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining("[channels] 1 subscriber counts: unavailable --"));
+  });
+
+  test("channels YouTube no longer has, or without statistics, have no count", async () => {
+    routeFetch([["/channels?", { pageInfo: { totalResults: 0 } }]]);
+    expect(await youtube.channelSubscribers("KEY", ["UCgone"])).toEqual({});
+    freshCache();
+    routeFetch([["/channels?", { items: [{ id: "UCbare" }] }]]);
+    expect(await youtube.channelSubscribers("KEY", ["UCbare"])).toEqual({});
+  });
+});

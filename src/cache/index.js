@@ -212,13 +212,25 @@ const dislikeCache = new Namespace("dislikes", 1, {
   staleMs: (s, freshMs) => Math.min(s.staleMs, MAX_YOUTUBE_DATA_MS - freshMs)
 });
 
+/**
+ * How many subscribers a channel has, by channel id, shared by everyone on
+ * this server and kept as long as a video's details: it decides whether a
+ * recent HD upload counts as 4K (resolution.js). Version 1 is a count, or
+ * null when the channel hides it.
+ */
+const channelCache = new Namespace("channel", 1, {
+  freshMs: (s) => s.searchMs,
+  staleMs: (s, freshMs) => Math.min(s.staleMs, MAX_YOUTUBE_DATA_MS - freshMs)
+});
+
 const NAMESPACES = {
   search: searchCache,
   metadata: metadataCache,
   cooldown: keyCooldown,
   browse: browseCache,
   video: videoCache,
-  dislikes: dislikeCache
+  dislikes: dislikeCache,
+  channel: channelCache
 };
 
 /**
@@ -264,6 +276,7 @@ module.exports = {
   browseCache,
   videoCache,
   dislikeCache,
+  channelCache,
   NAMESPACES,
   Namespace,
   isNewRelease,

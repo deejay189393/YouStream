@@ -38,13 +38,13 @@ describe("buildStream", () => {
     expect(stream.ytId).toBe("abcdefghijk");
     expect(stream.url).toBeUndefined();
     expect(stream.externalUrl).toBeUndefined();
-    expect(stream.name).toBe("▶️ YouStream HD");
+    expect(stream.name).toBe("▶️ YouStream 1080p");
   });
 
   test("the hints AIOStreams reads before anything in the text", () => {
     expect(buildStream("app", match(), context()).behaviorHints).toEqual({
       bingeGroup: "youstream-app-UCindie",
-      filename: "Example Show (2019) S01E03 HD WEB-DL Hindi",
+      filename: "Example Show (2019) S01E03 1080p WEB-DL Hindi",
       duration: 2211,
       publishDate: "2019-04-30T10:28:12Z",
       indexer: "YouTube"
@@ -62,7 +62,7 @@ describe("buildStream", () => {
     const stream = buildStream("youtube", match(), context());
     expect(stream.externalUrl).toBe("https://www.youtube.com/watch?v=abcdefghijk");
     expect(stream.ytId).toBeUndefined();
-    expect(stream.name).toBe("📱 YouStream HD");
+    expect(stream.name).toBe("📱 YouStream 1080p");
   });
 
   test("SmartTube gets vnd.youtube", () => {
@@ -74,7 +74,7 @@ describe("buildStream", () => {
     expect(description.split("\n")).toEqual([
       "📡 Example Show (2019) • S01E03 • The Exam",
       "🎬 Example Show - S01 E03",
-      "🎞️ HD • ⏱️ 36m 51s (−20s)",
+      "🎞️ 1080p • ⏱️ 36m 51s (−20s)",
       "📺 Indie Series • 👁 4.5M • 📅 30 Apr 2019",
       "🎧 Hindi",
       "▶️ Play in app"
@@ -87,10 +87,10 @@ describe("buildStream", () => {
     expect(description.split("\n").slice(0, 4)).toEqual([
       "🍿 Example Film (1968)",
       "🎬 Example Film (1968)",
-      "🎞️ HD • ⏱️ 36m 51s (exact)",
+      "🎞️ 1080p • ⏱️ 36m 51s (exact)",
       "📺 Indie Series • 👁 4.5M • 📅 30 Apr 2019"
     ]);
-    expect(behaviorHints.filename).toBe("Example Film (1968) HD WEB-DL English");
+    expect(behaviorHints.filename).toBe("Example Film (1968) 1080p WEB-DL English");
   });
 
   test("an SD video, from a channel with no id or name, with nothing else known", () => {
@@ -99,14 +99,14 @@ describe("buildStream", () => {
       match({ definition: "sd", channelId: "", channelTitle: "", views: null, language: null, publishedAt: null }, { offsetSeconds: null }),
       context()
     );
-    expect(stream.name).toBe("📱 YouStream SD");
+    expect(stream.name).toBe("📱 YouStream 480p");
     expect(stream.behaviorHints).toEqual({
       bingeGroup: "youstream-youtube",
       filename: "Example Show (2019) S01E03 SD WEB-DL",
       duration: 2211,
       indexer: "YouTube"
     });
-    expect(stream.description.split("\n").slice(2)).toEqual(["🎞️ SD • ⏱️ 36m 51s", "📺 YouTube", "📱 YouTube app"]);
+    expect(stream.description.split("\n").slice(2)).toEqual(["🎞️ 480p • ⏱️ 36m 51s", "📺 YouTube", "📱 YouTube app"]);
   });
 
   test("an age-restricted video says where it opens", () => {
@@ -117,10 +117,10 @@ describe("buildStream", () => {
 
   test("the reader's own templates, and a preset", () => {
     const own = buildStream("app", match(), context({ nameTemplate: "{addon.name} {stream.resolution}", descriptionTemplate: "{video.title::upper}" }));
-    expect(own.name).toBe("YouStream 720p");
+    expect(own.name).toBe("YouStream 1080p");
     expect(own.description).toBe("EXAMPLE SHOW - S01 E03");
     const compact = buildStream("app", match(), context({ format: "compact" }));
-    expect(compact.name).toBe("YouStream HD");
+    expect(compact.name).toBe("YouStream 1080p");
     expect(compact.description).toBe("▶️ Example Show - S01 E03\n⏱️ 36m • 👁 4.5M • 🎧 Hindi");
   });
 
@@ -128,7 +128,7 @@ describe("buildStream", () => {
     const before = process.env.RELEASE_CHANNEL;
     process.env.RELEASE_CHANNEL = "beta";
     try {
-      expect(buildStream("app", match(), context()).name).toBe("▶️ YouStream Beta HD");
+      expect(buildStream("app", match(), context()).name).toBe("▶️ YouStream Beta 1080p");
     } finally {
       if (before === undefined) delete process.env.RELEASE_CHANNEL;
       else process.env.RELEASE_CHANNEL = before;
@@ -174,11 +174,11 @@ describe("toItemStreams: a YouTube video opened from a catalog, search or the li
   test("one row per way of watching, in the reader's order, from the reader's templates", () => {
     const streams = toItemStreams(item(), normalizeConfig({ playback: ["youtube", "app"] }));
     expect(streams.map((s) => s.externalUrl || s.ytId)).toEqual(["https://www.youtube.com/watch?v=itemvideo01", "itemvideo01"]);
-    expect(streams[1].name).toBe("▶️ YouStream HD");
+    expect(streams[1].name).toBe("▶️ YouStream 1080p");
     expect(streams[1].description.split("\n")[0]).toBe("🎬 How Example Engines Work");
     expect(streams[1].behaviorHints).toEqual({
       bingeGroup: "youstream-app-UCscience",
-      filename: "How Example Engines Work HD WEB-DL English",
+      filename: "How Example Engines Work 1080p WEB-DL English",
       duration: 754,
       indexer: "YouTube"
     });

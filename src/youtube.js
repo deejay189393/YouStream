@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { searchCache, keyCooldown } = require("./cache");
+const { searchCache, keyCooldown, channelCache } = require("./cache");
 
 /**
  * The YouTube Data API, used the way its quota forces.
@@ -303,6 +303,47 @@ async function findChannel(apiKey, { id, handle, username }) {
   return channel ? { id: channel.id, title: (channel.snippet && channel.snippet.title) || "" } : null;
 }
 
+/**
+ * How many subscribers each channel has, by channel id, for the resolution
+ * estimate (resolution.js): one channels.list per fifty channels not already
+ * known, 1 unit each, every count kept for everyone for a day. A channel that
+ * hides its count is left out, and so is one YouTube cannot be asked about
+ * right now -- unless an older count is still kept -- so this never fails the
+ * streams it is asked for.
+ */
+async function channelSubscribers(apiKey, channelIds) {
+  const counts = {};
+  const missing = [];
+  for (const id of new Set(channelIds.filter((c) => typeof c === "string" && c))) {
+    const hit = await channelCache.get(id);
+    if (hit && hit.fresh) {
+      if (hit.value !== null) counts[id] = hit.value;
+    } else {
+      missing.push({ id, hit });
+    }
+  }
+  for (let i = 0; i < missing.length; i += MAX_RESULTS) {
+    const batch = missing.slice(i, i + MAX_RESULTS);
+    try {
+      const data = await withKey(apiKey, () => call("channels", { key: apiKey, part: "statistics", id: batch.map((m) => m.id).join(","), maxResults: MAX_RESULTS }));
+      const stats = new Map((Array.isArray(data.items) ? data.items : []).map((c) => [c.id, c.statistics]));
+      for (const { id } of batch) {
+        const s = stats.get(id) || {};
+        const count = s.hiddenSubscriberCount ? NaN : Number(s.subscriberCount);
+        const value = Number.isFinite(count) ? count : null;
+        await channelCache.set(id, value);
+        if (value !== null) counts[id] = value;
+      }
+    } catch (err) {
+      console.log(`[channels] ${batch.length} subscriber counts: ${err.kind} -- ${err.message}`);
+      batch.forEach(({ id, hit }) => {
+        if (hit && hit.value !== null) counts[id] = hit.value;
+      });
+    }
+  }
+  return counts;
+}
+
 /** A public playlist by id, or null: 1 unit. */
 async function findPlaylist(apiKey, id) {
   const data = await call("playlists", { key: apiKey, part: "snippet", id });
@@ -372,6 +413,7 @@ module.exports = {
   chartPage,
   findChannel,
   findPlaylist,
+  channelSubscribers,
   classify,
   durationToSeconds,
   primaryLanguage,

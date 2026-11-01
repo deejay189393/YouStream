@@ -312,6 +312,55 @@ describe("YouTube items: metadata and streams", () => {
   });
 });
 
+describe("how sharp a stream is said to be", () => {
+  const RECENT = { snippet: { publishedAt: "2026-10-19T05:00:09Z", channelId: "UCbig" } };
+  const channels = (count) => ["/channels?", { items: [{ id: "UCbig", statistics: { subscriberCount: String(count) } }] }];
+  const filenames = (res) => res.streams.map((s) => s.behaviorHints.filename);
+
+  test("a recent upload from a channel of 300,000 or more is 4K, asked about once", async () => {
+    const fetch = routeFetch([["/videos?", { items: [apiVideo("abcdefghijk", RECENT)] }], channels(8500000)]);
+    const res = await handleStream({ id: "yt_id:abcdefghijk", config: { youtubeKey: "KEY", playback: ["app", "youtube"] } });
+    expect(filenames(res)).toEqual(["Video abcdefghijk 2160p WEB-DL", "Video abcdefghijk 2160p WEB-DL"]);
+    expect(res.streams[0].name).toBe("▶️ YouStream 4K");
+    expect(fetch.mock.calls.filter(([url]) => String(url).includes("/channels?"))).toHaveLength(1);
+  });
+
+  test("from a smaller channel, 1080p", async () => {
+    routeFetch([["/videos?", { items: [apiVideo("abcdefghijk", RECENT)] }], channels(299999)]);
+    const res = await handleStream({ id: "yt_id:abcdefghijk", config: { youtubeKey: "KEY" } });
+    expect(res.streams[0].name).toBe("▶️ YouStream 1080p");
+  });
+
+  test("YouTube failing on the channel leaves the stream at 1080p, served all the same", async () => {
+    routeFetch([["/videos?", { items: [apiVideo("abcdefghijk", RECENT)] }], ["/channels?", response({}, { status: 503 })]]);
+    const res = await handleStream({ id: "yt_id:abcdefghijk", config: { youtubeKey: "KEY" } });
+    expect(res.streams[0].name).toBe("▶️ YouStream 1080p");
+    expect(res.cacheMaxAge).toBe(AGES.maxAgeSeconds);
+  });
+
+  test("an old film is 1080p without asking about any channel", async () => {
+    const fetch = routeFetch([
+      ["/meta/movie/tt0063350.json", NOTLD],
+      ...youtubeReturns([apiVideo("full0000001", { snippet: { title: "Night of the Living Dead (1968) Full Movie", channelId: "UCbig" }, contentDetails: { duration: "PT1H35M" } })])
+    ]);
+    const res = await handleStream({ id: "tt0063350", config: CONFIG });
+    expect(filenames(res)[0]).toBe("Night of the Living Dead (1968) 1080p WEB-DL");
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("/channels?"))).toBe(false);
+  });
+
+  test("a new episode on a big channel is 4K, by the episode's own air date", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    routeFetch([
+      ["/meta/series/tt9999901.json", { meta: { name: "Example Show", year: "2025-", runtime: "50 min", videos: [{ season: 2, episode: 8, name: "The Final Round", released: `${today}T00:00:00.000Z` }] } }],
+      // A recent release is matched on an official channel only.
+      ...youtubeReturns([apiVideo("episode0008", { snippet: { title: "Example Show S02E08 - The Final Round", channelId: "UCbig" }, contentDetails: { duration: "PT50M", licensedContent: true } })]),
+      channels(12100000)
+    ]);
+    const res = await handleStream({ id: "tt9999901:2:8", config: CONFIG });
+    expect(filenames(res)[0]).toMatch(/^Example Show \(2025\) S02E08 2160p WEB-DL/);
+  });
+});
+
 describe("videos saved before 0.8.0, as YouTube with youstream: ids", () => {
   const VIDEO = apiVideo("abcdefghijk", { snippet: { title: "How Example Engines Work", channelTitle: "Example Science" } });
   const CONFIG = { youtubeKey: "KEY", catalogs: [{ trending: "all" }] };
