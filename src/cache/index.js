@@ -152,7 +152,8 @@ class Namespace {
  * this server: the results are the same whoever asks, and a search is the
  * scarcest thing the addon spends, 100 of a key's 10,000 daily units.
  * Version 1 is youtube.toVideo's shape; entries made before it kept the
- * like count have none, and nothing that reads this cache uses it.
+ * like and watcher counts have neither, and nothing that reads this cache
+ * uses them.
  */
 const searchCache = new Namespace("search", 1, {
   freshMs: (s) => s.searchMs,
@@ -180,10 +181,10 @@ const keyCooldown = new Namespace("cooldown", 1, {
  * their key, what the page lists and which page it is. Kept apart per
  * reader and for as long as that reader chose (their refresh interval, or
  * a couple of minutes for a search), then kept a while longer only to
- * answer with when YouTube cannot be asked. Version 2 is browse.js's page
- * shape, with each video's like count.
+ * answer with when YouTube cannot be asked. Version 3 is browse.js's page
+ * shape, with each video's like count and a live stream's watcher count.
  */
-const browseCache = new Namespace("browse", 2, {
+const browseCache = new Namespace("browse", 3, {
   freshMs: () => 2 * 60 * 60 * 1000,
   staleMs: (s, freshMs) => Math.min(s.staleMs, MAX_YOUTUBE_DATA_MS - freshMs)
 });
@@ -191,10 +192,11 @@ const browseCache = new Namespace("browse", 2, {
 /**
  * One video's details by id, shared by everyone on this server, for the
  * metadata and streams of a video opened from a catalog, from search or
- * from an app's library. Version 2 is items.toItem's shape, with the like
- * count.
+ * from an app's library. Version 3 is items.toItem's shape, with the like
+ * count and a live stream's watcher count. A live stream's is kept two
+ * minutes (browse.js).
  */
-const videoCache = new Namespace("video", 2, {
+const videoCache = new Namespace("video", 3, {
   freshMs: (s) => s.searchMs,
   staleMs: (s, freshMs) => Math.min(s.staleMs, MAX_YOUTUBE_DATA_MS - freshMs)
 });

@@ -649,6 +649,41 @@ describe("resolveTitle", () => {
     expect(await resolve("tt0000001")).toBeNull();
   });
 
+  test("an IMDb film Cinemeta cannot answer for, with no TMDB key, is a failed lookup, not an unknown title", async () => {
+    routeFetch([["/meta/movie/", response({}, { status: 500 })]]);
+    await expect(resolve("tt0111161")).rejects.toMatchObject({
+      kind: "unavailable",
+      message: "no title, as Cinemeta movie tt0111161 failed"
+    });
+  });
+
+  test("so is one neither Cinemeta nor TMDB could be asked about, naming both", async () => {
+    routeFetch([
+      ["/meta/movie/", new Error("timed out")],
+      ["/find/", response({}, { status: 503 })]
+    ]);
+    await expect(resolve("tt0111161", { tmdbKey: "k" })).rejects.toMatchObject({
+      kind: "unavailable",
+      message: "no title, as Cinemeta movie tt0111161, TMDB find tt0111161 failed"
+    });
+  });
+
+  test("and one Cinemeta does not list while TMDB, which might, is down", async () => {
+    routeFetch([["/find/", new Error("down")]]);
+    await expect(resolve("tt0111161", { tmdbKey: "k" })).rejects.toMatchObject({ kind: "unavailable" });
+  });
+
+  test("lookups running at once each count only their own failures", async () => {
+    routeFetch([
+      ["/meta/movie/tt0000500.json", response({}, { status: 500 })],
+      ["/meta/movie/tt0111161.json", CINEMETA_MOVIE]
+    ]);
+    const [down, missing, known] = await Promise.allSettled([resolve("tt0000500"), resolve("tt0000404"), resolve("tt0111161")]);
+    expect(down).toMatchObject({ status: "rejected", reason: { message: "no title, as Cinemeta movie tt0000500 failed" } });
+    expect(missing).toEqual({ status: "fulfilled", value: null });
+    expect(known).toMatchObject({ status: "fulfilled", value: { title: "The Shawshank Redemption" } });
+  });
+
   test("a TMDB lookup that fails leaves Cinemeta's answer standing", async () => {
     routeFetch([
       ["/meta/movie/", { meta: { name: "No TMDB id", year: "2000", runtime: "100 min" } }],
@@ -789,9 +824,12 @@ describe("resolveTitle", () => {
       expect(await resolve("tt8000008:1:1")).toMatchObject({ runtimeSeconds: 1320, runtimeKind: "typical", sources: ["cinemeta", "tvdb"] });
     });
 
-    test("Cinemeta down, TheTVDB is not asked", async () => {
+    test("Cinemeta down, TheTVDB is not asked, and with nothing else to answer, the lookup has failed", async () => {
       const fetch = routeFetch([["/meta/series/", response({}, { status: 500 })]]);
-      expect(await resolve("tt4742876:1:3")).toBeNull();
+      await expect(resolve("tt4742876:1:3")).rejects.toMatchObject({
+        kind: "unavailable",
+        message: expect.stringContaining("Cinemeta series tt4742876")
+      });
       expect(fetch.mock.calls.some(([url]) => url.includes("thetvdb"))).toBe(false);
     });
   });
@@ -1061,6 +1099,19 @@ describe("resolveTitle", () => {
   test("a missing Kitsu entry is null", async () => {
     routeFetch([]);
     expect(await resolve("kitsu:1:1")).toBeNull();
+  });
+
+  test("but Kitsu down is a failed lookup", async () => {
+    routeFetch([["/anime/", response({}, { status: 502 })]]);
+    await expect(resolve("kitsu:1:1")).rejects.toMatchObject({
+      kind: "unavailable",
+      message: "no title, as Kitsu anime 1, Kitsu episode 1 1 failed"
+    });
+  });
+
+  test("as is TMDB down for a tmdb: show", async () => {
+    routeFetch([["/tv/5", new Error("down")]]);
+    await expect(resolve("tmdb:5:1:1", { tmdbKey: "k" })).rejects.toMatchObject({ kind: "unavailable" });
   });
 });
 

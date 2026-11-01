@@ -111,6 +111,8 @@ function toVideo(detail) {
   const restriction = content.regionRestriction || {};
   const views = Number(stats.viewCount);
   const likes = Number(stats.likeCount);
+  const live = snippet.liveBroadcastContent && snippet.liveBroadcastContent !== "none" ? snippet.liveBroadcastContent : null;
+  const watching = Number((detail.liveStreamingDetails || {}).concurrentViewers);
   return {
     id: detail.id,
     title: typeof snippet.title === "string" ? snippet.title : "",
@@ -126,7 +128,10 @@ function toVideo(detail) {
     // Left out of the API's answer when the uploader hides it.
     likes: Number.isFinite(likes) ? likes : null,
     language: primaryLanguage(snippet.defaultAudioLanguage || snippet.defaultLanguage),
-    live: snippet.liveBroadcastContent && snippet.liveBroadcastContent !== "none" ? snippet.liveBroadcastContent : null,
+    live,
+    // How many are watching a live stream now; YouTube leaves it out when
+    // the channel hides it, and it means nothing once the stream has ended.
+    watching: live === "live" && Number.isFinite(watching) ? watching : null,
     embeddable: status.embeddable !== false,
     ageRestricted: Boolean(content.contentRating && content.contentRating.ytRating === "ytAgeRestricted"),
     licensed: content.licensedContent === true,
@@ -180,8 +185,11 @@ async function withKey(apiKey, run) {
   }
 }
 
-/** Every video's details at once, which is what `videos.list` charges one unit for. */
-const VIDEO_PARTS = "snippet,contentDetails,statistics,status";
+/**
+ * Every video's details at once, which is what `videos.list` charges one unit
+ * for, whatever the parts: a live stream's watcher count comes at no extra cost.
+ */
+const VIDEO_PARTS = "snippet,contentDetails,statistics,status,liveStreamingDetails";
 
 const idsOf = (items, pick) =>
   (Array.isArray(items) ? items : []).map((item) => item && pick(item)).filter((id) => typeof id === "string" && id);

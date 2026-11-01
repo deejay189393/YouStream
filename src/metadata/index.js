@@ -1,3 +1,4 @@
+const { AsyncLocalStorage } = require("async_hooks");
 const cinemeta = require("./cinemeta");
 const tmdb = require("./tmdb");
 const kitsu = require("./kitsu");
@@ -35,11 +36,18 @@ const { yearOf } = require("./http");
  * this server has a TheTVDB key (see tvdb.js), then TMDB's, then TVmaze's.
  */
 
+/**
+ * The lookups that failed while one title was being resolved, kept apart for
+ * each call to resolveTitle -- the only way in to `attempt`.
+ */
+const failures = new AsyncLocalStorage();
+
 async function attempt(label, fn) {
   try {
     return await fn();
   } catch (err) {
     console.warn(`[metadata] ${label}: ${err.message}`);
+    failures.getStore().push(label);
     return null;
   }
 }
@@ -260,11 +268,28 @@ async function kitsuTitle(id, isEpisode, episode) {
 }
 
 /**
+ * The title an id names, or null when the services that know it say there is
+ * no such title. When it is not found and a service could not be asked -- a
+ * timeout, an outage -- it throws, with kind "unavailable": that is no answer,
+ * and an app told "no streams" would keep that for an hour, where it should
+ * ask again in a minute.
+ *
  * @param parsed   from ids.parseStreamId
  * @param options  { tmdbKey, region }: the key may be the reader's or the
  *                 server's; without one, `tmdb:` ids cannot be read at all.
  */
-async function resolveTitle(parsed, { tmdbKey = "", region = "" } = {}) {
+async function resolveTitle(parsed, options) {
+  const failed = [];
+  const title = await failures.run(failed, () => lookUp(parsed, options));
+  if (!title && failed.length) {
+    const err = new Error(`no title, as ${failed.join(", ")} failed`);
+    err.kind = "unavailable";
+    throw err;
+  }
+  return title;
+}
+
+async function lookUp(parsed, { tmdbKey = "", region = "" } = {}) {
   const options = { tmdbKey, region };
   if (parsed.source === "imdb") {
     return parsed.isEpisode

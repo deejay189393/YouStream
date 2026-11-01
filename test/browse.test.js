@@ -318,15 +318,42 @@ describe("what is offered", () => {
     expect(item).toMatchObject({ id: "ok1", tags: ["engines"], category: "Science & Technology" });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  test("but a stream that is live is known by id for two minutes only, so its page is current", async () => {
+    chart([apiVideo("live1", { snippet: { liveBroadcastContent: "live" }, liveStreamingDetails: { concurrentViewers: "500" } })]);
+    await browse.catalogItems({ entry, settings: settingsFor() });
+    Date.now.mockReturnValue(NOW + browse.LIVE_ITEM_MS - 1);
+    const fetch = routeFetch([["/videos?", { items: [apiVideo("live1", { snippet: { liveBroadcastContent: "none" } })] }]]);
+    expect((await browse.getItem("live1", KEY)).watching).toBe(500);
+    expect(fetch).not.toHaveBeenCalled();
+    Date.now.mockReturnValue(NOW + browse.LIVE_ITEM_MS + 1);
+    expect(await browse.getItem("live1", KEY)).toMatchObject({ live: null, watching: null });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("getItem", () => {
   test("one videos.list when the video is not known, then kept for everyone", async () => {
     const fetch = routeFetch([["/videos?", videosBody]]);
     expect((await browse.getItem("abcdefghijk", KEY)).id).toBe("abcdefghijk");
-    expect(params(fetch, 0)).toMatchObject({ id: "abcdefghijk", part: "snippet,contentDetails,statistics,status" });
+    expect(params(fetch, 0)).toMatchObject({ id: "abcdefghijk", part: "snippet,contentDetails,statistics,status,liveStreamingDetails" });
     expect((await browse.getItem("abcdefghijk", "AIzaSomeoneElse")).id).toBe("abcdefghijk");
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("a live stream's details are kept two minutes, as its watcher count and its being live change", async () => {
+    const live = apiVideo("livelivelil", {
+      snippet: { liveBroadcastContent: "live" },
+      liveStreamingDetails: { concurrentViewers: "12400" }
+    });
+    const fetch = routeFetch([["/videos?", { items: [live] }]]);
+    expect((await browse.getItem("livelivelil", KEY)).watching).toBe(12400);
+    Date.now.mockReturnValue(NOW + browse.LIVE_ITEM_MS - 1);
+    await browse.getItem("livelivelil", KEY);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    Date.now.mockReturnValue(NOW + browse.LIVE_ITEM_MS + 1);
+    await browse.getItem("livelivelil", KEY);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   test("null for a video YouTube no longer has, even one known before", async () => {

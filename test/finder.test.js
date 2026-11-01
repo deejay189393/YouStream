@@ -109,6 +109,17 @@ describe("findVideos", () => {
     expect((await findVideos("tt0000001", SETTINGS)).status).toBe("unknown title");
   });
 
+  test("a title that could not be looked up is not an unknown one, and nothing is searched", async () => {
+    const fetch = routeFetch([["/meta/series/", new Error("socket hang up")]]);
+    const result = await findVideos("tt9432978:1:3", SETTINGS);
+    expect(result).toEqual({
+      status: "title lookup failed",
+      parsed: expect.objectContaining({ id: "tt9432978", season: 1, episode: 3 }),
+      error: { kind: "unavailable", message: expect.stringContaining("Cinemeta series tt9432978") }
+    });
+    expect(fetch.mock.calls.some(([url]) => url.includes("/search?"))).toBe(false);
+  });
+
   test("from id to ranked matches, with one search of the right length", async () => {
     const fetch = routeFetch([
       ["/meta/series/tt9432978.json", CINEMETA],

@@ -25,10 +25,11 @@ const { dislikeEstimate } = require("./dislikes");
  * kept shorter, in case a title's upload is simply newer than the search --
  * and for a recent release no longer than the server keeps its search. An
  * answer from an out-of-date search stood in for a failure, so it is asked
- * for again as soon as an empty one; a failure is retried in a minute.
+ * for again as soon as an empty one; a failure, of the title lookup or of
+ * the search, is retried in a minute.
  */
 function maxAgeFor(result, streams, streamsConfig = hostConfig.streams) {
-  if (result.status === "search failed") return streamsConfig.failedMaxAgeSeconds;
+  if (result.status === "search failed" || result.status === "title lookup failed") return streamsConfig.failedMaxAgeSeconds;
   if (streams.length && !result.stale) return streamsConfig.maxAgeSeconds;
   if (!result.title) return streamsConfig.emptyMaxAgeSeconds;
   return Math.min(streamsConfig.emptyMaxAgeSeconds, Math.round(searchMsFor(result.title) / 1000));
@@ -66,6 +67,8 @@ const SEARCH_MAX_AGE_SECONDS = 60;
 const MAX_CATALOG_AGE_SECONDS = 60 * 60;
 /** A video's details change little: its view count. */
 const META_MAX_AGE_SECONDS = 6 * 60 * 60;
+/** A live stream's do: how many are watching, and whether it is still live. */
+const LIVE_META_MAX_AGE_SECONDS = 2 * 60;
 
 /** What an id that is not a YouTube item, or a video that is gone, answers: 404. */
 function notFound() {
@@ -148,7 +151,7 @@ async function handleMeta({ type, id, config }) {
   if (!settings.youtubeKey || type !== ITEM_TYPE || !videoId) throw notFound();
   const [item, dislikes] = await Promise.all([getItem(videoId, settings.youtubeKey), dislikeEstimate(videoId)]);
   if (!item || isBlocked(item)) throw notFound();
-  return { meta: toFullMeta(item, dislikes), cacheMaxAge: META_MAX_AGE_SECONDS };
+  return { meta: toFullMeta(item, dislikes), cacheMaxAge: item.live === "live" ? LIVE_META_MAX_AGE_SECONDS : META_MAX_AGE_SECONDS };
 }
 
 function createAddonInterface() {

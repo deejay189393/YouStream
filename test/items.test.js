@@ -37,7 +37,8 @@ const detail = (overrides = {}) =>
     },
     contentDetails: { duration: "PT12M34S", ...(overrides.contentDetails || {}) },
     statistics: { viewCount: "1200000", ...(overrides.statistics || {}) },
-    status: overrides.status || {}
+    status: overrides.status || {},
+    liveStreamingDetails: overrides.liveStreamingDetails
   });
 
 describe("item ids", () => {
@@ -197,6 +198,25 @@ describe("itemDescription", () => {
     ["only the description", { channelTitle: "", views: null, likes: null }, null, "An engine, explained."]
   ])("%s", (_, fields, dislikes, text) => {
     expect(itemDescription(item(fields), dislikes)).toBe(text);
+  });
+
+  test.each([
+    ["a live stream says who is watching now, in place of its views", { live: "live", watching: 12400, likes: 1600000 }, 20000,
+      "Example Science\n🔴 Live · 12.4K watching · 👍🏻 1.6M · 👎🏻 ~20K\n\nAn engine, explained."],
+    ["a live stream whose channel hides the count still says it is live", { live: "live", watching: null }, null,
+      "Example Science\n🔴 Live · 👍🏻 45K\n\nAn engine, explained."],
+    ["a premiere still to come counts its views, as any other video", { live: "upcoming", watching: null }, null,
+      "Example Science\n1.2M views · 👍🏻 45K\n\nAn engine, explained."]
+  ])("%s", (_, fields, dislikes, text) => {
+    expect(itemDescription(item(fields), dislikes)).toBe(text);
+  });
+
+  test("a live stream's card says so too, without a dislike estimate", () => {
+    const card = toMetaPreview(
+      toItem(detail({ snippet: { liveBroadcastContent: "live" }, statistics: { likeCount: "3400" }, liveStreamingDetails: { concurrentViewers: "980" } }))
+    );
+    expect(card.description).toBe("Example Science\n🔴 Live · 980 watching · 👍🏻 3.4K\n\nAn engine, explained.");
+    expect(card.name).toBe("🔴 How Example Engines Work");
   });
 
   test("nothing known is no description at all", () => {

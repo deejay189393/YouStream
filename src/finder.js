@@ -69,7 +69,12 @@ async function findVideos(rawId, settings) {
   if (!parsed) return { status: "unsupported id" };
   if (!settings.types.includes(contentKind(parsed))) return { status: "type switched off", parsed };
 
-  const title = await resolveTitle(parsed, { tmdbKey: effectiveTmdbKey(settings), region: settings.region });
+  let title;
+  try {
+    title = await resolveTitle(parsed, { tmdbKey: effectiveTmdbKey(settings), region: settings.region });
+  } catch (err) {
+    return { status: "title lookup failed", parsed, error: { kind: err.kind, message: err.message } };
+  }
   if (!title) return { status: "unknown title", parsed };
 
   const window = durationWindow(title, settings);

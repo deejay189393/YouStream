@@ -57,6 +57,15 @@ describe("stream handler", () => {
     expect(await handleStream({ id: "tt0000001", config: CONFIG })).toEqual({ streams: [], cacheMaxAge: AGES.emptyMaxAgeSeconds });
   });
 
+  test("a title lookup that failed is retried soon too, not kept as an unknown title", async () => {
+    const fetch = routeFetch([["/meta/movie/", response({}, { status: 504 })]]);
+    expect(await handleStream({ id: "tt0063350", config: CONFIG })).toEqual({ streams: [], cacheMaxAge: AGES.failedMaxAgeSeconds });
+    expect(console.log).toHaveBeenCalledWith(
+      "[stream] tt0063350 title lookup failed: unavailable -- no title, as Cinemeta movie tt0063350 failed"
+    );
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("googleapis"))).toBe(false);
+  });
+
   test("a failed search is retried soon", async () => {
     routeFetch([["/meta/movie/", NOTLD], ["/search?", response({ error: { errors: [{ reason: "quotaExceeded" }] } }, { status: 403 })]]);
     expect(await handleStream({ id: "tt0063350", config: CONFIG })).toEqual({ streams: [], cacheMaxAge: AGES.failedMaxAgeSeconds });
@@ -81,6 +90,7 @@ describe("maxAgeFor", () => {
     expect(maxAgeFor({ status: "ok", title: OLD_FILM }, [], ages)).toBe(3600);
     expect(maxAgeFor({ status: "unknown title" }, [], ages)).toBe(3600);
     expect(maxAgeFor({ status: "search failed", title: OLD_FILM }, [], ages)).toBe(60);
+    expect(maxAgeFor({ status: "title lookup failed" }, [], ages)).toBe(60);
   });
 
   test("an answer from an out-of-date search is asked for again as soon as an empty one", () => {
@@ -100,6 +110,8 @@ describe("logResult", () => {
     expect(console.log).toHaveBeenLastCalledWith("[stream] x unknown title");
     logResult("x", { status: "search failed", error: { kind: "quota", message: "spent" } });
     expect(console.log).toHaveBeenLastCalledWith("[stream] x search failed: quota -- spent");
+    logResult("x", { status: "title lookup failed", error: { kind: "unavailable", message: "no title, as Kitsu anime 1 failed" } });
+    expect(console.log).toHaveBeenLastCalledWith("[stream] x title lookup failed: unavailable -- no title, as Kitsu anime 1 failed");
   });
 
   test("a cached lookup with no rejections", () => {
@@ -216,6 +228,18 @@ describe("YouTube items: metadata and streams", () => {
     const res = await handleMeta({ type: "YouTube", id: "youstream:abcdefghijk", config: { youtubeKey: "KEY" } });
     expect(res.meta.description).toBe("Example Science\n1.2M views · 👍🏻 45K · 👎🏻 ~1.3K\n\nAn engine, explained.");
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test("a live stream's page says it is live and who is watching, and the app asks again in two minutes", async () => {
+    const live = apiVideo("livelivelil", {
+      snippet: { channelTitle: "Example Radio", description: "Music, all day.", liveBroadcastContent: "live" },
+      statistics: { viewCount: "98000000", likeCount: "1600000" },
+      liveStreamingDetails: { actualStartTime: "2026-10-01T00:00:00Z", concurrentViewers: "12400" }
+    });
+    routeFetch([["/videos?", { items: [live] }], ["returnyoutubedislikeapi.com", { dislikes: 20000 }]]);
+    const res = await handleMeta({ type: "YouTube", id: "youstream:livelivelil", config: { youtubeKey: "KEY" } });
+    expect(res.cacheMaxAge).toBe(2 * 60);
+    expect(res.meta.description).toBe("Example Radio\n🔴 Live · 12.4K watching · 👍🏻 1.6M · 👎🏻 ~20K\n\nMusic, all day.");
   });
 
   test("an estimate that cannot be had leaves the dislikes out, and the page is served all the same", async () => {

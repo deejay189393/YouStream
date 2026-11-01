@@ -102,17 +102,24 @@ const AGE_NOTE = "🔞 Age-restricted: it plays in the YouTube app, where you ar
  * the uploader's own description. A count YouTube does not give is left out
  * with its separator: likes are hidden when the uploader turns them off, and
  * dislikes are an estimate (dislikes.js), looked up for a video's page only.
+ * A live stream says so, with how many are watching it now in place of its
+ * views so far, as YouTube shows it.
  *
  *   Example Science
  *   1.2M views · 👍🏻 45K · 👎🏻 ~1.3K
  *
  *   How an engine works, explained in thirteen minutes. ...
+ *
+ *   Example Radio
+ *   🔴 Live · 12.4K watching · 👍🏻 1.6M · 👎🏻 ~20K
  */
 function itemDescription(item, dislikes = null) {
   const views = formatCount(item.views);
+  const watching = formatCount(item.watching);
   const likes = formatCount(item.likes);
   const disliked = formatCount(dislikes);
-  const counts = [views && `${views} views`, likes && `👍🏻 ${likes}`, disliked && `👎🏻 ~${disliked}`].filter(Boolean).join(" · ");
+  const seen = item.live === "live" ? ["🔴 Live", watching && `${watching} watching`] : [views && `${views} views`];
+  const counts = [...seen, likes && `👍🏻 ${likes}`, disliked && `👎🏻 ~${disliked}`].filter(Boolean).join(" · ");
   const heading = [item.channelTitle, counts].filter(Boolean).join("\n");
   return [heading, item.ageRestricted ? AGE_NOTE : null, item.description].filter(Boolean).join("\n\n") || undefined;
 }

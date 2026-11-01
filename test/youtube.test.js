@@ -47,7 +47,7 @@ describe("searchVideos", () => {
     });
     const videosCall = new URL(fetch.mock.calls[1][0]);
     expect(videosCall.searchParams.get("id")).toBe("b,a,gone");
-    expect(videosCall.searchParams.get("part")).toBe("snippet,contentDetails,statistics,status");
+    expect(videosCall.searchParams.get("part")).toBe("snippet,contentDetails,statistics,status,liveStreamingDetails");
   });
 
   test("leaves out the optional filters it was not given", async () => {
@@ -285,6 +285,7 @@ describe("toVideo", () => {
       likes: 120,
       language: "hi",
       live: null,
+      watching: null,
       embeddable: false,
       ageRestricted: true,
       licensed: true,
@@ -307,12 +308,24 @@ describe("toVideo", () => {
       likes: null,
       language: null,
       live: null,
+      watching: null,
       embeddable: true,
       ageRestricted: false,
       licensed: false,
       regionAllowed: null,
       regionBlocked: null
     });
+  });
+
+  test("a live stream's watcher count, while it is live and only then", () => {
+    const live = (liveBroadcastContent, liveStreamingDetails) =>
+      youtube.toVideo(apiVideo("x", { snippet: { liveBroadcastContent }, ...(liveStreamingDetails ? { liveStreamingDetails } : {}) }));
+    expect(live("live", { actualStartTime: "2026-11-01T00:00:00Z", concurrentViewers: "12400" }).watching).toBe(12400);
+    // The channel hides it.
+    expect(live("live", { actualStartTime: "2026-11-01T00:00:00Z" }).watching).toBeNull();
+    // A stream that has ended keeps its details, but nobody is watching it live.
+    expect(live("none", { actualEndTime: "2026-11-01T02:00:00Z", concurrentViewers: "5" }).watching).toBeNull();
+    expect(live("upcoming", { scheduledStartTime: "2026-11-02T00:00:00Z" }).watching).toBeNull();
   });
 
   test("marks live and upcoming broadcasts, and reads an allow-list", () => {
@@ -452,7 +465,7 @@ describe("browsing calls", () => {
     expect(page.next).toBe("N");
     expect(params(fetch)).toEqual({
       key: "KEY",
-      part: "snippet,contentDetails,statistics,status",
+      part: "snippet,contentDetails,statistics,status,liveStreamingDetails",
       chart: "mostPopular",
       regionCode: "IN",
       videoCategoryId: "10",

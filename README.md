@@ -476,6 +476,19 @@ description. A count YouTube does not give, such as likes an uploader hid,
 is left out with its separator. A row's cards say the same without the
 dislikes, which would take a lookup per card.
 
+A stream that is live now says so, with how many are watching in place of
+its views so far, as YouTube shows it:
+
+```
+Example Radio
+🔴 Live · 12.4K watching · 👍🏻 1.6M · 👎🏻 ~20K
+```
+
+A channel can hide that count; the line then says only that it is live. Its
+page is asked for again after two minutes, and its details are kept for two
+minutes rather than a day, so the count stays current and a stream that has
+ended goes back to its views.
+
 Tags are cleaned the way Newsio cleans publishers' keywords:
 - generic words, the channel's own name, handles, hashtags and slug families
   are dropped;
@@ -693,7 +706,7 @@ redeploys, one instance.
 | Metadata | 3 days | titles, runtimes and credits rarely change |
 | A YouTube catalog's page | your refresh interval, 2 hours by default | per reader, under a fingerprint of the key |
 | A YouTube search's page | 2 minutes, then 10 more for outages only | per reader |
-| A YouTube video's details | 1 day (the search lifetime) | shared: every video a row lists, and any opened by id |
+| A YouTube video's details | 1 day (the search lifetime); 2 minutes for a stream that is live | shared: every video a row lists, and any opened by id |
 | A video's dislike estimate | 1 day (the search lifetime) | shared; after a refusal or an error, none is asked for a minute |
 | Kept past that, for outages | 7 days | answered with **only** when the service it came from fails (a spent quota, an outage): yesterday's results beat none |
 | A key with its quota spent | until the quota resets, an hour at most | |
@@ -711,7 +724,11 @@ Redis came back, caching resumed without a restart.
 
 **In the app.** Stream lists tell Stremio and Nuvio how long to reuse them: 6
 hours with videos in them, 1 hour when empty (no longer than the server's own
-search for a recent release), 1 minute after a failure.
+search for a recent release), 1 minute after a failure. A failure is YouTube
+not answering, or the title not found while a service that might know it did
+not answer (Cinemeta timing out, TMDB down): that is not an unknown title, so
+it is asked about again in a minute rather than an hour. A YouTube video's
+page is reused for 6 hours, a live stream's for 2 minutes.
 
 ## Deploying
 

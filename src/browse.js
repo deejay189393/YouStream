@@ -60,6 +60,11 @@ const SEARCH_REUSE_MS = 2 * 60 * 1000;
  * fails, but not days, as a catalog's are.
  */
 const SEARCH_STALE_MS = 10 * 60 * 1000;
+/**
+ * A live stream's details are kept two minutes, not a day: how many are
+ * watching, and whether it is live at all, change by the minute.
+ */
+const LIVE_ITEM_MS = 2 * 60 * 1000;
 
 /** Han, kana and Hangul pack a word into a character or two. */
 const DENSE_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
@@ -150,7 +155,7 @@ async function fetchUpstream(source, apiKey, pageToken) {
     next = found.next;
   }
   const items = details.map(toItem);
-  await Promise.all(items.map((item) => videoCache.set(item.id, item)));
+  await Promise.all(items.map(keepItem));
   return { items: items.map(toPreview), next };
 }
 
@@ -319,6 +324,11 @@ async function searchItems({ query, settings, skip, settleOptions }) {
   return { items: await assemble(ctx, skip, settings), skipped: false };
 }
 
+/** A video kept by id for everyone: a day, or two minutes while it is live. */
+function keepItem(item) {
+  return videoCache.set(item.id, item, item.live === "live" ? LIVE_ITEM_MS : undefined);
+}
+
 /**
  * One video by id, for its metadata and streams: from the shared cache when
  * it is there, else one `videos.list` (1 unit). Null when YouTube has no
@@ -332,7 +342,7 @@ function getItem(videoId, apiKey) {
       const [detail] = await withKey(apiKey, () => videosById(apiKey, [videoId]));
       if (!detail) return null;
       const item = toItem(detail);
-      await videoCache.set(videoId, item);
+      await keepItem(item);
       return item;
     } catch (err) {
       if (hit) return hit.value;
@@ -392,5 +402,6 @@ module.exports = {
   TYPING_GAP_MS,
   MAX_TYPING_SETTLE_MS,
   SEARCH_REUSE_MS,
-  SEARCH_STALE_MS
+  SEARCH_STALE_MS,
+  LIVE_ITEM_MS
 };
