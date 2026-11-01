@@ -484,7 +484,8 @@ Example Radio
 🔴 Live · 12.4K watching · 👍🏻 1.6M · 👎🏻 ~20K
 ```
 
-A channel can hide that count; the line then says only that it is live. Its
+Its name starts with 🔴 as well, unless the uploader's title already does. A
+channel can hide that count; the line then says only that it is live. Its
 page is asked for again after two minutes, and its details are kept for two
 minutes rather than a day, so the count stays current and a stream that has
 ended goes back to its views.

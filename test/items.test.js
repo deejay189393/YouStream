@@ -145,6 +145,22 @@ describe("toMetaPreview", () => {
     const bare = toMetaPreview(toItem({ id: "abcdefghijk" }));
     expect(bare).toMatchObject({ name: "Untitled", description: undefined, releaseInfo: undefined });
   });
+
+  test.each([
+    ["🔴LIVE | Example Game Night | Day 6", "🔴LIVE | Example Game Night | Day 6"],
+    ["🔴 WATCH LIVE - Example Surf Pro, Day 2", "🔴 WATCH LIVE - Example Surf Pro, Day 2"],
+    ["🔴Live🔴Example Quiz Night", "🔴Live🔴Example Quiz Night"],
+    // Only a title that starts with one: a 🔴 further in, or another red sign, is the uploader's.
+    ["Example Game LIVE 🔴 Can We Escape?", "🔴 Example Game LIVE 🔴 Can We Escape?"],
+    ["🛑EXAMPLE NEWS LIVE | Headlines", "🔴 🛑EXAMPLE NEWS LIVE | Headlines"],
+    ["LIVE: Example Rally", "🔴 LIVE: Example Rally"]
+  ])("a live title %p is named %p: a 🔴 the uploader put first is not doubled", (title, name) => {
+    expect(toMetaPreview(toItem(detail({ snippet: { title, liveBroadcastContent: "live" } }))).name).toBe(name);
+  });
+
+  test("a title with a 🔴 is left as it is once the stream is over", () => {
+    expect(toMetaPreview(toItem(detail({ snippet: { title: "🔴LIVE | Example Game Night" } }))).name).toBe("🔴LIVE | Example Game Night");
+  });
 });
 
 describe("toFullMeta", () => {

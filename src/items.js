@@ -89,8 +89,15 @@ function runtimeText(seconds) {
   return hours ? `${hours}h ${minutes % 60}m` : `${minutes} min`;
 }
 
-/** A live stream says so where a grid shows text: on the name. */
-const itemName = (item) => `${item.live === "live" ? "🔴 " : ""}${item.title || "Untitled"}`;
+/**
+ * A live stream says so where a grid shows text: on the name. Many uploaders
+ * start a live title with a 🔴 of their own, so one that does gets no second.
+ */
+const LIVE_MARK = "🔴";
+function itemName(item) {
+  const title = item.title || "Untitled";
+  return item.live === "live" && !title.startsWith(LIVE_MARK) ? `${LIVE_MARK} ${title}` : title;
+}
 
 const releaseInfo = (item) => (item.publishedAt ? item.publishedAt.slice(0, 10) : undefined);
 
