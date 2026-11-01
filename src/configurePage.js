@@ -520,7 +520,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       <p class="lead">
         Search YouTube from your app, and keep searches, channels, playlists and Trending as rows on its home
         screen. A video you open there plays the ways you choose under &ldquo;When you press play&rdquo;, and one
-        you save to your library is listed under the type <strong>YouTube</strong>.
+        you save to your library is listed under the type <strong>youtube</strong>.
       </p>
       <div class="row-box">
         <label class="check"><input type="checkbox" id="yt-search"${s.search ? " checked" : ""} />

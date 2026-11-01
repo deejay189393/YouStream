@@ -7,15 +7,31 @@ const { WATCH_URL } = require("./playback");
  * list, what an app saves to its library, and what YouStream gives metadata
  * and streams for.
  *
- * They have their own type, "YouTube", spelled exactly so: a video is not a
- * film or an episode, and an app's library can then list saved videos apart
- * from everything else (Nuvio's type picker shows it as written). Ids are
- * "youstream:" and the video's id, a prefix no other addon claims, so the app
- * asks YouStream -- and only YouStream -- about them, however long after they
- * were saved.
+ * Their type is "youtube", lower case like "movie" and "series": a video is
+ * not a film or an episode, and an app's library can then list saved videos
+ * apart from everything else. Their id names YouTube, not YouStream, the way
+ * a film's IMDb id names IMDb: "yt_id:" and the video's own id, the prefix
+ * Stremio's own YouTube add-on uses. Any add-on can then give metadata or
+ * streams for the same video, and YouStream does for videos other add-ons
+ * list.
  */
-const ITEM_TYPE = "YouTube";
-const ITEM_PREFIX = "youstream:";
+const ITEM_TYPE = "youtube";
+const ITEM_PREFIX = "yt_id:";
+
+/**
+ * What YouStream called its videos before 0.8.0, still answered so that a
+ * video saved then keeps its page and its streams.
+ */
+const LEGACY_TYPE = "YouTube";
+const LEGACY_PREFIX = "youstream:";
+
+/**
+ * Stremio's own YouTube add-on lists a channel's videos under the type
+ * "channel", each as yt_id:<channel id>:<video id>; YouStream gives streams
+ * for those too.
+ */
+const CHANNEL_TYPE = "channel";
+
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 
 /** YouTube's own limit on a description. */
@@ -25,12 +41,25 @@ const PREVIEW_DESCRIPTION = 300;
 
 const itemId = (videoId) => `${ITEM_PREFIX}${videoId}`;
 
-/** The video id in an item id, or null when it is not one. */
+/**
+ * The YouTube video an id is for, or null when it is not one:
+ *
+ *   yt_id:B7i390JbgJE                            YouStream's, from 0.8.0
+ *   youstream:B7i390JbgJE                        YouStream's, before 0.8.0
+ *   yt_id:UCrDkAvwZum-UTjHmzDI2iIw:9bZkp7q19f0   Stremio's YouTube add-on
+ *
+ * A channel's own id (yt_id:UC...) is not a video.
+ */
 function videoIdOf(id) {
-  if (typeof id !== "string" || !id.startsWith(ITEM_PREFIX)) return null;
-  const videoId = id.slice(ITEM_PREFIX.length);
+  if (typeof id !== "string") return null;
+  const prefix = [ITEM_PREFIX, LEGACY_PREFIX].find((p) => id.startsWith(p));
+  if (!prefix) return null;
+  const videoId = id.slice(prefix.length).split(":").pop();
   return VIDEO_ID.test(videoId) ? videoId : null;
 }
+
+/** Whether a type is YouStream's for a video: "youtube", in any case. */
+const isItemType = (type) => typeof type === "string" && type.toLowerCase() === ITEM_TYPE;
 
 /**
  * YouTube's video categories. The same everywhere, so kept here rather than
@@ -131,12 +160,15 @@ function itemDescription(item, dislikes = null) {
   return [heading, item.ageRestricted ? AGE_NOTE : null, item.description].filter(Boolean).join("\n\n") || undefined;
 }
 
-/** One video in a catalog or in search results. */
-function toMetaPreview(item) {
-  const id = itemId(item.id);
+/**
+ * One video in a catalog or in search results. `as` gives it another type
+ * and id -- the ones an app asked with, for a video it saved before 0.8.0.
+ */
+function toMetaPreview(item, as = {}) {
+  const id = as.id || itemId(item.id);
   return {
     id,
-    type: ITEM_TYPE,
+    type: as.type || ITEM_TYPE,
     name: itemName(item),
     poster: item.poster,
     posterShape: "landscape",
@@ -150,9 +182,9 @@ function toMetaPreview(item) {
 }
 
 /** Everything the detail page shows, with the dislike estimate when there is one. */
-function toFullMeta(item, dislikes = null) {
+function toFullMeta(item, dislikes = null, as = {}) {
   return {
-    ...toMetaPreview(item),
+    ...toMetaPreview(item, as),
     description: itemDescription(item, dislikes),
     released: item.publishedAt || undefined,
     genres: itemGenres(item),
@@ -289,9 +321,13 @@ function itemGenres(item) {
 module.exports = {
   ITEM_TYPE,
   ITEM_PREFIX,
+  LEGACY_TYPE,
+  LEGACY_PREFIX,
+  CHANNEL_TYPE,
   CATEGORIES,
   itemId,
   videoIdOf,
+  isItemType,
   toItem,
   toPreview,
   toMetaPreview,

@@ -6,7 +6,7 @@ const { toStreams, toItemStreams } = require("./streams");
 const { hostConfig } = require("./hostConfig");
 const { searchMsFor } = require("./cache");
 const { catalogItems, searchItems, getItem } = require("./browse");
-const { ITEM_TYPE, videoIdOf, toMetaPreview, toFullMeta } = require("./items");
+const { LEGACY_TYPE, LEGACY_PREFIX, videoIdOf, isItemType, toMetaPreview, toFullMeta } = require("./items");
 const { dislikeEstimate } = require("./dislikes");
 
 /**
@@ -107,20 +107,30 @@ async function itemStreams(videoId, settings) {
 }
 
 /**
+ * How a row lists its videos: as "youtube" items with yt_id: ids, or, for an
+ * app still asking with the manifest it had before 0.8.0, as "YouTube" items
+ * with youstream: ids -- which that manifest routes back here.
+ */
+function listedAs(type) {
+  return (item) => (type === LEGACY_TYPE ? { type: LEGACY_TYPE, id: `${LEGACY_PREFIX}${item.id}` } : {});
+}
+
+/**
  * A row of the reader's catalog, or the search row. An empty list rather
  * than an error when YouTube cannot answer, so a spent quota leaves an empty
  * row rather than a broken addon.
  */
 async function handleCatalog({ type, id, extra, config }) {
   const settings = normalizeConfig(config);
-  if (!settings.youtubeKey || type !== ITEM_TYPE) return { metas: [] };
+  if (!settings.youtubeKey || !isItemType(type)) return { metas: [] };
   const skip = extra && extra.skip;
+  const as = listedAs(type);
   try {
     if (id === SEARCH_CATALOG_ID) {
       if (!settings.search) return { metas: [] };
       const result = await searchItems({ query: extra && extra.search, settings, skip });
       return {
-        metas: result.items.map(toMetaPreview),
+        metas: result.items.map((item) => toMetaPreview(item, as(item))),
         cacheMaxAge: result.skipped ? 0 : SEARCH_MAX_AGE_SECONDS
       };
     }
@@ -130,7 +140,7 @@ async function handleCatalog({ type, id, extra, config }) {
     if (!entry) return { metas: [] };
     const items = await catalogItems({ entry, settings, skip });
     return {
-      metas: items.map(toMetaPreview),
+      metas: items.map((item) => toMetaPreview(item, as(item))),
       cacheMaxAge: Math.min(Math.round(refreshMs(settings.catalogRefresh) / 1000), MAX_CATALOG_AGE_SECONDS)
     };
   } catch (err) {
@@ -144,14 +154,22 @@ async function handleCatalog({ type, id, extra, config }) {
  * long after it was saved. A video YouTube no longer has is a 404; YouTube
  * failing to answer is an error, which the app asks again about. The dislike
  * estimate is asked for alongside, and never fails the page.
+ *
+ * The type is "youtube" in any case: Nuvio lower-cases the type of a saved
+ * video when it looks its name up again, and videos saved before 0.8.0 are
+ * "YouTube". The page carries the id and type it was asked for, so the app
+ * finds the item it asked about.
  */
 async function handleMeta({ type, id, config }) {
   const settings = normalizeConfig(config);
   const videoId = videoIdOf(id);
-  if (!settings.youtubeKey || type !== ITEM_TYPE || !videoId) throw notFound();
+  if (!settings.youtubeKey || !isItemType(type) || !videoId) throw notFound();
   const [item, dislikes] = await Promise.all([getItem(videoId, settings.youtubeKey), dislikeEstimate(videoId)]);
   if (!item || isBlocked(item)) throw notFound();
-  return { meta: toFullMeta(item, dislikes), cacheMaxAge: item.live === "live" ? LIVE_META_MAX_AGE_SECONDS : META_MAX_AGE_SECONDS };
+  return {
+    meta: toFullMeta(item, dislikes, { type, id }),
+    cacheMaxAge: item.live === "live" ? LIVE_META_MAX_AGE_SECONDS : META_MAX_AGE_SECONDS
+  };
 }
 
 function createAddonInterface() {

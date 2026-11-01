@@ -203,25 +203,35 @@ describe("YouTube items over HTTP", () => {
 
   test("a catalog, then the video's details and its streams, the way an app asks", async () => {
     routeFetch([["googleapis.com/youtube/v3/videos", { items: [apiVideo("abcdefghijk", { snippet: { title: "Trending One" } })] }]]);
-    const catalog = await request(app).get(`/${KEYED()}/catalog/YouTube/trending.all.json`);
+    const catalog = await request(app).get(`/${KEYED()}/catalog/youtube/trending.all.json`);
     expect(catalog.status).toBe(200);
     expect(catalog.headers["access-control-allow-origin"]).toBe("*");
-    expect(catalog.body.metas[0]).toMatchObject({ id: "youstream:abcdefghijk", type: "YouTube" });
+    expect(catalog.body.metas[0]).toMatchObject({ id: "yt_id:abcdefghijk", type: "youtube" });
     // Nuvio puts skip in the path, its next request starting at the count it has.
-    const more = await request(app).get(`/${KEYED()}/catalog/YouTube/trending.all/skip=1.json`);
+    const more = await request(app).get(`/${KEYED()}/catalog/youtube/trending.all/skip=1.json`);
     expect(more.body.metas).toEqual([]);
-    const meta = await request(app).get(`/${KEYED()}/meta/YouTube/youstream%3Aabcdefghijk.json`);
-    expect(meta.body.meta).toMatchObject({ id: "youstream:abcdefghijk", name: "Trending One", description: "Channel\n12.3K views" });
-    const streams = await request(app).get(`/${KEYED()}/stream/YouTube/youstream:abcdefghijk.json`);
+    const meta = await request(app).get(`/${KEYED()}/meta/youtube/yt_id%3Aabcdefghijk.json`);
+    expect(meta.body.meta).toMatchObject({ id: "yt_id:abcdefghijk", type: "youtube", name: "Trending One", description: "Channel\n12.3K views" });
+    const streams = await request(app).get(`/${KEYED()}/stream/youtube/yt_id:abcdefghijk.json`);
     expect(streams.body.streams[0].ytId).toBe("abcdefghijk");
     // No upload date: AIOStreams has no release for a YouTube item, and would drop it as a fake.
     streams.body.streams.forEach((stream) => expect(stream.behaviorHints).not.toHaveProperty("publishDate"));
     expect(streams.body.streams[0].behaviorHints).toMatchObject({ indexer: "YouTube", duration: expect.any(Number) });
   });
 
+  test("the forms other apps and add-ons ask with: a video saved before 0.8.0, and a channel's video in Stremio's YouTube add-on", async () => {
+    routeFetch([["googleapis.com/youtube/v3/videos", (url) => ({ items: [apiVideo(new URL(url).searchParams.get("id"))] })]]);
+    const saved = await request(app).get(`/${KEYED()}/meta/YouTube/youstream:abcdefghijk.json`);
+    expect(saved.body.meta).toMatchObject({ id: "youstream:abcdefghijk", type: "YouTube" });
+    const savedStreams = await request(app).get(`/${KEYED()}/stream/YouTube/youstream:abcdefghijk.json`);
+    expect(savedStreams.body.streams[0].ytId).toBe("abcdefghijk");
+    const channelVideo = await request(app).get(`/${KEYED()}/stream/channel/yt_id:UCrDkAvwZum-UTjHmzDI2iIw:9bZkp7q19f0.json`);
+    expect(channelVideo.body.streams[0].ytId).toBe("9bZkp7q19f0");
+  });
+
   test("a video that is gone is a 404, with the protocol's CORS header, which Nuvio takes as final", async () => {
     routeFetch([["googleapis.com/youtube/v3/videos", { items: [] }]]);
-    const res = await request(app).get(`/${KEYED()}/meta/YouTube/youstream:gonegonegon.json`);
+    const res = await request(app).get(`/${KEYED()}/meta/youtube/yt_id:gonegonegon.json`);
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: "Not found" });
     expect(res.headers["access-control-allow-origin"]).toBe("*");
@@ -230,7 +240,7 @@ describe("YouTube items over HTTP", () => {
   test("YouTube failing on a video's details is an error, not a 404", async () => {
     jest.spyOn(console, "error").mockImplementation(() => {});
     routeFetch([["googleapis.com/youtube/v3/videos", response({}, { status: 503 })]]);
-    const res = await request(app).get(`/${KEYED()}/meta/YouTube/youstream:abcdefghijk.json`);
+    const res = await request(app).get(`/${KEYED()}/meta/youtube/yt_id:abcdefghijk.json`);
     expect(res.status).toBe(500);
   });
 

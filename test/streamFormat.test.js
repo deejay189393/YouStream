@@ -255,7 +255,7 @@ describe("renderStreamText", () => {
 test("previewData: each sample's in-app fields and every way of watching", () => {
   const data = previewData("YouStream Beta", NOW);
   expect(Object.keys(data.samples)).toEqual(["film", "episode", "video"]);
-  expect(data.samples.video.metadata.type).toBe("YouTube");
+  expect(data.samples.video.metadata.type).toBe("youtube");
   expect(data.samples.film.addon.name).toBe("YouStream Beta");
   expect(data.samples.episode.stream.type).toBe("youtube");
   expect(data.play).toEqual({
@@ -282,8 +282,8 @@ describe("a YouTube video opened as an item of its own", () => {
   test("no film or show behind it: its type is YouTube and every title field is empty", () => {
     const scope = itemScope();
     expect(scope.metadata).toMatchObject({
-      queryType: "YouTube",
-      type: "YouTube",
+      queryType: "youtube",
+      type: "youtube",
       isAnime: false,
       title: null,
       titles: [],

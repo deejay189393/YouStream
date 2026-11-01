@@ -142,30 +142,30 @@ describe("YouTube catalogs", () => {
   test("a catalog of the reader's lists its videos as YouTube items, kept by the app at most its interval", async () => {
     routeFetch([["/videos?", { items: [apiVideo("trend000001", { snippet: { title: "Trending One" } })] }]]);
     const iface = createAddonInterface();
-    const res = await iface.get("catalog", "YouTube", "trending.all", {}, TRENDING);
+    const res = await iface.get("catalog", "youtube", "trending.all", {}, TRENDING);
     expect(res.cacheMaxAge).toBe(45 * 60);
     expect(res.metas).toEqual([
-      expect.objectContaining({ id: "youstream:trend000001", type: "YouTube", name: "Trending One", posterShape: "landscape" })
+      expect.objectContaining({ id: "yt_id:trend000001", type: "youtube", name: "Trending One", posterShape: "landscape" })
     ]);
   });
 
   test("an interval longer than an hour is still asked about hourly by the app; the server keeps the rest", async () => {
     routeFetch([["/videos?", { items: [] }]]);
-    const res = await handleCatalog({ type: "YouTube", id: "trending.all", extra: {}, config: { ...TRENDING, catalogRefresh: "1d" } });
+    const res = await handleCatalog({ type: "youtube", id: "trending.all", extra: {}, config: { ...TRENDING, catalogRefresh: "1d" } });
     expect(res.cacheMaxAge).toBe(60 * 60);
   });
 
   test("pages follow skip", async () => {
     const fetch = routeFetch([["/videos?", (url) => (new URL(url).searchParams.get("pageToken") ? { items: [apiVideo("second00001")] } : { items: [apiVideo("first000001")], nextPageToken: "N" })]]);
-    const res = await handleCatalog({ type: "YouTube", id: "trending.all", extra: { skip: "1" }, config: TRENDING });
-    expect(res.metas.map((m) => m.id)).toEqual(["youstream:second00001"]);
+    const res = await handleCatalog({ type: "youtube", id: "trending.all", extra: { skip: "1" }, config: TRENDING });
+    expect(res.metas.map((m) => m.id)).toEqual(["yt_id:second00001"]);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   test.each([
     ["another type", "movie", "trending.all", TRENDING],
-    ["a catalog this reader does not have", "YouTube", "trending.music", TRENDING],
-    ["no key", "YouTube", "trending.all", { catalogs: [{ trending: "all" }] }]
+    ["a catalog this reader does not have", "youtube", "trending.music", TRENDING],
+    ["no key", "youtube", "trending.all", { catalogs: [{ trending: "all" }] }]
   ])("nothing for %s", async (_, type, id, config) => {
     const fetch = routeFetch([]);
     expect(await handleCatalog({ type, id, extra: {}, config })).toEqual({ metas: [] });
@@ -174,14 +174,14 @@ describe("YouTube catalogs", () => {
 
   test("YouTube failing is an empty row, asked again in a minute, and logged", async () => {
     routeFetch([["/videos?", response({ error: { errors: [{ reason: "quotaExceeded" }] } }, { status: 403 })]]);
-    expect(await handleCatalog({ type: "YouTube", id: "trending.all", extra: {}, config: TRENDING })).toEqual({ metas: [], cacheMaxAge: 60 });
+    expect(await handleCatalog({ type: "youtube", id: "trending.all", extra: {}, config: TRENDING })).toEqual({ metas: [], cacheMaxAge: 60 });
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining("[catalog] trending.all failed: quota"));
   });
 });
 
 describe("YouTube search", () => {
   const search = (query, config = { youtubeKey: "KEY" }, extra = {}) =>
-    handleCatalog({ type: "YouTube", id: "search", extra: { search: query, ...extra }, config });
+    handleCatalog({ type: "youtube", id: "search", extra: { search: query, ...extra }, config });
 
   test("the app's search, answered live from YouTube", async () => {
     jest.spyOn(browse, "searchItems");
@@ -190,7 +190,7 @@ describe("YouTube search", () => {
       ["/videos?", { items: [apiVideo("found000001")] }]
     ]);
     const res = await search("interstellar");
-    expect(res).toEqual({ metas: [expect.objectContaining({ id: "youstream:found000001" })], cacheMaxAge: 60 });
+    expect(res).toEqual({ metas: [expect.objectContaining({ id: "yt_id:found000001" })], cacheMaxAge: 60 });
   }, 10000);
 
   test("nothing to search yet is not kept by the app at all", async () => {
@@ -217,15 +217,15 @@ describe("YouTube items: metadata and streams", () => {
   test("a video's details, for its page and the app's library", async () => {
     routeFetch([["/videos?", { items: [VIDEO] }]]);
     const iface = createAddonInterface();
-    const res = await iface.get("meta", "YouTube", "youstream:abcdefghijk", {}, { youtubeKey: "KEY" });
+    const res = await iface.get("meta", "youtube", "yt_id:abcdefghijk", {}, { youtubeKey: "KEY" });
     expect(res.cacheMaxAge).toBe(6 * 60 * 60);
-    expect(res.meta).toMatchObject({ id: "youstream:abcdefghijk", type: "YouTube", name: "How Example Engines Work", genres: ["Science & Technology", "Engines"] });
+    expect(res.meta).toMatchObject({ id: "yt_id:abcdefghijk", type: "youtube", name: "How Example Engines Work", genres: ["Science & Technology", "Engines"] });
   });
 
   test("the page leads with the channel and its counts, the dislikes being Return YouTube Dislike's estimate", async () => {
     const liked = apiVideo("abcdefghijk", { snippet: { channelTitle: "Example Science", description: "An engine, explained." }, statistics: { viewCount: "1200000", likeCount: "45000" } });
     const fetch = routeFetch([["/videos?", { items: [liked] }], ["returnyoutubedislikeapi.com/votes?videoId=abcdefghijk", { dislikes: 1300 }]]);
-    const res = await handleMeta({ type: "YouTube", id: "youstream:abcdefghijk", config: { youtubeKey: "KEY" } });
+    const res = await handleMeta({ type: "youtube", id: "yt_id:abcdefghijk", config: { youtubeKey: "KEY" } });
     expect(res.meta.description).toBe("Example Science\n1.2M views · 👍🏻 45K · 👎🏻 ~1.3K\n\nAn engine, explained.");
     expect(fetch).toHaveBeenCalledTimes(2);
   });
@@ -237,40 +237,41 @@ describe("YouTube items: metadata and streams", () => {
       liveStreamingDetails: { actualStartTime: "2026-10-01T00:00:00Z", concurrentViewers: "12400" }
     });
     routeFetch([["/videos?", { items: [live] }], ["returnyoutubedislikeapi.com", { dislikes: 20000 }]]);
-    const res = await handleMeta({ type: "YouTube", id: "youstream:livelivelil", config: { youtubeKey: "KEY" } });
+    const res = await handleMeta({ type: "youtube", id: "yt_id:livelivelil", config: { youtubeKey: "KEY" } });
     expect(res.cacheMaxAge).toBe(2 * 60);
     expect(res.meta.description).toBe("Example Radio\n🔴 Live · 12.4K watching · 👍🏻 1.6M · 👎🏻 ~20K\n\nMusic, all day.");
   });
 
   test("an estimate that cannot be had leaves the dislikes out, and the page is served all the same", async () => {
     routeFetch([["/videos?", { items: [VIDEO] }], ["returnyoutubedislikeapi.com", response({}, { status: 503 })]]);
-    const res = await handleMeta({ type: "YouTube", id: "youstream:abcdefghijk", config: { youtubeKey: "KEY" } });
+    const res = await handleMeta({ type: "youtube", id: "yt_id:abcdefghijk", config: { youtubeKey: "KEY" } });
     expect(res.meta.description).toBe("Channel\n12.3K views");
   });
 
   test("a catalog card carries no estimate: nothing is asked of Return YouTube Dislike for a row", async () => {
     const fetch = routeFetch([["/videos?", { items: [VIDEO] }]]);
-    const res = await handleCatalog({ type: "YouTube", id: "trending.all", extra: {}, config: { youtubeKey: "KEY", catalogs: [{ trending: "all" }] } });
+    const res = await handleCatalog({ type: "youtube", id: "trending.all", extra: {}, config: { youtubeKey: "KEY", catalogs: [{ trending: "all" }] } });
     expect(res.metas[0].description).toBe("Channel\n12.3K views");
     expect(fetch.mock.calls.some(([url]) => String(url).includes("returnyoutubedislike"))).toBe(false);
   });
 
   test.each([
-    ["an id that is not an item", "YouTube", "tt0063350", { youtubeKey: "KEY" }],
-    ["another type", "movie", "youstream:abcdefghijk", { youtubeKey: "KEY" }],
-    ["no key", "YouTube", "youstream:abcdefghijk", {}]
+    ["an id that is not an item", "youtube", "tt0063350", { youtubeKey: "KEY" }],
+    ["a channel's own id", "youtube", "yt_id:UCrDkAvwZum-UTjHmzDI2iIw", { youtubeKey: "KEY" }],
+    ["another type", "movie", "yt_id:abcdefghijk", { youtubeKey: "KEY" }],
+    ["no key", "youtube", "yt_id:abcdefghijk", {}]
   ])("%s is not found, so the router passes it on", async (_, type, id, config) => {
     await expect(handleMeta({ type, id, config })).rejects.toMatchObject({ noHandler: true });
   });
 
   test("a video YouTube no longer has, or this server blocks, is not found", async () => {
     routeFetch([["/videos?", { items: [] }]]);
-    await expect(handleMeta({ type: "YouTube", id: "youstream:gonegonegon", config: { youtubeKey: "KEY" } })).rejects.toMatchObject({ noHandler: true });
+    await expect(handleMeta({ type: "youtube", id: "yt_id:gonegonegon", config: { youtubeKey: "KEY" } })).rejects.toMatchObject({ noHandler: true });
     hostConfig.legal.blockedVideos.push("abcdefghijk");
     try {
       routeFetch([["/videos?", { items: [VIDEO] }]]);
-      await expect(handleMeta({ type: "YouTube", id: "youstream:abcdefghijk", config: { youtubeKey: "KEY" } })).rejects.toMatchObject({ noHandler: true });
-      expect(await handleStream({ id: "youstream:abcdefghijk", config: { youtubeKey: "KEY" } })).toEqual({ streams: [], cacheMaxAge: AGES.emptyMaxAgeSeconds });
+      await expect(handleMeta({ type: "youtube", id: "yt_id:abcdefghijk", config: { youtubeKey: "KEY" } })).rejects.toMatchObject({ noHandler: true });
+      expect(await handleStream({ id: "yt_id:abcdefghijk", config: { youtubeKey: "KEY" } })).toEqual({ streams: [], cacheMaxAge: AGES.emptyMaxAgeSeconds });
     } finally {
       hostConfig.legal.blockedVideos.pop();
     }
@@ -278,12 +279,12 @@ describe("YouTube items: metadata and streams", () => {
 
   test("YouTube failing is an error the app asks again about, not 'not found'", async () => {
     routeFetch([["/videos?", response({}, { status: 503 })]]);
-    await expect(handleMeta({ type: "YouTube", id: "youstream:abcdefghijk", config: { youtubeKey: "KEY" } })).rejects.toMatchObject({ kind: "unavailable" });
+    await expect(handleMeta({ type: "youtube", id: "yt_id:abcdefghijk", config: { youtubeKey: "KEY" } })).rejects.toMatchObject({ kind: "unavailable" });
   });
 
   test("its streams: the reader's ways of watching, from the reader's templates", async () => {
     routeFetch([["/videos?", { items: [VIDEO] }]]);
-    const res = await handleStream({ id: "youstream:abcdefghijk", config: { youtubeKey: "KEY", playback: ["app", "smarttube"] } });
+    const res = await handleStream({ id: "yt_id:abcdefghijk", config: { youtubeKey: "KEY", playback: ["app", "smarttube"] } });
     expect(res.cacheMaxAge).toBe(AGES.maxAgeSeconds);
     expect(res.streams.map((s) => s.ytId || s.externalUrl)).toEqual(["abcdefghijk", "vnd.youtube:abcdefghijk"]);
     expect(res.streams[0].description.split("\n")[0]).toBe("🎬 How Example Engines Work");
@@ -291,15 +292,61 @@ describe("YouTube items: metadata and streams", () => {
 
   test("no streams for a video gone, and a minute's wait when YouTube fails", async () => {
     routeFetch([["/videos?", { items: [] }]]);
-    expect(await handleStream({ id: "youstream:gonegonegon", config: { youtubeKey: "KEY" } })).toEqual({ streams: [], cacheMaxAge: AGES.emptyMaxAgeSeconds });
+    expect(await handleStream({ id: "yt_id:gonegonegon", config: { youtubeKey: "KEY" } })).toEqual({ streams: [], cacheMaxAge: AGES.emptyMaxAgeSeconds });
     routeFetch([["/videos?", response({}, { status: 503 })]]);
-    expect(await handleStream({ id: "youstream:failfailfai", config: { youtubeKey: "KEY" } })).toEqual({ streams: [], cacheMaxAge: 60 });
+    expect(await handleStream({ id: "yt_id:failfailfai", config: { youtubeKey: "KEY" } })).toEqual({ streams: [], cacheMaxAge: 60 });
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining("[stream] video failfailfai failed: unavailable"));
   });
 
   test("streams for YouTube items whatever the reader's film and show types", async () => {
     routeFetch([["/videos?", { items: [VIDEO] }]]);
-    const res = await handleStream({ id: "youstream:abcdefghijk", config: { youtubeKey: "KEY", types: [] } });
+    const res = await handleStream({ id: "yt_id:abcdefghijk", config: { youtubeKey: "KEY", types: [] } });
     expect(res.streams.length).toBeGreaterThan(0);
+  });
+
+  test("streams for a video of Stremio's own YouTube add-on, filed under its channel", async () => {
+    routeFetch([["/videos?", { items: [apiVideo("9bZkp7q19f0")] }]]);
+    const iface = createAddonInterface();
+    const res = await iface.get("stream", "channel", "yt_id:UCrDkAvwZum-UTjHmzDI2iIw:9bZkp7q19f0", {}, { youtubeKey: "KEY" });
+    expect(res.streams[0].ytId).toBe("9bZkp7q19f0");
+  });
+});
+
+describe("videos saved before 0.8.0, as YouTube with youstream: ids", () => {
+  const VIDEO = apiVideo("abcdefghijk", { snippet: { title: "How Example Engines Work", channelTitle: "Example Science" } });
+  const CONFIG = { youtubeKey: "KEY", catalogs: [{ trending: "all" }] };
+
+  test("an app still asking with the old manifest's type gets its rows in the old form, which that manifest routes back here", async () => {
+    routeFetch([["/videos?", { items: [VIDEO] }]]);
+    const res = await handleCatalog({ type: "YouTube", id: "trending.all", extra: {}, config: CONFIG });
+    expect(res.metas[0]).toMatchObject({ id: "youstream:abcdefghijk", type: "YouTube", behaviorHints: { defaultVideoId: "youstream:abcdefghijk" } });
+  });
+
+  test("its search row too", async () => {
+    routeFetch([
+      ["/search?", { items: [{ id: { videoId: "abcdefghijk" } }] }],
+      ["/videos?", { items: [VIDEO] }]
+    ]);
+    const searched = await handleCatalog({ type: "YouTube", id: "search", extra: { search: "engines" }, config: CONFIG });
+    expect(searched.metas.map((m) => [m.type, m.id])).toEqual([["YouTube", "youstream:abcdefghijk"]]);
+  }, 10000);
+
+  test("a saved video's page answers with the id and type it was asked for", async () => {
+    routeFetch([["/videos?", { items: [VIDEO] }]]);
+    const res = await handleMeta({ type: "YouTube", id: "youstream:abcdefghijk", config: CONFIG });
+    expect(res.meta).toMatchObject({ id: "youstream:abcdefghijk", type: "YouTube", name: "How Example Engines Work" });
+  });
+
+  test("so does the lower-cased type Nuvio asks with when it looks a saved video's name up again", async () => {
+    routeFetch([["/videos?", { items: [VIDEO] }]]);
+    const res = await handleMeta({ type: "youtube", id: "youstream:abcdefghijk", config: CONFIG });
+    expect(res.meta).toMatchObject({ id: "youstream:abcdefghijk", type: "youtube", name: "How Example Engines Work" });
+  });
+
+  test("and its streams are the same as ever", async () => {
+    routeFetch([["/videos?", { items: [VIDEO] }]]);
+    const iface = createAddonInterface();
+    const res = await iface.get("stream", "YouTube", "youstream:abcdefghijk", {}, CONFIG);
+    expect(res.streams.map((s) => s.ytId || s.externalUrl)[0]).toBe("abcdefghijk");
   });
 });

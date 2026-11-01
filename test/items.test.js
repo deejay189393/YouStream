@@ -3,6 +3,7 @@ const {
   ITEM_PREFIX,
   itemId,
   videoIdOf,
+  isItemType,
   toItem,
   toPreview,
   toMetaPreview,
@@ -42,22 +43,41 @@ const detail = (overrides = {}) =>
   });
 
 describe("item ids", () => {
-  test("the type is YouTube, spelled so, and ids carry the youstream: prefix", () => {
-    expect(ITEM_TYPE).toBe("YouTube");
-    expect(ITEM_PREFIX).toBe("youstream:");
-    expect(itemId("abcdefghijk")).toBe("youstream:abcdefghijk");
+  test("the type is youtube, lower case like movie and series, and ids name YouTube: yt_id: and the video's id", () => {
+    expect(ITEM_TYPE).toBe("youtube");
+    expect(ITEM_PREFIX).toBe("yt_id:");
+    expect(itemId("abcdefghijk")).toBe("yt_id:abcdefghijk");
   });
 
   test.each([
+    ["yt_id:abcdefghijk", "abcdefghijk"],
+    ["yt_id:a-b_c-d_e-f", "a-b_c-d_e-f"],
+    // Before 0.8.0.
     ["youstream:abcdefghijk", "abcdefghijk"],
-    ["youstream:a-b_c-d_e-f", "a-b_c-d_e-f"],
-    ["youstream:short", null],
+    // A video of a channel in Stremio's own YouTube add-on.
+    ["yt_id:UCrDkAvwZum-UTjHmzDI2iIw:9bZkp7q19f0", "9bZkp7q19f0"],
+    // That channel itself is no video.
+    ["yt_id:UCrDkAvwZum-UTjHmzDI2iIw", null],
+    ["yt_id:short", null],
+    ["yt_id:abcdefghijk:1:2", null],
     ["youstream:abcdefghijk:1:2", null],
+    ["yt:abcdefghijk", null],
     ["tt0063350", null],
     ["abcdefghijk", null],
     [null, null]
   ])("videoIdOf(%p)", (id, videoId) => {
     expect(videoIdOf(id)).toBe(videoId);
+  });
+
+  test.each([
+    ["youtube", true],
+    ["YouTube", true],
+    ["YOUTUBE", true],
+    ["channel", false],
+    ["movie", false],
+    [undefined, false]
+  ])("isItemType(%p)", (type, yes) => {
+    expect(isItemType(type)).toBe(yes);
   });
 });
 
@@ -120,8 +140,8 @@ test.each([
 describe("toMetaPreview", () => {
   test("a landscape card that opens straight to the video's streams", () => {
     expect(toMetaPreview(toPreview(toItem(detail())))).toEqual({
-      id: "youstream:abcdefghijk",
-      type: "YouTube",
+      id: "yt_id:abcdefghijk",
+      type: "youtube",
       name: "How Example Engines Work",
       poster: "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg",
       posterShape: "landscape",
@@ -129,7 +149,7 @@ describe("toMetaPreview", () => {
       description: "Example Science\n1.2M views\n\nAn engine, explained.",
       releaseInfo: "2025-03-14",
       runtime: "13 min",
-      behaviorHints: { defaultVideoId: "youstream:abcdefghijk" }
+      behaviorHints: { defaultVideoId: "yt_id:abcdefghijk" }
     });
   });
 
@@ -158,6 +178,16 @@ describe("toMetaPreview", () => {
     expect(toMetaPreview(toItem(detail({ snippet: { title, liveBroadcastContent: "live" } }))).name).toBe(name);
   });
 
+  test("a card can carry the type and id an app asked with, for a video saved before 0.8.0", () => {
+    const card = toMetaPreview(toItem(detail()), { type: "YouTube", id: "youstream:abcdefghijk" });
+    expect(card).toMatchObject({ id: "youstream:abcdefghijk", type: "YouTube", behaviorHints: { defaultVideoId: "youstream:abcdefghijk" } });
+    expect(toFullMeta(toItem(detail()), null, { type: "youtube", id: "youstream:abcdefghijk" })).toMatchObject({
+      id: "youstream:abcdefghijk",
+      type: "youtube",
+      website: "https://www.youtube.com/watch?v=abcdefghijk"
+    });
+  });
+
   test("a title with a 🔴 is left as it is once the stream is over", () => {
     expect(toMetaPreview(toItem(detail({ snippet: { title: "🔴LIVE | Example Game Night" } }))).name).toBe("🔴LIVE | Example Game Night");
   });
@@ -166,8 +196,8 @@ describe("toMetaPreview", () => {
 describe("toFullMeta", () => {
   test("the channel, how widely it has been seen, then the description; the tags and the channel's link", () => {
     expect(toFullMeta(toItem(detail({ status: {}, contentDetails: { licensedContent: true } })))).toEqual({
-      id: "youstream:abcdefghijk",
-      type: "YouTube",
+      id: "yt_id:abcdefghijk",
+      type: "youtube",
       name: "How Example Engines Work",
       poster: "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg",
       posterShape: "landscape",
@@ -179,7 +209,7 @@ describe("toFullMeta", () => {
       genres: ["Science & Technology", "Engines", "How It Works"],
       website: "https://www.youtube.com/watch?v=abcdefghijk",
       links: [{ name: "Example Science", category: "Channel", url: "https://www.youtube.com/channel/UCscience" }],
-      behaviorHints: { defaultVideoId: "youstream:abcdefghijk" }
+      behaviorHints: { defaultVideoId: "yt_id:abcdefghijk" }
     });
   });
 

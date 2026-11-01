@@ -327,7 +327,7 @@ description from what it parsed; to show YouStream's instead, turn on
 A video opened as a YouTube item, from a catalog, search or the library,
 carries no `publishDate`. AIOStreams weighs a stream's age against the
 title's release date, which it looks up itself in TMDB and TVDB; a
-`youstream:` id is neither, so for an item it has no date and takes the title
+`yt_id:` id is neither, so for an item it has no date and takes the title
 to come out tomorrow. Tamtaro's "Info & Other Unwanted" then drops every
 stream published over a week before that as a fake release, which for a
 YouTube item meant any video more than a week old. With no age to weigh, the
@@ -340,21 +340,33 @@ Everything here is YouTube used as YouTube: what you search, ranked the way
 YouTube ranks it, and rows of the searches, channels, playlists and charts
 you choose.
 
-### The type `YouTube`
+### The type `youtube` and `yt_id:` ids
 
-Every video YouStream lists is an item of its own type, **`YouTube`**,
-spelled exactly so, with the id `youstream:<video id>`. A video is not a film
-or an episode, so it gets a type of its own. In Nuvio's library, pick
-**YouTube** in the type list to see every video you saved. The `youstream:`
-prefix is claimed by no other addon, so the app asks YouStream, and only
-YouStream, about these ids, however long after they were saved.
+Every video YouStream lists is an item of its own type, **`youtube`**, lower
+case like `movie` and `series`, with the id **`yt_id:<video id>`**, for
+example `yt_id:B7i390JbgJE`. A video is not a film or an episode, so it gets
+a type of its own; Nuvio shows it as "Youtube" (it capitalizes a type's first
+letter only), and in its library you pick that in the type list to see every
+video you saved.
+
+The id names YouTube, not YouStream, the way a film's `tt` id names IMDb:
+`yt_id:` is the prefix Stremio's own YouTube add-on uses. Any add-on can give
+metadata or streams for the same video, and YouStream gives streams for
+videos other add-ons list, including the channel videos of Stremio's YouTube
+add-on (`yt_id:<channel id>:<video id>`, type `channel`).
 
 The manifest declares this per resource. Metadata is claimed only for type
-`YouTube` and `youstream:` ids, and streams for those and for films and
-shows. Metadata addons are never asked about a video, and YouStream is never
-asked about a film. Nuvio and Stremio both route requests by these
-per-resource types and prefixes. Nuvio matches the type exactly, case
-included.
+`youtube` and `yt_id:` ids, and streams for those and for films and shows.
+Metadata addons are never asked about a video, and YouStream is never asked
+about a film. Nuvio and Stremio both route requests by these per-resource
+types and prefixes, and AIOStreams matches the type exactly, case included.
+
+**Videos saved before 0.8.0** are type `YouTube` with `youstream:` ids. They
+keep working: YouStream still answers their pages and streams, and an app
+still holding the old manifest gets its rows in the old form. Once the app
+reloads the manifest, new rows use `youtube` and `yt_id:`; Nuvio may then
+list the old saved videos under a type of their own, and forget the order
+you gave YouStream's rows on the home screen, since it keys them by type.
 
 ### Search
 
@@ -622,8 +634,8 @@ https://<host>/<your config>/explain/series/<imdb id>:<season>:<episode>.json
 | `GET /:config/configure` | Re-configuration, pre-filled |
 | `GET /manifest.json` | Unconfigured manifest (configuration required) |
 | `GET /:config/manifest.json` | Your manifest |
-| `GET /:config/catalog/YouTube/:id/:extra?.json` | Your catalogs and the search row (`search=…`, `skip=…`) |
-| `GET /:config/meta/YouTube/youstream:<video id>.json` | A YouTube video's details; 404 when it is gone |
+| `GET /:config/catalog/youtube/:id/:extra?.json` | Your catalogs and the search row (`search=…`, `skip=…`) |
+| `GET /:config/meta/youtube/yt_id:<video id>.json` | A YouTube video's details; 404 when it is gone |
 | `GET /:config/stream/:type/:id.json` | Streams for films, episodes and YouTube videos |
 | `GET /:config/explain/:type/:id.json` | The working behind one lookup |
 | `POST /api/check-keys` | Key check for the configure page |
@@ -638,7 +650,8 @@ router. The manifest claims, per resource:
 
 - streams for `movie`, `series` and `anime`, with the id prefixes `tt`,
   `kitsu:` and, only when a TMDB key is available to read them, `tmdb:`;
-- metadata and streams for `YouTube`, with `youstream:`.
+- metadata and streams for `youtube`, with `yt_id:` (and, for videos saved before 0.8.0, `YouTube` with `youstream:`);
+- streams for `channel`, with `yt_id:`, the videos of Stremio's own YouTube add-on.
 
 Its catalogs are yours, then the search row. A catalog id must be in your
 own config to answer, so the addon is no open proxy for YouTube searches.

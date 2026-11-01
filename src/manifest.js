@@ -1,5 +1,5 @@
 const { normalizeConfig, isConfigured, effectiveTmdbKey } = require("./config");
-const { ITEM_TYPE, ITEM_PREFIX } = require("./items");
+const { ITEM_TYPE, ITEM_PREFIX, LEGACY_TYPE, LEGACY_PREFIX, CHANNEL_TYPE } = require("./items");
 const { SKIP_OPTIONS } = require("./catalogs");
 
 /**
@@ -12,12 +12,14 @@ const { SKIP_OPTIONS } = require("./catalogs");
  *
  *   YouTube itself. Catalogs (the reader's searches, channels, playlists and
  *   Trending), a search row, and metadata and streams for every video they
- *   list, as items of the type "YouTube" (items.js). Metadata is claimed for
- *   that type and its "youstream:" ids alone, per resource, so the app never
- *   asks YouStream about a film.
+ *   list, as items of the type "youtube" with yt_id: ids (items.js).
+ *   Metadata is claimed for that type and those ids alone, per resource, so
+ *   the app never asks YouStream about a film. Videos saved before 0.8.0
+ *   ("YouTube", youstream:) are claimed too, and the videos of Stremio's own
+ *   YouTube add-on ("channel", yt_id:) get streams.
  */
 const ADDON_ID = "org.deejay189393.youstream";
-const ADDON_VERSION = "0.7.7";
+const ADDON_VERSION = "0.8.0";
 const ADDON_NAME = "YouStream";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION =
@@ -97,10 +99,16 @@ function catalogsFor(settings) {
   ];
 }
 
+/** The types and id prefixes a YouTube video comes with (items.js). */
+const VIDEO_TYPES = [ITEM_TYPE, LEGACY_TYPE];
+const VIDEO_PREFIXES = [ITEM_PREFIX, LEGACY_PREFIX];
+
 /**
  * What a configured addon serves. Metadata only for YouTube items; streams
  * for those and for films and shows, each resource with its own types and
- * id prefixes, so neither is asked about the other's ids.
+ * id prefixes, so neither is asked about the other's ids. The top-level
+ * types are what the addon lists, so the old type and "channel" appear only
+ * where they are answered.
  */
 function configuredParts(settings) {
   const types = typesFor(settings);
@@ -109,11 +117,11 @@ function configuredParts(settings) {
   return {
     resources: [
       ...(catalogs.length ? ["catalog"] : []),
-      { name: "meta", types: [ITEM_TYPE], idPrefixes: [ITEM_PREFIX] },
-      { name: "stream", types: [...types, ITEM_TYPE], idPrefixes: [...prefixes, ITEM_PREFIX] }
+      { name: "meta", types: VIDEO_TYPES, idPrefixes: VIDEO_PREFIXES },
+      { name: "stream", types: [...types, ...VIDEO_TYPES, CHANNEL_TYPE], idPrefixes: [...prefixes, ...VIDEO_PREFIXES] }
     ],
     types: [...types, ITEM_TYPE],
-    idPrefixes: [...prefixes, ITEM_PREFIX],
+    idPrefixes: [...prefixes, ...VIDEO_PREFIXES],
     catalogs
   };
 }
@@ -166,7 +174,7 @@ function buildInterfaceManifest() {
     description: "Internal routing manifest (not served).",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series", "anime", ITEM_TYPE],
-    idPrefixes: ["tt", "kitsu:", "tmdb:", ITEM_PREFIX],
+    idPrefixes: ["tt", "kitsu:", "tmdb:", ...VIDEO_PREFIXES],
     catalogs: [{ type: ITEM_TYPE, id: SEARCH_CATALOG_ID, name: ADDON_NAME, extra: [{ name: "search", isRequired: true }] }],
     config: [{ key: "youtubeKey", type: "password", title: "YouTube API key" }],
     behaviorHints: { configurable: true, configurationRequired: true }
