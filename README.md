@@ -877,12 +877,14 @@ project, `youstream`, with a service per release channel.
 | Service | Branch | Domain | Region | Variables |
 |---|---|---|---|---|
 | `youstream` | `main` | [youstream.up.railway.app](https://youstream.up.railway.app/configure) | Singapore | `PORT=3000`, `TVDB_API_KEY`, optionally `TMDB_API_KEY`, `REDIS_URL` |
-| `youstream-beta` | `dev` | [youstream-beta.up.railway.app](https://youstream-beta.up.railway.app/configure) | Singapore | the same, plus `RELEASE_CHANNEL=beta` |
+| `youstream-beta` | `beta` | [youstream-beta.up.railway.app](https://youstream-beta.up.railway.app/configure) | Singapore | the same, plus `RELEASE_CHANNEL=beta`, and for profiles `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `SECRET_KEY` |
+| `Postgres` | | private network only | Singapore | Railway's PostgreSQL, beta's profiles |
 
-Work happens on `dev`, which beta deploys on every push; `main` moves only
+Work happens on `beta`, which beta deploys on every push; `main` moves only
 when a release goes to prod. CI runs on both: the tests, on Node 24 like the
-image, and a build of the production image, started and asked for `/health`
-and its manifest.
+image, against a real Redis and PostgreSQL, and a build of the production
+image, started and asked for `/health` and its manifest, and started again
+with profiles on SQLite.
 
 For a cache that survives redeploys, add Railway's Redis to the project and
 set `REDIS_URL=${{Redis.REDIS_URL}}` on each service. Railway's private
