@@ -9,8 +9,10 @@ const { normalizeCatalogs, toStoredCatalogs, SORTS, LENGTHS } = require("./catal
  *
  *     encodeURIComponent(JSON.stringify(config))
  *
- * Nothing is stored on the server. Every setting left at its default is left
- * out, because the whole URL rides on every request an app makes.
+ * -- or, for a reader with a profile, are kept on the server, sealed, and
+ * the segment names the profile instead (profiles/links.js). Either way
+ * every setting left at its default is left out: the whole URL rides on
+ * every request an app makes.
  *
  *   youtubeKey      required -- the reader's YouTube Data API key
  *   tmdbKey         optional -- exact episode runtimes, and tmdb: ids
@@ -337,8 +339,11 @@ function normalizeConfig(config) {
 
 const sameList = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
-/** The URL segment for a config: only what differs from the defaults. */
-function encodeConfig(config) {
+/**
+ * A config as it is kept -- in a link's path segment, or in a profile --
+ * with only what differs from the defaults.
+ */
+function compactConfig(config) {
   const n = normalizeConfig(config);
   const out = { youtubeKey: n.youtubeKey };
   if (n.tmdbKey) out.tmdbKey = n.tmdbKey;
@@ -370,7 +375,12 @@ function encodeConfig(config) {
   if (n.safeSearch !== SAFE_SEARCH[0]) out.safeSearch = n.safeSearch;
   if (n.catalogs.length) out.catalogs = toStoredCatalogs(n.catalogs);
   if (!sameMargin(n.catalogRefresh, DEFAULT_CATALOG_REFRESH)) out.catalogRefresh = formatMargin(n.catalogRefresh);
-  return encodeURIComponent(JSON.stringify(out));
+  return out;
+}
+
+/** The URL segment for a config: only what differs from the defaults. */
+function encodeConfig(config) {
+  return encodeURIComponent(JSON.stringify(compactConfig(config)));
 }
 
 function maybeDecode(raw) {
@@ -411,6 +421,7 @@ function effectiveTmdbKey(settings) {
 
 module.exports = {
   normalizeConfig,
+  compactConfig,
   encodeConfig,
   decodeConfig,
   isConfigured,

@@ -38,7 +38,7 @@ describe("basic routes", () => {
   test("/health", async () => {
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, cache: "memory", imdb: { loaded: false } });
+    expect(res.body).toEqual({ ok: true, cache: "memory", imdb: { loaded: false }, profiles: "off" });
   });
 
   test("/health says when IMDb's data is turned off", async () => {

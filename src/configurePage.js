@@ -29,6 +29,8 @@ const {
   MIN_CATALOG_REFRESH
 } = require("./config");
 const catalogs = require("./catalogs");
+const { PASSWORD_MIN } = require("./profiles/api");
+const { BACKGROUND } = require("./webApp");
 
 /** Where the addon's source lives, linked from the footer. */
 const REPO_URL = "https://github.com/deejay189393/YouStream";
@@ -132,6 +134,201 @@ function keyField({ id, label, value, placeholder }) {
             label
           )}" aria-pressed="false">${EYE_ICON}</button>
         </div>`;
+}
+
+/** A password box with the same show/hide button as a key's. */
+function passwordField({ id, label, autocomplete, name = "", placeholder = "" }) {
+  return `
+        <label class="field" for="${id}"><span class="label-text">${escapeHtml(label)}</span>
+        <div class="key-row">
+          <input type="password" id="${id}"${name ? ` name="${name}"` : ""} autocomplete="${autocomplete}" placeholder="${escapeHtml(
+            placeholder
+          )}" spellcheck="false" autocapitalize="none" />
+          <button type="button" class="key-toggle" data-for="${id}" data-what="password" title="Show password" aria-label="Show ${escapeHtml(
+            label.toLowerCase()
+          )}" aria-pressed="false">${EYE_ICON}</button>
+        </div></label>`;
+}
+
+/** No profiles: what the page is given when the server has none, or the caller says nothing. */
+const NO_PROFILES = {
+  sessionDays: { remembered: 30, max: 90 },
+  enabled: false,
+  unavailable: false,
+  signedIn: null,
+  signInId: null,
+  otherProfile: null,
+  linkWorks: true,
+  source: null,
+  fileName: "",
+  done: null
+};
+
+/** A profile's id as the page shows it: its first eight characters. */
+const shortId = (id) => `${id.slice(0, 8)}…`;
+
+/** The notes at the top of the page, for the mode it is in and how it got there. */
+function profileBanners(p, mode, usable, isReconfigure) {
+  const notes = [];
+  if (p.done === "created") {
+    notes.push(
+      "Your profile is ready. Install YouStream with the link below, once: from now on, whatever you save here reaches your apps without reinstalling."
+    );
+  }
+  if (p.done === "deleted") notes.push("Your profile was deleted, and its install link no longer works.");
+  if (p.enabled && p.unavailable) {
+    notes.push(
+      "Profiles are unavailable right now: YouStream cannot reach its database. Try again in a minute, or make an install link that holds your settings instead."
+    );
+  }
+  if (mode === "signin" && !p.linkWorks) {
+    notes.push("This install link no longer works: its profile was deleted, or the link was replaced. Sign in to see the current one.");
+  }
+  if (mode === "signin" && p.otherProfile) {
+    notes.push(`You're signed in to another profile (${shortId(p.otherProfile)}). Sign in below to switch to this one.`);
+  }
+  if (p.source === "import") {
+    const then = mode === "profile" ? "save to keep them" : usable ? "create your profile to use them" : "generate your link to use them";
+    notes.push(`Imported ${p.fileName ? `“${p.fileName}”` : "a settings file"}: nothing is saved yet. Look the settings over, then ${then}.`);
+  } else if (p.source === "link" && mode === "profile") {
+    notes.push(
+      "These settings come from an install link that carries them itself. Saving makes them your profile's settings, in place of the ones it has."
+    );
+  } else if (isReconfigure && mode !== "profile" && usable) {
+    notes.push(
+      "Editing a setup whose install link carries its settings. Create a profile below for a link that never changes, which you can edit from any device."
+    );
+  } else if (isReconfigure && mode !== "profile") {
+    notes.push("Editing your current setup: everything is pre-filled. Generate a new link and install it to apply your changes.");
+  }
+  return notes.map((text) => `<div class="banner">${escapeHtml(text)}</div>`).join("\n  ");
+}
+
+/** Signed in: who, and the way out. */
+function profileBar(p) {
+  return `
+  <div class="profile-bar">
+    <span><span class="dot" aria-hidden="true"></span>Signed in <span class="muted">· profile <code title="${escapeHtml(
+      p.signedIn.id
+    )}">${escapeHtml(shortId(p.signedIn.id))}</code></span></span>
+    <button type="button" class="ghost-btn" id="signout-btn" aria-expanded="false" aria-controls="signout-panel">Sign out</button>
+  </div>
+  <div class="card small" id="signout-panel" hidden>
+    <label class="check"><input type="checkbox" id="signout-all" />
+      <span><strong>Sign out on all devices</strong><em>Every phone and computer signed in to this profile will have to sign in again. Your install link keeps working.</em></span></label>
+    <div class="btn-row">
+      <button type="button" class="danger-btn" id="signout-confirm">Sign out</button>
+      <button type="button" class="ghost-btn" id="signout-cancel">Cancel</button>
+    </div>
+    <div class="msg" id="signout-msg" role="alert" hidden></div>
+  </div>`;
+}
+
+const stremioLink = (url) => url.replace(/^https?:\/\//, "stremio://");
+
+/** The profile's install link: the one thing to put in an app, once. */
+function installCard(p) {
+  const url = p.signedIn.installUrl;
+  return `
+  <div class="card" id="install-card">
+    <h2>Your install link</h2>
+    <p class="lead">Install it once, in Stremio, Nuvio or AIOStreams. It never changes: whatever you save here reaches your apps without reinstalling.</p>
+    <a id="profile-install" class="install-btn" href="${escapeHtml(stremioLink(url))}">Install in Stremio</a>
+    <div class="url-row">
+      <input id="profile-url" type="text" readonly value="${escapeHtml(url)}" aria-label="Your install link" />
+      <button type="button" id="profile-copy">Copy</button>
+    </div>
+    <div class="hint">In Nuvio or AIOStreams, paste the copied link where addons are added. Using an older YouStream link there? Swap it for this one, once.<br />
+    Keep it private: whoever has it can use YouStream on your YouTube quota, though they can never see or change your settings or keys.</div>
+  </div>`;
+}
+
+/** Sign in: open from an install link, folded away on a new setup. */
+/** How long "stay signed in" lasts, as the host set it. */
+const rememberText = ({ remembered, max }) => `For ${remembered} days from when you last use YouStream here, ${max} at most.`;
+
+function signInCard(p, mode) {
+  const remember = rememberText(p.sessionDays);
+  return `
+  <details class="card" id="signin-card"${mode === "signin" ? " open" : ""}>
+    <summary>${mode === "signin" ? "Sign in to your profile" : "Have a profile? Sign in"}</summary>
+    <form id="signin-form" novalidate>
+      <p class="lead">To change your settings from any device. Your apps keep the same install link.</p>
+      <label class="field" for="signin-id"><span class="label-text">Profile ID</span>
+        <input type="text" id="signin-id" name="username" autocomplete="username" autocapitalize="none" spellcheck="false"
+          placeholder="1b4e28ba-2fa1-41d2-883f-0016d3cca427" value="${escapeHtml(p.signInId || "")}" /></label>
+      ${passwordField({ id: "signin-password", label: "Password", autocomplete: "current-password", name: "password" })}
+      <label class="check stay"><input type="checkbox" id="signin-remember" checked />
+        <span><strong>Stay signed in on this device</strong><em>${remember}</em></span></label>
+      <button type="submit" class="submit" id="signin-btn">Sign in</button>
+      <div class="msg" id="signin-msg" role="alert" hidden></div>
+      <div class="hint">Your profile ID is in your install link, after the address and before the dot: you can paste the whole link. A password cannot be reset, as it is what unlocks your settings. If yours is lost, <a href="/configure">start a new setup</a> and install its link in place of the old one.</div>
+    </form>
+  </details>`;
+}
+
+/** Creating a profile: the end of the form for a new setup. */
+function createSection(p) {
+  return `
+    <div class="card create" id="create-card">
+      <h2>Your profile</h2>
+      <p class="lead">Your settings are kept on this server, encrypted, behind a password. You get one install link that never changes: change anything here later, from any device, and your apps use it without reinstalling.</p>
+      <input type="text" id="create-id" name="username" autocomplete="username" readonly hidden />
+      ${passwordField({ id: "create-password", label: `Password (at least ${PASSWORD_MIN} characters)`, autocomplete: "new-password", name: "new-password" })}
+      ${passwordField({ id: "create-password2", label: "The same password again", autocomplete: "new-password" })}
+      <label class="check stay"><input type="checkbox" id="create-remember" checked />
+        <span><strong>Stay signed in on this device</strong><em>${rememberText(p.sessionDays)}</em></span></label>
+      <div class="hint">Let your browser or password manager save it: a password cannot be reset, as it is what unlocks your settings.</div>
+    </div>`;
+}
+
+/** Export and import, in every mode but signing in. */
+function backupsCard() {
+  return `
+  <div class="card" id="backups-card">
+    <h2>Backups</h2>
+    <p class="lead">Save your settings to a file, or fill the form from one. An import is only saved when you save.</p>
+    <label class="check"><input type="checkbox" id="export-no-keys" checked />
+      <span><strong>Leave my keys out of the file</strong><em>Your YouTube and TMDB keys. Importing a file without keys keeps the keys already filled in.</em></span></label>
+    <div class="btn-row">
+      <button type="button" class="ghost-btn" id="export-btn">Export settings</button>
+      <button type="button" class="ghost-btn" id="import-btn">Import settings</button>
+      <input type="file" id="import-file" accept="application/json,.json" hidden />
+    </div>
+    <div class="msg" id="backup-msg" role="alert" hidden></div>
+  </div>`;
+}
+
+/** The profile's password, link and existence: each asks for the password. */
+function securityCard() {
+  return `
+  <details class="card" id="security-card">
+    <summary>Profile and security</summary>
+    <div class="sec">
+      <h3>Change your password</h3>
+      <p class="lead">Signs out every other device. Your install link stays the same.</p>
+      ${passwordField({ id: "pw-current", label: "Current password", autocomplete: "current-password" })}
+      ${passwordField({ id: "pw-new", label: `New password (at least ${PASSWORD_MIN} characters)`, autocomplete: "new-password" })}
+      ${passwordField({ id: "pw-new2", label: "The new password again", autocomplete: "new-password" })}
+      <button type="button" class="ghost-btn" id="pw-btn">Change password</button>
+      <div class="msg" id="pw-msg" role="alert" hidden></div>
+    </div>
+    <div class="sec">
+      <h3>Replace your install link</h3>
+      <p class="lead">If your link got out. The old link stops working at once, so install YouStream again with the new one wherever you use it.</p>
+      ${passwordField({ id: "link-password", label: "Password", autocomplete: "current-password" })}
+      <button type="button" class="ghost-btn" id="link-btn">Replace install link</button>
+      <div class="msg" id="link-msg" role="alert" hidden></div>
+    </div>
+    <div class="sec">
+      <h3>Delete your profile</h3>
+      <p class="lead">Deletes your settings from this server, and your install link stops working. Export your settings first if you may want them again.</p>
+      ${passwordField({ id: "delete-password", label: "Password", autocomplete: "current-password" })}
+      <label class="check"><input type="checkbox" id="delete-sure" /><span><strong>Yes, delete my profile</strong></span></label>
+      <button type="button" class="danger-btn" id="delete-btn">Delete profile</button>
+      <div class="msg" id="delete-msg" role="alert" hidden></div>
+    </div>
+  </details>`;
 }
 
 const MARGIN_ROWS = [
@@ -258,9 +455,23 @@ function options(list, selected, anyLabel) {
  *                                   the data sources' attribution, shown in
  *                                   the footer as their terms ask
  */
-function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = [] }) {
+function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = [], profile = {} }) {
   const isReconfigure = Boolean(existing);
   const s = normalizeConfig(existing);
+  const p = { ...NO_PROFILES, ...profile };
+  // profile: signed in, editing it. signin: opened from a profile's install
+  // link by someone not signed in to it. new: everything else.
+  const mode = p.signedIn ? "profile" : p.signInId ? "signin" : "new";
+  // Whether a profile can be made or signed in to right now.
+  const usable = p.enabled && !p.unavailable;
+  const clientProfile = {
+    mode,
+    usable,
+    id: p.signedIn ? p.signedIn.id : null,
+    imported: p.source === "import",
+    passwordMin: PASSWORD_MIN
+  };
+  const submitLabel = mode === "profile" ? "Save changes" : usable ? "Create profile and get install link" : "Generate install link";
   // A new setup starts with no catalogs, for the reader to add the rows
   // they want; reconfiguring shows exactly what was saved. Search is on
   // unless switched off, either way.
@@ -277,6 +488,11 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>${ADDON_NAME} — Configure</title>
 <link rel="icon" href="/logo.png" />
+<link rel="manifest" href="/app.webmanifest" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta name="theme-color" content="${BACKGROUND}" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="${ADDON_NAME}" />
 <style>
   :root {
     --bg: #0f1013; --card: #17181d; --border: #2b2d36; --field: #0c0d10;
@@ -461,6 +677,50 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .inline-inputs input { flex: 1 1 auto; min-width: 0; }
   .inline-inputs select { width: auto; flex: 0 0 auto; }
   .note-warn { color: var(--warn); }
+  [hidden] { display: none !important; }
+  .profile-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px 10px 14px; margin-bottom: 12px; font-size: 14px;
+  }
+  .profile-bar .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ecf8e; margin-right: 8px; vertical-align: middle; }
+  .profile-bar .muted { color: var(--muted); }
+  .profile-bar code, .sec code { font-size: 12.5px; color: var(--text); }
+  .card.small { padding: 14px 16px; }
+  .ghost-btn, .danger-btn {
+    background: var(--field); border: 1px solid var(--border); color: var(--text); padding: 9px 14px;
+    border-radius: 9px; font-size: 14px; cursor: pointer; font-family: inherit;
+  }
+  .ghost-btn:hover { border-color: var(--link); }
+  .danger-btn { color: #ff8d8d; border-color: #6b2630; }
+  .ghost-btn:disabled, .danger-btn:disabled { opacity: .6; cursor: progress; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .link-btn { background: none; border: none; color: var(--link); font-size: 13px; cursor: pointer; padding: 0; margin-top: 12px; font-family: inherit; text-decoration: underline; }
+  .msg { font-size: 13px; margin-top: 10px; line-height: 1.5; }
+  .msg.good { color: #6fdca6; }
+  .msg.bad { color: #ff6b6b; }
+  .install-btn {
+    display: block; text-align: center; text-decoration: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; padding: 14px;
+    border-radius: 10px; font-weight: 600; margin-bottom: 10px;
+  }
+  .stay { margin: 4px 0 14px; }
+  #backups-card { margin-top: 18px; }
+  #signin-card .submit { margin-top: 2px; }
+  .sec { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
+  .sec:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+  .sec h3 { font-size: 14px; margin: 0 0 4px; }
+  .sec .check { margin: 4px 0 12px; }
+  .header-actions { margin-top: 12px; }
+  .save-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; align-items: center; justify-content: center; gap: 14px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); background: rgba(23,24,29,.96); border-top: 1px solid var(--border);
+    font-size: 14px; color: var(--muted);
+  }
+  #save-bar-btn {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; border: 0; border-radius: 9px;
+    padding: 10px 22px; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  body.has-save-bar .wrap { padding-bottom: 110px; }
 </style>
 </head>
 <body>
@@ -469,10 +729,15 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     <img src="/logo.png" alt="${ADDON_NAME}" />
     <h1>${ADDON_NAME}</h1>
     <p>${escapeHtml(DESCRIPTION)}</p>
+    <div class="header-actions"><button type="button" class="ghost-btn" id="install-app" hidden>Install the ${ADDON_NAME} app</button></div>
   </header>
+  ${mode === "profile" ? profileBar(p) : ""}
+  ${profileBanners(p, mode, usable, isReconfigure)}
+  ${mode === "profile" ? installCard(p) : ""}
+  ${usable && mode !== "profile" ? signInCard(p, mode) : ""}
+  ${mode === "signin" ? '<p class="hint">Not your profile, or starting over? <a href="/configure">Start a new setup</a>.</p>' : ""}
 
-  ${isReconfigure ? '<div class="banner">Editing your current setup: everything is pre-filled. Generate a new link and install it to apply your changes.</div>' : ""}
-
+  <div id="setup"${mode === "signin" ? " hidden" : ""}>
   <form id="config-form" novalidate>
     <div class="card">
       <h2>YouTube API key</h2>
@@ -489,7 +754,11 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
           <li>Go to <a href="${YOUTUBE_CREDENTIALS_URL}" target="_blank" rel="noopener">Credentials</a>, then <strong>Create credentials &rarr; API key</strong>.</li>
           <li>Leave <strong>Application restrictions</strong> at <strong>None</strong>: this server makes the calls, not your browser. Limiting the key to the YouTube Data API v3 is fine.</li>
         </ol>
-        Your key is kept only inside your personal addon link; YouStream never stores it (see the <a href="/terms" target="_blank" rel="noopener">privacy policy</a>).
+        ${
+          p.enabled
+            ? "With a profile, your key is kept on this server, encrypted, and only your password or your install link opens it; without one, it lives only inside your install link"
+            : "Your key is kept only inside your personal addon link; YouStream never stores it"
+        } (see the <a href="/terms" target="_blank" rel="noopener">privacy policy</a>).
       </div>
     </div>
 
@@ -709,10 +978,17 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       </details>
     </div>
 
-    <label class="check agree"><input type="checkbox" id="agree"${isReconfigure ? " checked" : ""} />
+    ${usable && mode === "new" ? createSection(p) : ""}
+    <label class="check agree"${mode === "profile" ? " hidden" : ""}><input type="checkbox" id="agree"${isReconfigure ? " checked" : ""} />
       <span>I agree to the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a> and to YouStream's <a href="/terms" target="_blank" rel="noopener">terms of use and privacy policy</a>.</span></label>
 
-    <button type="submit" class="submit" id="submit-btn">Generate install link</button>
+    <button type="submit" class="submit" id="submit-btn">${submitLabel}</button>
+    ${
+      usable && mode === "new"
+        ? '<button type="button" class="link-btn" id="no-profile-btn">Or make an install link that carries your settings, without a profile</button>'
+        : ""
+    }
+    <div class="msg" id="save-status" role="status" hidden></div>
     <div class="error" id="error" style="display:none" role="alert"></div>
   </form>
 
@@ -727,6 +1003,10 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       <div class="hint">In Nuvio, or if the button does not open Stremio, paste the copied URL into the app's add-addon box. Keep it private: it contains your keys.</div>
     </div>
   </div>
+  ${backupsCard()}
+  ${mode === "profile" ? securityCard() : ""}
+  </div>
+  ${mode === "profile" ? '<div class="save-bar" id="save-bar" hidden><span>Unsaved changes</span><button type="button" class="ghost-btn" id="save-bar-discard">Discard</button><button type="button" id="save-bar-btn">Save</button></div>' : ""}
 
   <footer>
     <a href="${REPO_URL}" target="_blank" rel="noopener">
@@ -858,7 +1138,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       var reveal = input.type === "password";
       input.type = reveal ? "text" : "password";
       btn.setAttribute("aria-pressed", reveal ? "true" : "false");
-      btn.setAttribute("title", reveal ? "Hide key" : "Show key");
+      btn.setAttribute("title", (reveal ? "Hide " : "Show ") + (btn.getAttribute("data-what") || "key"));
     });
   });
 
@@ -1309,11 +1589,12 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   syncSearch();
   renderCatalogs();
 
-  // Reads the form into a config, or returns an error message.
-  function readConfig() {
+  // Reads the form into a config, or returns an error message. For an
+  // export, a missing key and the unticked terms box are no error.
+  function readConfig(forExport) {
     var youtubeKey = document.getElementById("youtube-key").value.trim();
     var tmdbKey = document.getElementById("tmdb-key").value.trim();
-    if (!youtubeKey) return "Enter your YouTube API key.";
+    if (!youtubeKey && !forExport) return "Enter your YouTube API key.";
     if (!isKeyText(youtubeKey)) return "That YouTube key has characters a key never has. Copy it again, without spaces.";
     if (tmdbKey && !isKeyText(tmdbKey)) return "That TMDB key has characters a key never has. Copy it again, without spaces.";
 
@@ -1324,7 +1605,8 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       return "Choose something for YouStream to do: movies, series, YouTube search, or a catalog.";
     }
 
-    var config = { youtubeKey: youtubeKey };
+    var config = {};
+    if (youtubeKey) config.youtubeKey = youtubeKey;
     if (tmdbKey) config.tmdbKey = tmdbKey;
 
     var rows = document.querySelectorAll(".margin-row");
@@ -1408,7 +1690,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     var refresh = parseFloat(refreshValue.value.trim()) + refreshUnit.value;
     if (refresh !== YT.defaultRefresh.value + YT.defaultRefresh.unit) config.catalogRefresh = refresh;
 
-    if (!document.getElementById("agree").checked) {
+    if (!document.getElementById("agree").checked && !forExport) {
       return "To install YouStream, agree to the YouTube Terms of Service and YouStream's terms of use and privacy policy.";
     }
     return config;
@@ -1430,21 +1712,32 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     if (resultEl.scrollIntoView) resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  // A button at work: disabled, saying what it is doing; then as it was.
+  function busy(button, text) {
+    if (!button.getAttribute("data-label")) button.setAttribute("data-label", button.textContent);
+    button.disabled = true;
+    button.textContent = text;
+  }
+
+  function idle(button) {
+    button.disabled = false;
+    button.textContent = button.getAttribute("data-label") || button.textContent;
+  }
+
   function finishChecking() {
-    submitBtn.disabled = false;
-    submitBtn.textContent = "Generate install link";
+    idle(submitBtn);
   }
 
   // Asks the server to try the keys, so a bad one is caught here rather
-  // than discovered later as an empty stream list. If the check itself
-  // cannot run, the link is built anyway: the keys may well be fine.
-  function checkKeys(config) {
+  // than discovered later as an empty stream list, then hands the config on
+  // with a warning, if any. If the check itself cannot run, it is handed on
+  // anyway: the keys may well be fine.
+  function checkKeys(config, then) {
     if (typeof fetch !== "function") {
-      showResult(config, "");
+      then(config, "");
       return;
     }
-    submitBtn.disabled = true;
-    submitBtn.textContent = "Checking your keys...";
+    busy(submitBtn, "Checking your keys...");
     fetch("/api/check-keys", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1455,23 +1748,457 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
         finishChecking();
         if (KEY_PROBLEMS[status.youtube]) return showError(KEY_PROBLEMS[status.youtube]);
         if (status.tmdb === "invalid") return showError(TMDB_INVALID);
-        showResult(config, status.youtube === "quota" ? QUOTA_WARNING : "");
+        then(config, status.youtube === "quota" ? QUOTA_WARNING : "");
       })
       .catch(function () {
         finishChecking();
-        showResult(config, "");
+        then(config, "");
       });
+  }
+
+  // --- Profiles -------------------------------------------------------
+  // PROFILE.mode: "profile" (signed in, editing it), "signin" (opened from
+  // a profile's install link, not signed in to it) or "new".
+  var PROFILE = ${jsonForScript(clientProfile)};
+  var noProfile = !PROFILE.usable;
+  var leaving = false;
+  var dirty = false;
+  var saveStatus = document.getElementById("save-status");
+  var saveBar = document.getElementById("save-bar");
+
+  // A note under a control: good, bad, or gone when there is no text.
+  function say(el, text, kind) {
+    el.textContent = text || "";
+    el.className = "msg" + (kind ? " " + kind : "");
+    el.hidden = !text;
+  }
+
+  // Leaves the page without the unsaved-changes question.
+  function go(url) {
+    leaving = true;
+    window.location.href = url;
+  }
+
+  // Calls the profile API: the answer's data, or an Error with its message.
+  function api(method, path, body) {
+    return fetch(path, {
+      method: method,
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body || {})
+    }).then(function (res) {
+      if (res.status === 204) return {};
+      return res.json().then(null, function () { return {}; }).then(function (data) {
+        if (!res.ok) throw new Error(data.error || "YouStream answered with an error (" + res.status + "). Try again.");
+        return data;
+      });
+    }, function () {
+      throw new Error("YouStream could not be reached. Check your connection and try again.");
+    });
+  }
+
+  // Offers the profile ID and password to the browser's password manager,
+  // where it can take them (Chrome, Android); waits at most a few seconds.
+  function rememberLogin(id, password) {
+    var stored = null;
+    try {
+      if (window.PasswordCredential && navigator.credentials && navigator.credentials.store) {
+        stored = navigator.credentials.store(new window.PasswordCredential({ id: id, password: password, name: "YouStream profile" }));
+      }
+    } catch (e) {
+      stored = null;
+    }
+    return Promise.race([
+      Promise.resolve(stored).then(null, function () {}),
+      new Promise(function (done) { setTimeout(done, 2500); })
+    ]);
+  }
+
+  function isProfileId(text) {
+    if (text.length !== 36) return false;
+    for (var i = 0; i < 36; i++) {
+      var ch = text.charAt(i);
+      var dash = i === 8 || i === 13 || i === 18 || i === 23;
+      if (dash ? ch !== "-" : "0123456789abcdef".indexOf(ch) === -1) return false;
+    }
+    return true;
+  }
+
+  // The profile ID in what was typed or pasted: the ID, or a whole install link.
+  function profileIdFrom(text) {
+    var t = String(text || "").trim().toLowerCase();
+    for (var i = 0; i + 36 <= t.length; i++) {
+      if (isProfileId(t.slice(i, i + 36))) return t.slice(i, i + 36);
+    }
+    return "";
+  }
+
+  function markDirty() {
+    if (PROFILE.mode !== "profile" || dirty) return;
+    dirty = true;
+    saveBar.hidden = false;
+    document.body.className = "has-save-bar";
+    say(saveStatus, "");
+  }
+
+  function markClean() {
+    dirty = false;
+    if (saveBar) saveBar.hidden = true;
+    document.body.className = "";
+  }
+
+  // Any edit to the form: typing, choosing, and every button but the
+  // eye on a key and the preview's tabs.
+  form.addEventListener("input", markDirty);
+  form.addEventListener("change", markDirty);
+  form.addEventListener("click", function (e) {
+    var t = e.target;
+    while (t && t !== form && t.tagName !== "BUTTON") t = t.parentNode;
+    if (!t || t === form || t.type === "submit") return;
+    var cls = " " + t.className + " ";
+    if (cls.indexOf(" key-toggle ") !== -1 || cls.indexOf(" preview-tab ") !== -1) return;
+    markDirty();
+  });
+  window.addEventListener("beforeunload", function (e) {
+    if (!dirty || leaving) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
+  if (PROFILE.imported) {
+    markDirty();
+    // Reloading should not post the file again: the page reads as /configure.
+    if (window.history && window.history.replaceState) window.history.replaceState(null, "", "/configure");
+  }
+  if (saveBar) {
+    document.getElementById("save-bar-btn").addEventListener("click", function () { submitBtn.click(); });
+    // Back to the profile as saved.
+    document.getElementById("save-bar-discard").addEventListener("click", function () { go("/configure"); });
+  }
+
+  // Saves the signed-in profile's settings.
+  function saveProfile(config, warning) {
+    busy(submitBtn, "Saving...");
+    api("PUT", "/api/profile", { config: config }).then(function (data) {
+      idle(submitBtn);
+      markClean();
+      say(
+        saveStatus,
+        "Saved. " +
+          (data.manifestChanged
+            ? "What YouStream offers changed (its rows, or what it finds streams for): Stremio keeps the old list until you reinstall YouStream there; Nuvio picks it up the next time it starts, and AIOStreams within 6 hours."
+            : "No need to reinstall: your apps use the new settings from their next request.") +
+          (warning ? " " + warning : ""),
+        "good"
+      );
+    }, function (err) {
+      idle(submitBtn);
+      showError(err.message);
+    });
+  }
+
+  // What is wrong with the new profile's passwords, if anything.
+  function passwordProblem() {
+    var pw = document.getElementById("create-password").value;
+    if (pw.length < PROFILE.passwordMin) return "Choose a password of at least " + PROFILE.passwordMin + " characters for your profile.";
+    if (pw !== document.getElementById("create-password2").value) return "The two passwords are not the same.";
+    return "";
+  }
+
+  // Creates the profile, signs this browser in, and opens it.
+  function createProfile(config) {
+    var pw = document.getElementById("create-password").value;
+    busy(submitBtn, "Creating your profile...");
+    api("POST", "/api/profile", { config: config, password: pw, remember: document.getElementById("create-remember").checked })
+      .then(function (data) {
+        document.getElementById("create-id").value = data.id;
+        return rememberLogin(data.id, pw).then(function () { go("/configure?done=created"); });
+      }, function (err) {
+        idle(submitBtn);
+        showError(err.message);
+      });
+  }
+
+  var noProfileBtn = document.getElementById("no-profile-btn");
+  if (noProfileBtn) {
+    noProfileBtn.addEventListener("click", function () {
+      noProfile = !noProfile;
+      document.getElementById("create-card").hidden = noProfile;
+      submitBtn.textContent = noProfile ? "Generate install link" : "Create profile and get install link";
+      submitBtn.removeAttribute("data-label");
+      noProfileBtn.textContent = noProfile
+        ? "Create a profile instead: one link that never changes"
+        : "Or make an install link that carries your settings, without a profile";
+      hideError();
+    });
   }
 
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     hideError();
+    say(saveStatus, "");
     var config = readConfig();
     if (typeof config === "string") {
       showError(config);
       return;
     }
-    checkKeys(config);
+    if (PROFILE.mode === "profile") return checkKeys(config, saveProfile);
+    if (!noProfile) {
+      var problem = passwordProblem();
+      if (problem) return showError(problem);
+      return checkKeys(config, createProfile);
+    }
+    checkKeys(config, showResult);
+  });
+
+  // Signing in.
+  var signinForm = document.getElementById("signin-form");
+  if (signinForm) {
+    signinForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var msg = document.getElementById("signin-msg");
+      var btn = document.getElementById("signin-btn");
+      var id = profileIdFrom(document.getElementById("signin-id").value);
+      var password = document.getElementById("signin-password").value;
+      if (!id) return say(msg, "Enter your profile ID. It is in your install link, before the dot.", "bad");
+      if (!password) return say(msg, "Enter your password.", "bad");
+      say(msg, "");
+      busy(btn, "Signing in...");
+      api("POST", "/api/profile/session", { id: id, password: password, remember: document.getElementById("signin-remember").checked })
+        .then(function () {
+          return rememberLogin(id, password).then(function () { go("/configure"); });
+        }, function (err) {
+          idle(btn);
+          say(msg, err.message, "bad");
+        });
+    });
+  }
+
+  // Signing out: this device, or every one.
+  var signoutBtn = document.getElementById("signout-btn");
+  if (signoutBtn) {
+    var signoutPanel = document.getElementById("signout-panel");
+    signoutBtn.addEventListener("click", function () {
+      signoutPanel.hidden = !signoutPanel.hidden;
+      signoutBtn.setAttribute("aria-expanded", signoutPanel.hidden ? "false" : "true");
+    });
+    document.getElementById("signout-cancel").addEventListener("click", function () {
+      signoutPanel.hidden = true;
+      signoutBtn.setAttribute("aria-expanded", "false");
+    });
+    document.getElementById("signout-confirm").addEventListener("click", function () {
+      var everywhere = document.getElementById("signout-all").checked;
+      var btn = document.getElementById("signout-confirm");
+      busy(btn, "Signing out...");
+      api("DELETE", everywhere ? "/api/profile/sessions" : "/api/profile/session").then(function () {
+        go("/configure");
+      }, function (err) {
+        idle(btn);
+        say(document.getElementById("signout-msg"), err.message, "bad");
+      });
+    });
+  }
+
+  function copyText(input, button) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(input.value).then(function () {
+        button.textContent = "Copied!";
+        setTimeout(function () { button.textContent = "Copy"; }, 1500);
+      }).catch(function () { input.select(); });
+    } else {
+      input.select();
+    }
+  }
+
+  var profileCopy = document.getElementById("profile-copy");
+  if (profileCopy) {
+    profileCopy.addEventListener("click", function () { copyText(document.getElementById("profile-url"), profileCopy); });
+  }
+
+  // The profile's password, link and existence, each confirmed with the password.
+  function secured(buttonId, msgId, run) {
+    var btn = document.getElementById(buttonId);
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var msg = document.getElementById(msgId);
+      var problem = run.check();
+      if (problem) return say(msg, problem, "bad");
+      say(msg, "");
+      busy(btn, run.busy);
+      run.call().then(function (data) {
+        idle(btn);
+        run.done(data, msg);
+      }, function (err) {
+        idle(btn);
+        say(msg, err.message, "bad");
+      });
+    });
+  }
+
+  function value(id) {
+    return document.getElementById(id).value;
+  }
+
+  secured("pw-btn", "pw-msg", {
+    busy: "Changing...",
+    check: function () {
+      if (!value("pw-current")) return "Enter your current password.";
+      if (value("pw-new").length < PROFILE.passwordMin) return "Choose a new password of at least " + PROFILE.passwordMin + " characters.";
+      if (value("pw-new") !== value("pw-new2")) return "The two new passwords are not the same.";
+      return "";
+    },
+    call: function () {
+      return api("POST", "/api/profile/password", { currentPassword: value("pw-current"), newPassword: value("pw-new") });
+    },
+    done: function (data, msg) {
+      rememberLogin(PROFILE.id, value("pw-new"));
+      ["pw-current", "pw-new", "pw-new2"].forEach(function (id) { document.getElementById(id).value = ""; });
+      say(msg, "Password changed. Every other device was signed out; this one stays signed in. Your install link is the same.", "good");
+    }
+  });
+
+  secured("link-btn", "link-msg", {
+    busy: "Replacing...",
+    check: function () {
+      return value("link-password") ? "" : "Enter your password.";
+    },
+    call: function () {
+      return api("POST", "/api/profile/link", { password: value("link-password") });
+    },
+    done: function (data, msg) {
+      document.getElementById("link-password").value = "";
+      var schemeEnd = data.installUrl.indexOf("://");
+      document.getElementById("profile-url").value = data.installUrl;
+      document.getElementById("profile-install").href = "stremio://" + data.installUrl.slice(schemeEnd + 3);
+      say(msg, "Replaced: the old link no longer works. Install YouStream again with the new link above, wherever you use it.", "good");
+    }
+  });
+
+  secured("delete-btn", "delete-msg", {
+    busy: "Deleting...",
+    check: function () {
+      if (!value("delete-password")) return "Enter your password.";
+      return document.getElementById("delete-sure").checked ? "" : "Tick the box to confirm.";
+    },
+    call: function () {
+      return api("DELETE", "/api/profile", { password: value("delete-password") });
+    },
+    done: function () {
+      go("/configure?done=deleted");
+    }
+  });
+
+  // Backups: the form to a file, and a file to the form.
+  var SETTINGS_KEYS = ["youtubeKey", "tmdbKey", "movieMargin", "partnerMovieMargin", "episodeMargin", "typicalMargin", "playback",
+    "playbackVersion", "types", "maxResults", "minViews", "region", "audioLanguage", "embeddableOnly", "officialOnly", "exclude",
+    "excludeDescription", "movieQuery", "episodeQuery", "format", "nameTemplate", "descriptionTemplate", "search", "searchSort",
+    "searchLength", "safeSearch", "catalogs", "catalogRefresh"];
+  var backupMsg = document.getElementById("backup-msg");
+
+  function pad(n) {
+    return (n < 10 ? "0" : "") + n;
+  }
+
+  function stamp(d) {
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "." + pad(d.getHours()) + "-" + pad(d.getMinutes()) + "-" + pad(d.getSeconds());
+  }
+
+  document.getElementById("export-btn").addEventListener("click", function () {
+    var config = readConfig(true);
+    if (typeof config === "string") return say(backupMsg, config, "bad");
+    var withoutKeys = document.getElementById("export-no-keys").checked;
+    if (withoutKeys) {
+      delete config.youtubeKey;
+      delete config.tmdbKey;
+    }
+    var file = { youstream: "settings", version: 1, exportedAt: new Date().toISOString(), keysIncluded: !withoutKeys, config: config };
+    var link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: "application/json" }));
+    link.download = "youstream-settings-" + stamp(new Date()) + ".json";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+    say(backupMsg, withoutKeys ? "Exported, without your keys." : "Exported, with your keys in it: keep the file private.", "good");
+  });
+
+  // The settings a file holds: an export's, or a bare settings object.
+  function settingsIn(parsed) {
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    var exported = parsed.youstream === "settings";
+    var config = exported ? parsed.config : parsed;
+    if (!config || typeof config !== "object" || Array.isArray(config)) return null;
+    var known = SETTINGS_KEYS.some(function (key) { return Object.prototype.hasOwnProperty.call(config, key); });
+    return known || exported ? config : null;
+  }
+
+  // Sends the settings to be shown in the form, for the reader to look
+  // over and save: a form post, so the keys stay out of any URL.
+  function showImported(config, fileName) {
+    var post = document.createElement("form");
+    post.method = "post";
+    post.action = "/configure";
+    post.hidden = true;
+    [["config", JSON.stringify(config)], ["file", fileName]].forEach(function (field) {
+      var input = document.createElement("input");
+      input.type = "hidden";
+      input.name = field[0];
+      input.value = field[1];
+      post.appendChild(input);
+    });
+    document.body.appendChild(post);
+    leaving = true;
+    post.submit();
+  }
+
+  var importFile = document.getElementById("import-file");
+  document.getElementById("import-btn").addEventListener("click", function () { importFile.click(); });
+  importFile.addEventListener("change", function () {
+    var file = importFile.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var config = null;
+      try {
+        config = settingsIn(JSON.parse(reader.result));
+      } catch (e) {
+        config = null;
+      }
+      importFile.value = "";
+      if (!config) return say(backupMsg, "That file holds no YouStream settings. Choose a file exported here.", "bad");
+      // Keys the file leaves out stay as they are.
+      var current = readConfig(true);
+      var merged = {};
+      Object.keys(config).forEach(function (key) { merged[key] = config[key]; });
+      if (typeof current === "object") {
+        if (!merged.youtubeKey && current.youtubeKey) merged.youtubeKey = current.youtubeKey;
+        if (!merged.tmdbKey && current.tmdbKey) merged.tmdbKey = current.tmdbKey;
+      }
+      showImported(merged, file.name);
+    };
+    reader.readAsText(file);
+  });
+
+  // The page as an app: offline note and icons (sw.js), and an install
+  // button where the browser offers to install it.
+  if (navigator.serviceWorker && navigator.serviceWorker.register) {
+    navigator.serviceWorker.register("/sw.js").then(null, function () {});
+  }
+  var installApp = document.getElementById("install-app");
+  var installPrompt = null;
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault();
+    installPrompt = e;
+    installApp.hidden = false;
+  });
+  installApp.addEventListener("click", function () {
+    if (!installPrompt) return;
+    var prompt = installPrompt;
+    installPrompt = null;
+    installApp.hidden = true;
+    prompt.prompt();
+  });
+  window.addEventListener("appinstalled", function () {
+    installApp.hidden = true;
   });
 
   copyBtn.addEventListener("click", function () {

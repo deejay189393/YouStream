@@ -57,9 +57,33 @@
  *                               page for questions and removal requests
  *                               (default: the project's GitHub issues)
  *
+ *   DATABASE_URL                where profiles are kept: a SQLite file,
+ *                               sqlite:///data/youstream.db (on Railway, in a
+ *                               volume), or postgres://user:pass@host/db (see
+ *                               storage/index.js). With SECRET_KEY, turns
+ *                               profiles on; without both, the install link
+ *                               carries the settings, as before
+ *   SECRET_KEY                  64 hexadecimal characters (32 random bytes),
+ *                               which every profile's keys are bound to. Keep
+ *                               it secret and never change it: every profile
+ *                               would stop opening
+ *   PROFILE_SESSION_TTL         how long a remembered sign-in lasts unused
+ *                               (default 30d)
+ *   PROFILE_SESSION_MAX_TTL     how long it lasts however much it is used
+ *                               (default 90d)
+ *   PROFILE_PRUNE_AFTER         delete a profile no app or sign-in has used
+ *                               for this long (default off: kept until its
+ *                               owner deletes it)
+ *   TRUST_PROXY                 how many proxies stand in front of YouStream,
+ *                               whose X-Forwarded-For says who the client is
+ *                               (default 1, as on Railway); false for none.
+ *                               Sign-in attempts are limited per client
+ *
  * Durations are seconds, or a number with s, m, h or d: 90, 90s, 15m, 6h, 7d.
  * Zero turns that cache off.
  */
+
+const { parseDatabaseUrl } = require("./storage");
 
 const SECOND_MS = 1000;
 const UNIT_MS = { s: SECOND_MS, m: 60 * SECOND_MS, h: 60 * 60 * SECOND_MS, d: 24 * 60 * 60 * SECOND_MS };
@@ -89,6 +113,8 @@ function channelIdOf(entry) {
 const OFF = ["off", "false", "0", "no"];
 
 const DEFAULTS = {
+  PROFILE_SESSION_TTL: "30d",
+  PROFILE_SESSION_MAX_TTL: "90d",
   CACHE_DIR: ".cache",
   CACHE_PREFIX: "youstream",
   CACHE_MEMORY_MB: 64,
@@ -187,6 +213,8 @@ function readHostConfig(env = process.env) {
   }
 
   return {
+    profiles: readProfiles(env, given, duration, warnings),
+    trustProxy: readTrustProxy(env, given, warnings),
     cache: {
       store,
       redisUrl,
@@ -218,6 +246,63 @@ function readHostConfig(env = process.env) {
     },
     warnings
   };
+}
+
+/** A sign-in not remembered lasts as long as the browser keeps it, and a day at most. */
+const BROWSER_SESSION_MS = DAY_MS;
+
+/**
+ * Profiles are on when both DATABASE_URL and SECRET_KEY are usable; when
+ * either is missing or wrong they are off, with a warning, and the server
+ * runs as without them.
+ */
+function readProfiles(env, given, duration, warnings) {
+  const off = (reason) => {
+    warnings.push(`${reason}; profiles are off`);
+    return null;
+  };
+  let databaseUrl = null;
+  if (given("DATABASE_URL")) {
+    try {
+      parseDatabaseUrl(env.DATABASE_URL);
+      databaseUrl = env.DATABASE_URL.trim();
+    } catch (err) {
+      off(err.message);
+    }
+  }
+  let secret = null;
+  if (given("SECRET_KEY")) {
+    if (/^[0-9a-f]{64}$/i.test(env.SECRET_KEY.trim())) secret = Buffer.from(env.SECRET_KEY.trim(), "hex");
+    else off("SECRET_KEY must be 64 hexadecimal characters (32 bytes), such as openssl rand -hex 32 prints");
+  }
+  if (databaseUrl && !secret && !given("SECRET_KEY")) off("Profiles need SECRET_KEY as well as DATABASE_URL");
+  if (secret && !databaseUrl && !given("DATABASE_URL")) off("Profiles need DATABASE_URL as well as SECRET_KEY");
+
+  const rememberedMs = duration("PROFILE_SESSION_TTL");
+  const maxMs = duration("PROFILE_SESSION_MAX_TTL");
+  let pruneAfterMs = 0;
+  if (given("PROFILE_PRUNE_AFTER") && !OFF.includes(env.PROFILE_PRUNE_AFTER.trim().toLowerCase())) {
+    const ms = parseDuration(env.PROFILE_PRUNE_AFTER);
+    if (ms === null) warnings.push(`PROFILE_PRUNE_AFTER="${env.PROFILE_PRUNE_AFTER}" is not a duration such as 365d; profiles are never pruned`);
+    else pruneAfterMs = ms;
+  }
+  return {
+    enabled: Boolean(databaseUrl && secret),
+    databaseUrl,
+    secret,
+    sessions: { rememberedMs, maxMs: Math.max(maxMs, rememberedMs), browserMs: BROWSER_SESSION_MS },
+    pruneAfterMs
+  };
+}
+
+/** Express's "trust proxy": a number of hops, or false. */
+function readTrustProxy(env, given, warnings) {
+  if (!given("TRUST_PROXY")) return 1;
+  const raw = env.TRUST_PROXY.trim().toLowerCase();
+  if (OFF.includes(raw)) return false;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  warnings.push(`TRUST_PROXY="${env.TRUST_PROXY}" is not a number of proxies or false; using 1`);
+  return 1;
 }
 
 /** One line for the startup log; never prints a password or the admin token. */

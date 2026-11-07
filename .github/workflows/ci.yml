@@ -9,7 +9,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # A real Redis, for test/redis.integration.test.js.
+    # A real Redis, for test/redis.integration.test.js, and a real
+    # PostgreSQL, for test/profileStore.postgres.test.js.
     services:
       redis:
         image: redis:7-alpine
@@ -20,8 +21,21 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: youstream_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       REDIS_TEST_URL: redis://localhost:6379
+      POSTGRES_TEST_URL: postgres://postgres:postgres@localhost:5432/youstream_test
       # Read access to the private youstream-fixtures repository, for the
       # real-data tests. Without it (forks, pull requests from outside),
       # those suites are skipped and everything else still runs.
@@ -58,6 +72,16 @@ jobs:
           curl -fsS http://localhost:3000/health
           curl -fsS http://localhost:3000/manifest.json -o manifest.json
           grep -qF '"id":"org.deejay189393.youstream"' manifest.json
+      # Profiles on Node's own SQLite, in the image as built: there is no
+      # native module, so nothing to compile on Alpine, and this proves it.
+      - name: Start it with profiles on SQLite, and check that they are ready
+        run: |
+          docker run -d --name profiles -p 3001:3000 -e IMDB_DATASETS=off \
+            -e DATABASE_URL=sqlite:///data/youstream.db -e SECRET_KEY="$(openssl rand -hex 32)" youstream
+          for i in $(seq 1 30); do curl -fsS http://localhost:3001/health | grep -qF '"profiles":"ready"' && break; sleep 1; done
+          curl -fsS http://localhost:3001/health | grep -F '"profiles":"ready"'
       - name: The server's output, when it did not
         if: failure()
-        run: docker logs youstream
+        run: |
+          docker logs youstream
+          docker logs profiles || true

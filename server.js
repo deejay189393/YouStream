@@ -11,26 +11,22 @@ const { searchDuration } = require("./src/matching");
 const { formatDuration, formatOffset } = require("./src/text");
 const youtube = require("./src/youtube");
 const tmdb = require("./src/metadata/tmdb");
-const { hostConfig, describeCache } = require("./src/hostConfig");
+const { hostConfig, describeCache, DAY_MS } = require("./src/hostConfig");
 const { NAMESPACES, cacheSettings, cacheStats, clearAllCaches } = require("./src/cache");
 const imdb = require("./src/metadata/imdb");
 const { resolveSource } = require("./src/browse");
 const { SOURCE_KINDS } = require("./src/catalogs");
 const { trackRequest } = require("./src/requestContext");
+const { getBaseUrl } = require("./src/baseUrl");
+const profiles = require("./src/profiles");
+const { webAppManifest, serviceWorkerSource } = require("./src/webApp");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-/**
- * Behind Railway's proxy, TLS ends upstream and req.protocol reads "http".
- * The forwarded header says what the client actually used, so the manifest
- * advertises https:// URLs, which Stremio requires of a remote addon.
- */
-function getBaseUrl(req) {
-  const forwardedProto = req.get("x-forwarded-proto");
-  const proto = forwardedProto ? forwardedProto.split(",")[0].trim() : req.protocol;
-  return `${proto}://${req.get("host")}`;
-}
+// Who the client is, for the limits on sign-in attempts: the address the
+// proxy in front (Railway's) saw, from X-Forwarded-For.
+app.set("trust proxy", hostConfig.trustProxy);
 
 function invalidConfig(res) {
   return res.status(400).json({ error: "Invalid or corrupted addon configuration." });
@@ -63,18 +59,126 @@ app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => res.redirect("/configure"));
 
-app.get("/configure", (req, res) => {
-  res.set("Content-Type", "text/html; charset=utf-8");
-  res.send(renderConfigurePage({ baseUrl: getBaseUrl(req), existing: null, serverTmdb: serverHasTmdbKey(), credits: credits() }));
+/** Express 4 does not catch a rejected handler. */
+const answer = (handler) => (req, res, next) => handler(req, res).catch(next);
+
+const days = (ms) => Math.max(1, Math.round(ms / DAY_MS));
+
+/** How long a remembered sign-in lasts, in days, as the pages say it. */
+const sessionDays = () => ({
+  remembered: days(hostConfig.profiles.sessions.rememberedMs),
+  max: days(hostConfig.profiles.sessions.maxMs)
 });
+
+/** What the terms page says about profiles on this server. */
+const profileTerms = () => ({
+  enabled: hostConfig.profiles.enabled,
+  pruneAfterDays: hostConfig.profiles.pruneAfterMs ? days(hostConfig.profiles.pruneAfterMs) : 0,
+  sessionDays: sessionDays()
+});
+
+/** One-off notes a page shows after a redirect: ?done=created and so on. */
+const DONE = {
+  created: "created",
+  deleted: "deleted"
+};
+
+/**
+ * The configure page, for whoever asks: signed in to a profile or not, from
+ * an install link or not (profiles/index.js, pageState).
+ *
+ *   existing     settings to pre-fill the form with -- a link's own, or an
+ *                imported file's -- in place of the signed-in profile's
+ *   source       where `existing` came from: "link" or "import"
+ *   linkSegment  the page was opened from a profile's install link: it is
+ *                that profile's page only for its signed-in owner, and asks
+ *                anyone else to sign in
+ */
+async function sendConfigurePage(req, res, { existing = null, source = null, linkSegment = null, fileName = "" } = {}) {
+  const state = await profiles.pageState(req, res, linkSegment);
+  const { signedIn, link } = state;
+  const owner = signedIn && (!link || link.id === signedIn.id) ? signedIn : null;
+  const profile = {
+    enabled: state.enabled,
+    unavailable: state.unavailable,
+    signedIn: owner && { id: owner.id, installUrl: owner.installUrl, remembered: owner.remembered },
+    signInId: link && !owner ? link.id : null,
+    otherProfile: link && signedIn && !owner ? signedIn.id : null,
+    linkWorks: link ? link.works : true,
+    source: existing ? source : null,
+    fileName,
+    done: DONE[req.query.done] || null,
+    sessionDays: sessionDays()
+  };
+  res.set({
+    "Content-Type": "text/html; charset=utf-8",
+    // The page can hold the reader's keys: kept by no cache, shown in no frame.
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "same-origin",
+    "X-Frame-Options": "DENY"
+  });
+  res.send(
+    renderConfigurePage({
+      baseUrl: getBaseUrl(req),
+      existing: existing || (owner ? owner.config : null),
+      serverTmdb: serverHasTmdbKey(),
+      credits: credits(),
+      profile
+    })
+  );
+}
+
+app.get("/configure", answer((req, res) => sendConfigurePage(req, res)));
+
+/**
+ * Settings from a file the reader imported, merged on the page with the
+ * keys they already had, pre-filled for them to look over and save. Nothing
+ * is saved here. A form post, so the file's keys never ride in a URL.
+ */
+app.post(
+  "/configure",
+  express.urlencoded({ extended: false, limit: "128kb" }),
+  answer(async (req, res) => {
+    let imported = null;
+    try {
+      imported = JSON.parse(req.body.config);
+    } catch (_) {
+      imported = null;
+    }
+    if (!imported || typeof imported !== "object" || Array.isArray(imported)) return res.redirect(303, "/configure");
+    const fileName = typeof req.body.file === "string" ? req.body.file.slice(0, 120) : "";
+    return sendConfigurePage(req, res, { existing: imported, source: "import", fileName });
+  })
+);
+
+/** The configure page as an installable app (webApp.js). */
+app.get("/app.webmanifest", (req, res) => {
+  res.set("Content-Type", "application/manifest+json; charset=utf-8");
+  res.set("Cache-Control", "public, max-age=3600");
+  res.send(JSON.stringify(webAppManifest()));
+});
+
+app.get("/sw.js", (req, res) => {
+  res.set("Content-Type", "text/javascript; charset=utf-8");
+  res.set("Cache-Control", "no-cache");
+  res.send(serviceWorkerSource());
+});
+
+/** Profiles: creating, signing in, saving (profiles/api.js). */
+app.use("/api/profile", profiles.apiRouter);
 
 app.get("/terms", (req, res) => {
   res.set("Content-Type", "text/html; charset=utf-8");
-  res.send(renderTermsPage({ contact: hostConfig.legal.contact, credits: credits() }));
+  res.send(renderTermsPage({ contact: hostConfig.legal.contact, credits: credits(), profiles: profileTerms() }));
 });
 
 app.get("/health", (req, res) =>
-  res.json({ ok: true, cache: cacheSettings().store, imdb: hostConfig.metadata.imdbDatasets ? imdb.status() : "off" })
+  res.json({
+    ok: true,
+    cache: cacheSettings().store,
+    imdb: hostConfig.metadata.imdbDatasets ? imdb.status() : "off",
+    profiles: profiles.status()
+  })
 );
 
 /**
@@ -157,6 +261,10 @@ app.post("/api/youtube-source", express.json({ limit: "4kb" }), async (req, res)
   res.json(await resolveSource(youtubeKey, typeof req.body.input === "string" ? req.body.input.slice(0, 500) : "", req.body.kind));
 });
 
+// A profile's install link opens its settings here, for every path below
+// but /configure (profiles/links.js).
+app.use(profiles.links);
+
 // --- Manifest routes are served here rather than by the SDK router, because
 // the manifest varies per reader (their content types, and whether tmdb: ids
 // can be read), which the SDK's single static manifest cannot express.
@@ -171,13 +279,17 @@ app.get("/:config/manifest.json", (req, res) => {
 });
 
 // Re-configuration: the app's "Configure" button on an installed addon lands
-// here, with the reader's current settings in the path.
-app.get("/:config/configure", (req, res) => {
-  const decoded = decodeConfig(req.params.config);
-  if (!decoded) return invalidConfig(res);
-  res.set("Content-Type", "text/html; charset=utf-8");
-  res.send(renderConfigurePage({ baseUrl: getBaseUrl(req), existing: decoded, serverTmdb: serverHasTmdbKey(), credits: credits() }));
-});
+// here. A profile's link asks for the password, unless its owner is signed
+// in; a link that carries its settings pre-fills them.
+app.get(
+  "/:config/configure",
+  answer(async (req, res) => {
+    if (profiles.parseLinkSegment(req.params.config)) return sendConfigurePage(req, res, { linkSegment: req.params.config });
+    const decoded = decodeConfig(req.params.config);
+    if (!decoded) return invalidConfig(res);
+    return sendConfigurePage(req, res, { existing: decoded, source: "link" });
+  })
+);
 
 /** A video as the explain endpoint shows it. */
 function describeVideo(evaluation) {
@@ -257,7 +369,14 @@ if (require.main === module) {
   hostConfig.warnings.forEach((w) => console.warn(`[config] ${w}`));
   console.log(`[cache] ${describeCache(cacheSettings())}`);
   if (hostConfig.metadata.imdbDatasets) imdb.start();
-  app.listen(PORT, () => {
+  profiles.start(hostConfig.profiles);
+  const server = app.listen(PORT, () => {
     console.log(`YouStream addon listening on port ${PORT}`);
+  });
+  // A redeploy stops the old container: finish what is in flight, close the
+  // database cleanly (SQLite folds its write-ahead log back in), then exit.
+  process.once("SIGTERM", () => {
+    server.close();
+    profiles.stop().finally(() => process.exit(0));
   });
 }

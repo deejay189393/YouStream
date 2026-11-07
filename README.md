@@ -579,9 +579,10 @@ quota extension form.
 
 ## Settings
 
-Everything you choose is encoded into your personal addon URL. Nothing is
-stored on the server. Only settings that differ from the defaults go into the
-URL:
+Without a profile, everything you choose is encoded into your personal addon
+URL, and nothing is stored on the server; with one, the same settings are kept
+in your profile instead (see [Profiles](#profiles)). Either way, only settings
+that differ from the defaults are kept:
 
 ```js
 encodeURIComponent(JSON.stringify({
@@ -635,12 +636,92 @@ name, so with Hindi set a film search becomes "… full movie Hindi". That is
 how dubbed uploads are titled. A placeholder with nothing to fill it is
 dropped.
 
-**Your install URL contains your keys. Don't share it publicly.**
+**An install URL made without a profile contains your keys. Don't share it
+publicly.** A profile's does not, but lets whoever has it use YouStream on
+your quota.
 
-The configure page checks both keys before it builds the link
-(`POST /api/check-keys`, one quota unit). That catches a mistyped key, a
-project without the YouTube Data API enabled, and a key restricted to
+The configure page checks both keys before it builds the link or saves the
+profile (`POST /api/check-keys`, one quota unit). That catches a mistyped
+key, a project without the YouTube Data API enabled, and a key restricted to
 websites. It also warns when today's quota is already spent.
+
+## Profiles
+
+On a server whose host has turned them on (`DATABASE_URL` and `SECRET_KEY`,
+see [Hosting profiles](#hosting-profiles)), you can keep your settings in a
+**profile**, behind a password, instead of in the link:
+
+- **One link, for good.** A profile's install link is
+  `https://<host>/<profile id>.<token>/manifest.json`, and it never changes
+  when your settings do. It goes into Stremio, Nuvio or AIOStreams once;
+  save on the configure page, from any device, and the apps use the new
+  settings from their next request. Only what an app keeps in its own copy
+  of the manifest, the rows and the content types, takes longer, and the page
+  says so when a save changes it: Stremio shows it after a reinstall, Nuvio
+  the next time it starts, AIOStreams within six hours.
+- **Your keys are not in the link.** The link opens your settings for the
+  addon's own use and nothing else: its configure page asks for your
+  password. A link that gets out lets someone use YouStream on your YouTube
+  quota, never see or change your settings; replace it from the page and the
+  old one stops at once.
+- **Signed in on your phone.** "Stay signed in" keeps a device signed in for
+  30 days from its last use, and 90 at most. The configure page installs as
+  an app (Android: Install app; iPhone: Share, then Add to Home Screen) that
+  opens straight into your profile.
+- **Your password** is at least 8 characters. Changing it signs every other
+  device out and keeps the link. It cannot be reset, as it is what unlocks
+  your settings: let a password manager keep it.
+- **Backups.** Export your settings to a file, with your keys left out unless
+  you choose otherwise; import one to fill the form, keeping the keys already
+  in it. An import is saved only when you save.
+- **Delete** your profile from its page: it and its sign-ins go at once, and
+  its link stops working.
+
+**Without a profile** everything works as before: a link that carries its
+settings. Links made before profiles keep working, on every server. On a
+server with profiles the configure page still offers one ("without a
+profile"); on a server without, it is the only way. Opening such a link's
+configure page while signed in offers to save its settings to your profile.
+
+### How a profile is kept
+
+Each profile has a random key of its own, and its settings and its link's
+token are sealed with that key (AES-256-GCM). The key is stored only sealed:
+once with your password, stretched with scrypt (2^15, 32 MiB); once with the
+install link's token; and once per remembered sign-in, with the token in that
+browser's cookie. Each of those is also bound, with HKDF, to the server's
+`SECRET_KEY`, to the profile and to its purpose. So:
+
+- a copy of the database opens nothing without the server's secret, and
+  with it, still nothing without a password, a link or a cookie;
+- a link opens the settings for the addon only; everything that shows or
+  changes them refuses it;
+- your password is never stored: a wrong one is one that does not open the
+  key;
+- the database keeps the hash of a sign-in cookie's token, never the token.
+
+As in AIOStreams, changing the password, replacing the link and deleting the
+profile take the password itself, not just a sign-in, so a cookie copied off
+a device cannot lock you out. And as there, attempts are limited: 10 wrong
+passwords from one client, or 20 for one profile, then a 15-minute wait; 10
+new profiles an hour from one client; 120 requests a minute. Requests from
+another site are refused, the sign-in cookie is `HttpOnly` and `SameSite=Lax`,
+and the configure page is never cached or framed. At most two passwords are
+checked at once, so a flood of attempts cannot take the server's memory.
+
+The configure page talks to it through `/api/profile`:
+
+| Route | Purpose |
+|---|---|
+| `POST /api/profile` | Create a profile: `{ config, password, remember }`; signs this browser in |
+| `GET /api/profile` | The signed-in profile: its settings and install link |
+| `PUT /api/profile` | Save: `{ config }`; answers `{ saved, manifestChanged }` |
+| `DELETE /api/profile` | Delete: `{ password }`, and `{ id }` when not signed in to it |
+| `POST /api/profile/session` | Sign in: `{ id, password, remember }` |
+| `DELETE /api/profile/session` | Sign this browser out |
+| `DELETE /api/profile/sessions` | Sign every browser out of the signed-in profile |
+| `POST /api/profile/password` | `{ currentPassword, newPassword }` |
+| `POST /api/profile/link` | Replace the install link: `{ password }` |
 
 ## Explain endpoint
 
@@ -662,8 +743,9 @@ https://<host>/<your config>/explain/series/<imdb id>:<season>:<episode>.json
 
 | Route | Purpose |
 |---|---|
-| `GET /configure` | Setup page |
-| `GET /:config/configure` | Re-configuration, pre-filled |
+| `GET /configure` | Setup page; a signed-in profile's page |
+| `POST /configure` | The page pre-filled from an imported settings file (nothing saved) |
+| `GET /:config/configure` | Re-configuration, pre-filled; for a profile's link, its sign-in |
 | `GET /manifest.json` | Unconfigured manifest (configuration required) |
 | `GET /:config/manifest.json` | Your manifest |
 | `GET /:config/catalog/youtube/:id/:extra?.json` | Your catalogs and the search row (`search=…`, `skip=…`) |
@@ -672,8 +754,10 @@ https://<host>/<your config>/explain/series/<imdb id>:<season>:<episode>.json
 | `GET /:config/explain/:type/:id.json` | The working behind one lookup |
 | `POST /api/check-keys` | Key check for the configure page |
 | `POST /api/youtube-source` | Looks up a pasted playlist or channel, as the `kind` chosen, for the configure page (1 unit) |
+| `/api/profile…` | Profiles (see [Profiles](#how-a-profile-is-kept)) |
+| `GET /app.webmanifest`, `GET /sw.js` | The configure page as an installable app |
 | `GET /terms` | Terms of use and privacy policy |
-| `GET /health` | Health check used by Railway; also names the cache store |
+| `GET /health` | Health check used by Railway; also names the cache store, and whether profiles are `off`, `starting`, `ready` or `unavailable` |
 | `GET /admin/cache` | What the cache holds (only with `CACHE_ADMIN_TOKEN`) |
 | `DELETE /admin/cache/:namespace` | Empty `search`, `metadata`, `cooldown`, `browse`, `video`, `dislikes`, `channel` or `all` (only with `CACHE_ADMIN_TOKEN`) |
 
@@ -698,7 +782,7 @@ has, so an app that installs it anyway never asks it about anything.
 ```bash
 npm install
 npm start                 # http://localhost:3000/configure
-npm test                  # about 1,300 tests
+npm test                  # about 1,600 tests
 npm run test:coverage     # pinned at 100% statements, branches, functions, lines
 ```
 
@@ -709,6 +793,13 @@ Redis for it), the cache is also tested against a real Redis:
 ```bash
 redis-server --port 6390 --daemonize yes
 REDIS_TEST_URL=redis://127.0.0.1:6390 npm test
+```
+
+Profiles are tested on SQLite in memory always, and with `POSTGRES_TEST_URL`
+set (CI starts a PostgreSQL for it), on a real PostgreSQL as well:
+
+```bash
+POSTGRES_TEST_URL=postgres://postgres@127.0.0.1:5432/youstream_test npm test
 ```
 
 ### Real-data tests
@@ -797,6 +888,29 @@ For a cache that survives redeploys, add Railway's Redis to the project and
 set `REDIS_URL=${{Redis.REDIS_URL}}` on each service. Railway's private
 network is IPv6; the Redis client is already set up for it.
 
+### Hosting profiles
+
+Profiles need a database that outlives the container, and a secret:
+
+- **SQLite on a volume**, the cheapest: add a volume to the service, mounted
+  at `/data` for instance, and set `DATABASE_URL=sqlite:///data/youstream.db`.
+  Railway stops a service with a volume before starting its new deploy, so
+  each deploy has a few seconds without the addon.
+- **PostgreSQL**, a service of its own: set
+  `DATABASE_URL=${{Postgres.DATABASE_URL}}`. The addon then has no volume and
+  deploys without a gap.
+- **`SECRET_KEY`**: 64 hexadecimal characters, from `openssl rand -hex 32` or
+  Railway's `${{secret(64, "abcdef0123456789")}}`. Keep it only in the
+  service's variables, never with the database: the two together are what
+  open a profile, with its password or link. **Never change it**: no profile
+  would open. YouStream notices a changed one at start and keeps profiles off
+  rather than mix two secrets in one database.
+
+The tables are made on start, and kept up to date by numbered migrations.
+YouStream never waits for the database: while it cannot be reached, links
+that carry their settings work as ever, profile links answer with a row
+saying so, and YouStream tries again every few seconds, then minutes.
+
 ### Environment variables
 
 | Variable | Purpose |
@@ -825,6 +939,12 @@ network is IPv6; the Redis client is already set up for it.
 | `BLOCKED_VIDEOS` | Videos this server never offers, for a rights holder who asks: ids or YouTube links, separated by commas or spaces |
 | `BLOCKED_CHANNELS` | The same for whole channels: `UC…` ids or `youtube.com/channel/` links |
 | `CONTACT` | An email address or URL on the terms page, for questions and removal requests (default: this repository's GitHub issues) |
+| `DATABASE_URL` | Where profiles are kept: `sqlite:///absolute/path.db`, `sqlite://./relative/path.db` or `postgres://user:password@host:port/db`. With `SECRET_KEY`, turns profiles on |
+| `SECRET_KEY` | 64 hexadecimal characters (32 random bytes) every profile's keys are bound to. Never change it |
+| `PROFILE_SESSION_TTL` | How long "stay signed in" lasts unused (default `30d`) |
+| `PROFILE_SESSION_MAX_TTL` | How long it lasts at most, however much it is used (default `90d`) |
+| `PROFILE_PRUNE_AFTER` | Delete a profile no app or sign-in has used for this long, `365d` say (default: never) |
+| `TRUST_PROXY` | How many proxies stand in front, whose `X-Forwarded-For` names the client the sign-in limits count (default `1`, Railway's); `false` for none |
 
 Durations are seconds, or a number with `s`, `m`, `h` or `d`; `0` turns that
 cache off. A value that cannot be read is reported in the log at startup,
@@ -890,7 +1010,9 @@ YouTube's rules and takedowns.
 [YouTube Terms of Service](https://www.youtube.com/t/terms) and link the
 [Google Privacy Policy](https://policies.google.com/privacy), and the
 configure page asks readers to agree to both before it builds an install
-link, as YouTube's API Services policies require.
+link, as YouTube's API Services policies require. On a server that keeps
+profiles, it also says what a profile keeps, for how long, and the one
+cookie a sign-in sets.
 
 **Rights holders.** To have a video or channel no longer offered by a
 YouStream server, contact its host (the `CONTACT` on its terms page; for

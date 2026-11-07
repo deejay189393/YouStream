@@ -8,6 +8,14 @@ const MB = 1024 * 1024;
 describe("readHostConfig", () => {
   test("with nothing set: memory, and the documented lifetimes", () => {
     expect(readHostConfig({})).toEqual({
+      profiles: {
+        enabled: false,
+        databaseUrl: null,
+        secret: null,
+        sessions: { rememberedMs: 30 * DAY, maxMs: 90 * DAY, browserMs: DAY },
+        pruneAfterMs: 0
+      },
+      trustProxy: 1,
       cache: {
         store: "memory",
         redisUrl: null,
@@ -135,6 +143,63 @@ describe("readHostConfig", () => {
 
   test("a contact for questions and removal requests", () => {
     expect(readHostConfig({ CONTACT: " rights@example.com " }).legal.contact).toBe("rights@example.com");
+  });
+
+  test("profiles: on with a usable DATABASE_URL and SECRET_KEY", () => {
+    const secret = "ab".repeat(32);
+    const sqlite = readHostConfig({ DATABASE_URL: " sqlite:///data/youstream.db ", SECRET_KEY: ` ${secret.toUpperCase()} ` });
+    expect(sqlite.profiles).toEqual({
+      enabled: true,
+      databaseUrl: "sqlite:///data/youstream.db",
+      secret: Buffer.from(secret, "hex"),
+      sessions: { rememberedMs: 30 * DAY, maxMs: 90 * DAY, browserMs: DAY },
+      pruneAfterMs: 0
+    });
+    expect(sqlite.warnings).toEqual([]);
+    const pg = readHostConfig({ DATABASE_URL: "postgres://u:p@db.internal:5432/youstream", SECRET_KEY: secret });
+    expect(pg.profiles.enabled).toBe(true);
+  });
+
+  test("profiles: off, with a warning, when either half is missing or wrong", () => {
+    const secret = "ab".repeat(32);
+    const off = (env) => {
+      const c = readHostConfig(env);
+      return [c.profiles.enabled, c.warnings];
+    };
+    expect(off({ DATABASE_URL: "sqlite:///data/y.db" })).toEqual([false, ["Profiles need SECRET_KEY as well as DATABASE_URL; profiles are off"]]);
+    expect(off({ SECRET_KEY: secret })).toEqual([false, ["Profiles need DATABASE_URL as well as SECRET_KEY; profiles are off"]]);
+    expect(off({ DATABASE_URL: "mysql://h/db", SECRET_KEY: secret })).toEqual([
+      false,
+      ["DATABASE_URL must start with sqlite: or postgres:, not mysql:; profiles are off"]
+    ]);
+    expect(off({ DATABASE_URL: "sqlite:///data/y.db", SECRET_KEY: "not-hex" })).toEqual([
+      false,
+      ["SECRET_KEY must be 64 hexadecimal characters (32 bytes), such as openssl rand -hex 32 prints; profiles are off"]
+    ]);
+    expect(off({ DATABASE_URL: "   ", SECRET_KEY: "  " })).toEqual([false, []]);
+  });
+
+  test("profiles: how long sign-ins last, never capped below their own length, and pruning", () => {
+    const c = readHostConfig({ PROFILE_SESSION_TTL: "7d", PROFILE_SESSION_MAX_TTL: "1d", PROFILE_PRUNE_AFTER: "365d" });
+    expect(c.profiles.sessions).toEqual({ rememberedMs: 7 * DAY, maxMs: 7 * DAY, browserMs: DAY });
+    expect(c.profiles.pruneAfterMs).toBe(365 * DAY);
+    expect(readHostConfig({ PROFILE_PRUNE_AFTER: "off" }).profiles.pruneAfterMs).toBe(0);
+    const bad = readHostConfig({ PROFILE_PRUNE_AFTER: "soon", PROFILE_SESSION_TTL: "a while" });
+    expect(bad.profiles.pruneAfterMs).toBe(0);
+    expect(bad.profiles.sessions.rememberedMs).toBe(30 * DAY);
+    expect(bad.warnings).toEqual([
+      'PROFILE_SESSION_TTL="a while" is not a duration such as 90s, 15m, 6h or 7d; using 30d',
+      'PROFILE_PRUNE_AFTER="soon" is not a duration such as 365d; profiles are never pruned'
+    ]);
+  });
+
+  test("TRUST_PROXY: a number of proxies, or none", () => {
+    expect(readHostConfig({ TRUST_PROXY: "2" }).trustProxy).toBe(2);
+    expect(readHostConfig({ TRUST_PROXY: "false" }).trustProxy).toBe(false);
+    expect(readHostConfig({ TRUST_PROXY: "0" }).trustProxy).toBe(false);
+    const bad = readHostConfig({ TRUST_PROXY: "everyone" });
+    expect(bad.trustProxy).toBe(1);
+    expect(bad.warnings).toEqual(['TRUST_PROXY="everyone" is not a number of proxies or false; using 1']);
   });
 
   test("reads the process environment by default", () => {
