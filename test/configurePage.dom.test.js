@@ -769,7 +769,7 @@ describe("the YouTube card", () => {
     const row = () => p.document.querySelector("#catalog-list .cat-row");
     const filter = () => row().querySelector(".cat-filter select");
     const words = () => row().querySelector(".cat-words");
-    expect([...filter().options].map((o) => o.textContent)).toEqual(["No keyword filter", "Only videos mentioning", "Leave out videos mentioning"]);
+    expect([...filter().options].map((o) => o.textContent)).toEqual(["No keyword filter", "Only videos mentioning", "Hide videos mentioning"]);
     expect(words().hidden).toBe(true);
     pick(p, filter(), "exclude");
     expect(words().hidden).toBe(false);

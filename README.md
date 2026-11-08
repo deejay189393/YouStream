@@ -494,8 +494,8 @@ this server was asked to block (`BLOCKED_VIDEOS`, `BLOCKED_CHANNELS`), and
 non-embeddable videos when you asked for embeddable only.
 
 **Keyword filter.** Any row can keep only the videos that mention some
-words, or leave them out: under the row, choose "Only videos mentioning" or
-"Leave out videos mentioning" and type the words, separated by commas. A
+words, or hide them: under the row, choose "Only videos mentioning" or
+"Hide videos mentioning" and type the words, separated by commas. A
 word or a name is looked for in the video's title, its channel's name and
 its whole description; whole words, in any case, with or without accents,
 in any script. A plural or a possessive counts ("Kapoor's"), and so does a

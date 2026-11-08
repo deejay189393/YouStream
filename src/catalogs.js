@@ -119,7 +119,7 @@ const MAX_NAME_LENGTH = 80;
  */
 const FILTER_MODES = [
   { id: "include", label: "Only videos mentioning" },
-  { id: "exclude", label: "Leave out videos mentioning" }
+  { id: "exclude", label: "Hide videos mentioning" }
 ];
 const MAX_FILTER_WORDS = 20;
 const MAX_FILTER_WORD_LENGTH = 60;

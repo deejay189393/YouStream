@@ -655,7 +655,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .cat-lead { margin: 0 0 10px; }
   .cat-fixed { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
   .cat-filter { margin-top: 7px; display: flex; flex-direction: column; gap: 6px; }
-  .cat-filter select { width: auto; max-width: 100%; padding: 5px 8px; font-size: 12.5px; border-radius: 7px; align-self: flex-start; }
+  .cat-filter select { width: 100%; padding: 5px 8px; font-size: 12.5px; border-radius: 7px; }
   .cat-filter .cat-words { padding: 7px 9px; font-size: 13px; border-radius: 7px; }
   .btns { flex: 0 0 auto; display: flex; gap: 4px; }
   .btns button {
