@@ -157,6 +157,25 @@ app.post("/api/youtube-source", express.json({ limit: "4kb" }), async (req, res)
   res.json(await resolveSource(youtubeKey, typeof req.body.input === "string" ? req.body.input.slice(0, 500) : "", req.body.kind));
 });
 
+/**
+ * The addon protocol is read from web pages too -- Stremio's web app, and
+ * AIOStreams' page reading a manifest to name a custom addon -- and a
+ * browser hands a page another site's answer only when the answer says any
+ * site may read it. The SDK's router says so for catalogs, metadata and
+ * streams; the manifest and the explain endpoint are served here, so they
+ * say it here, errors included.
+ */
+function addonCors(req, res, next) {
+  res.set("Access-Control-Allow-Origin", "*");
+  if (req.method !== "OPTIONS") return next();
+  res.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+  const asked = req.get("Access-Control-Request-Headers");
+  if (asked) res.set("Access-Control-Allow-Headers", asked);
+  res.set("Access-Control-Max-Age", "86400");
+  return res.sendStatus(204);
+}
+app.use(["/manifest.json", "/:config/manifest.json", "/:config/explain"], addonCors);
+
 // --- Manifest routes are served here rather than by the SDK router, because
 // the manifest varies per reader (their content types, and whether tmdb: ids
 // can be read), which the SDK's single static manifest cannot express.

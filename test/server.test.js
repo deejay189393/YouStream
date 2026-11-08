@@ -111,6 +111,37 @@ describe("manifests", () => {
     expect((await request(app).get("/not-json/configure")).status).toBe(400);
   });
 
+  test("any web page may read a manifest, as AIOStreams' page and Stremio's web app do; errors too", async () => {
+    const origin = "https://aiostreams.example";
+    for (const path of ["/manifest.json", `/${CFG()}/manifest.json`, "/not-json/manifest.json", "/not-json/explain/movie/tt1.json"]) {
+      const res = await request(app).get(path).set("Origin", origin);
+      expect([path, res.headers["access-control-allow-origin"]]).toEqual([path, "*"]);
+    }
+    // The SDK's own routes already did.
+    const catalog = await request(app).get(`/${CFG()}/catalog/movie/none.json`).set("Origin", origin);
+    expect(catalog.headers["access-control-allow-origin"]).toBe("*");
+    // The configure page is no other site's to read.
+    expect((await request(app).get("/configure").set("Origin", origin)).headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  test("a preflight for a manifest is answered, with the headers asked for", async () => {
+    const asked = await request(app)
+      .options(`/${CFG()}/manifest.json`)
+      .set("Origin", "https://web.stremio.com")
+      .set("Access-Control-Request-Method", "GET")
+      .set("Access-Control-Request-Headers", "x-requested-with");
+    expect(asked.status).toBe(204);
+    expect(asked.headers).toMatchObject({
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, HEAD, OPTIONS",
+      "access-control-allow-headers": "x-requested-with",
+      "access-control-max-age": "86400"
+    });
+    const plain = await request(app).options("/manifest.json").set("Origin", "https://web.stremio.com");
+    expect(plain.status).toBe(204);
+    expect(plain.headers["access-control-allow-headers"]).toBeUndefined();
+  });
+
   test("reconfiguring pre-fills the page", async () => {
     const res = await request(app).get(`/${encodeConfig({ youtubeKey: "MYKEY123", region: "IN" })}/configure`);
     expect(res.status).toBe(200);
