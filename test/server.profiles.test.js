@@ -187,8 +187,9 @@ describe("importing a file", () => {
 describe("an install link, in the apps", () => {
   test("its manifest is the profile's, with no settings in its address", async () => {
     const { segment } = await withProfile({ youtubeKey: "AIzaSyPROFILEKEY", types: ["movie"] });
-    const res = await request(app).get(`/${segment}/manifest.json`);
+    const res = await request(app).get(`/${segment}/manifest.json`).set("Origin", "https://aiostreams.example");
     expect(res.status).toBe(200);
+    expect(res.headers["access-control-allow-origin"]).toBe("*");
     expect(res.body.behaviorHints).toEqual({ configurable: true, configurationRequired: false });
     expect(res.body.types).toContain("movie");
     expect(res.body.types).not.toContain("series");

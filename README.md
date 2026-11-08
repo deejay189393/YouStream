@@ -796,6 +796,12 @@ router. The manifest claims, per resource:
 Its catalogs are yours, then the search row. A catalog id must be in your
 own config to answer, so the addon is no open proxy for YouTube searches.
 
+Every answer on the addon protocol, the manifest and errors included, says
+any site may read it (`Access-Control-Allow-Origin: *`), as Stremio's web
+app and AIOStreams' page need: they read a manifest from the browser, and a
+browser hides an answer that does not say so. The configure page and the
+profile API say no such thing.
+
 The unconfigured manifest (`/manifest.json`, or any without a YouTube key)
 cannot be used by accident: Stremio offers Configure instead of Install, and
 since Nuvio ignores that flag, it also claims a single id prefix no title
