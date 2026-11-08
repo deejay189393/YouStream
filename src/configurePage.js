@@ -110,12 +110,12 @@ function jsonForScript(value) {
 const EYE_ICON =
   '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/><line class="eye-slash" x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg>';
 
-function keyField({ id, label, value, placeholder }) {
+function keyField({ id, label, value, placeholder, outside }) {
   return `
         <div class="key-row">
-          <input type="password" id="${id}" class="key-input" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(
-            value
-          )}" aria-label="${escapeHtml(label)}" autocomplete="off" spellcheck="false" />
+          <input type="password" id="${id}" class="key-input"${outside ? ' form="config-form"' : ""} placeholder="${escapeHtml(
+            placeholder
+          )}" value="${escapeHtml(value)}" aria-label="${escapeHtml(label)}" autocomplete="off" spellcheck="false" />
           <button type="button" class="key-toggle" data-for="${id}" title="Show key" aria-label="Show ${escapeHtml(
             label
           )}" aria-pressed="false">${EYE_ICON}</button>
@@ -150,7 +150,7 @@ const NO_PROFILES = {
   done: null
 };
 
-/** A profile's id as the page shows it: its first eight characters. */
+/** A profile's id as a note shows it: its first eight characters. */
 const shortId = (id) => `${id.slice(0, 8)}…`;
 
 /** The notes at the top of the page, for the mode it is in and how it got there. */
@@ -190,23 +190,30 @@ function profileBanners(p, mode, usable, isReconfigure) {
   return notes.map((text) => `<div class="banner">${escapeHtml(text)}</div>`).join("\n  ");
 }
 
-/** Signed in: who, and the way out. */
-function profileBar(p) {
+/** Signed in: who, the ID to sign in with elsewhere, and the way out. */
+function profileCard(p) {
   return `
-  <div class="profile-bar card">
-    <span><span class="dot" aria-hidden="true"></span>Signed in <span class="muted">· profile <code title="${escapeHtml(
-      p.signedIn.id
-    )}">${escapeHtml(shortId(p.signedIn.id))}</code></span></span>
-    <button type="button" class="ghost-btn" id="signout-btn" aria-expanded="false" aria-controls="signout-panel">Sign out</button>
-  </div>
-  <div class="card small" id="signout-panel" hidden>
-    <label class="check"><input type="checkbox" id="signout-all" />
-      <span><strong>Sign out on all devices</strong><em>Every phone and computer signed in to this profile will have to sign in again. Your install link keeps working.</em></span></label>
-    <div class="btn-row">
-      <button type="button" class="danger-btn" id="signout-confirm">Sign out</button>
-      <button type="button" class="ghost-btn" id="signout-cancel">Cancel</button>
+  <div class="card" id="profile-card">
+    <h3>Your profile</h3>
+    <p class="signed-in"><span class="dot" aria-hidden="true"></span>Signed in on this device</p>
+    <span class="label-text">Profile ID</span>
+    <div class="id-row">
+      <code id="profile-id">${escapeHtml(p.signedIn.id)}</code>
+      <button type="button" class="ghost-btn" id="profile-id-copy">Copy</button>
     </div>
-    <div class="msg" id="signout-msg" role="alert" hidden></div>
+    <div class="hint">What you sign in with on another device, with your password. On its own it opens nothing.</div>
+    <div class="btn-row">
+      <button type="button" class="ghost-btn" id="signout-btn" aria-expanded="false" aria-controls="signout-panel">Sign out</button>
+    </div>
+    <div id="signout-panel" class="signout-panel" hidden>
+      <label class="check"><input type="checkbox" id="signout-all" />
+        <span><strong>Sign out on all devices</strong><em>Every phone and computer signed in to this profile will have to sign in again. Your install link keeps working.</em></span></label>
+      <div class="btn-row">
+        <button type="button" class="danger-btn" id="signout-confirm">Sign out</button>
+        <button type="button" class="ghost-btn" id="signout-cancel">Cancel</button>
+      </div>
+      <div class="msg" id="signout-msg" role="alert" hidden></div>
+    </div>
   </div>`;
 }
 
@@ -219,12 +226,12 @@ function installCard(p) {
   <div class="card" id="install-card">
     <h3>Your install link</h3>
     <p class="lead">Install it once, in Stremio, Nuvio or AIOStreams. It never changes: whatever you save here reaches your apps without reinstalling.</p>
-    <a id="profile-install" class="install-btn" href="${escapeHtml(stremioLink(url))}">Install in Stremio</a>
+    <a id="profile-install" class="install-btn" href="${escapeHtml(stremioLink(url))}">Install in Nuvio</a>
     <div class="url-row">
       <input id="profile-url" type="text" readonly value="${escapeHtml(url)}" aria-label="Your install link" />
       <button type="button" id="profile-copy">Copy</button>
     </div>
-    <div class="hint">In Nuvio or AIOStreams, paste the copied link where addons are added. Using an older YouStream link there? Swap it for this one, once.<br />
+    <div class="hint">Or copy it and paste it where addons are added, in AIOStreams or Stremio. Using an older YouStream link there? Swap it for this one, once.<br />
     Keep it private: whoever has it can use YouStream on your YouTube quota, though they can never see or change your settings or keys.</div>
   </div>`;
 }
@@ -256,8 +263,7 @@ function signInCard(p, mode) {
 /** Creating a profile: the end of the form for a new setup. */
 function createSection(p) {
   return `
-    <div class="card create" id="create-card">
-      <h3>Your profile</h3>
+    <div class="create" id="create-card">
       <p class="lead">Your settings are kept on this server, encrypted, behind a password. You get one install link that never changes: change anything here later, from any device, and your apps use it without reinstalling.</p>
       <input type="text" id="create-id" name="username" autocomplete="username" readonly hidden />
       ${passwordField({ id: "create-password", label: `Password (at least ${PASSWORD_MIN} characters)`, autocomplete: "new-password", name: "new-password" })}
@@ -431,16 +437,67 @@ function options(list, selected, anyLabel) {
   );
 }
 
+/**
+ * The keys: YouTube's, which YouStream cannot work without, and TMDB's,
+ * which is optional. On a new setup they are its first step, on the
+ * Summary, with TMDB's folded away; once signed in they sit in Account, out
+ * of the way, and their boxes still belong to the settings form.
+ */
+function keysCard({ s, p, tmdbNote, step }) {
+  const outside = !step;
+  const tmdb = `<p class="lead">
+          Lets ${ADDON_NAME} read the <code>tmdb:</code> ids Nuvio uses for some titles, and adds TMDB's cast
+          lists and other names to the evidence a match needs.
+        </p>
+        ${keyField({ id: "tmdb-key", label: "TMDB key", value: s.tmdbKey, placeholder: "API key or Read Access Token", outside })}
+        <div class="hint">${escapeHtml(tmdbNote)} Get one free under <a href="${TMDB_KEY_URL}" target="_blank" rel="noopener">TMDB settings &rarr; API</a>; either the API key or the Read Access Token works.</div>`;
+  return `
+      <div class="card" id="keys-card">
+        <h3>${step ? '<span class="step-no">1</span>Your YouTube key' : "Keys"}</h3>
+        <p class="lead">
+          ${ADDON_NAME} searches YouTube with your own key, which is free. A key can search 100 times a day.
+          A search is spent the first time a title is looked up, and nothing is spent after that for a day,
+          however often it is opened again.
+        </p>
+        ${keyField({ id: "youtube-key", label: "YouTube API key", value: s.youtubeKey, placeholder: "AIza...", outside })}
+        <p class="msg" id="key-status" role="status" hidden></p>
+        <details class="fold"${s.youtubeKey ? "" : " open"}>
+          <summary>How to get one</summary>
+          <div class="hint">
+            <ol>
+              <li>Open the <a href="${YOUTUBE_KEY_URL}" target="_blank" rel="noopener">YouTube Data API v3</a> page in Google Cloud, pick or create a project, and press <strong>Enable</strong>.</li>
+              <li>Go to <a href="${YOUTUBE_CREDENTIALS_URL}" target="_blank" rel="noopener">Credentials</a>, then <strong>Create credentials &rarr; API key</strong>.</li>
+              <li>Leave <strong>Application restrictions</strong> at <strong>None</strong>: this server makes the calls, not your browser. Limiting the key to the YouTube Data API v3 is fine.</li>
+            </ol>
+            ${
+              p.enabled
+                ? "With a profile, your key is kept on this server, encrypted, and only your password or your install link opens it; without one, it lives only inside your install link"
+                : "Your key is kept only inside your personal addon link; YouStream never stores it"
+            } (see the <a href="/terms" target="_blank" rel="noopener">privacy policy</a>).
+          </div>
+        </details>
+        ${
+          step
+            ? `<details class="fold" id="tmdb-fold"${s.tmdbKey ? " open" : ""}>
+          <summary>TMDB key <span class="chip">optional</span></summary>
+          ${tmdb}
+        </details>`
+            : `<span class="sub-label">TMDB key <span class="chip">optional</span></span>
+        ${tmdb}`
+        }
+      </div>`;
+}
+
 /** The page's sections: a bar of tabs along the bottom of a phone, a column down the side of a wider screen. */
 const ICONS = {
   summary:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="4.5" rx="1.5"/><rect x="13.5" y="11" width="7" height="9.5" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/></svg>',
-  search:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20.5 20.5"/></svg>',
+  streams:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M7.5 4v16M16.5 4v16M3.5 9h4M3.5 15h4M16.5 9h4M16.5 15h4"/></svg>',
+  playback:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><path d="M10.2 8.6v6.8l5.6-3.4z"/></svg>',
   catalogs:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="4" width="17" height="6.5" rx="1.5"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.5"/></svg>',
-  streams:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><path d="M10.2 8.6v6.8l5.6-3.4z"/></svg>',
   account:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c1.4-3.6 4.3-5.5 7.5-5.5s6.1 1.9 7.5 5.5"/></svg>'
 };
@@ -448,9 +505,9 @@ const ICONS = {
 function tabs(accountLabel) {
   const list = [
     ["summary", "Summary"],
-    ["search", "Search"],
-    ["catalogs", "Catalogs"],
     ["streams", "Streams"],
+    ["playback", "Playback"],
+    ["catalogs", "Catalogs"],
     ["account", accountLabel]
   ];
   return list.map(([id, label]) => `<a class="tab" href="#${id}" data-tab="${id}">${ICONS[id]}<span>${label}</span></a>`).join("\n      ");
@@ -724,10 +781,7 @@ const STYLE = `
   .inline-inputs input { flex: 1 1 auto; min-width: 0; }
   .inline-inputs select { width: auto; flex: 0 0 auto; }
   .note-warn { color: var(--warn); }
-  .profile-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; font-size: 14px; }
-  .profile-bar .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ecf8e; margin-right: 8px; vertical-align: middle; }
-  .profile-bar .muted { color: var(--muted); }
-  .profile-bar code, .sec code { font-size: 12.5px; color: var(--text); }
+  .sec code { font-size: 12.5px; color: var(--text); }
   .card.small { padding: 14px 16px; }
   .ghost-btn, .danger-btn {
     background: var(--field); border: 1px solid var(--border); color: var(--text); padding: 9px 14px;
@@ -748,6 +802,26 @@ const STYLE = `
   .sec h4 { font-size: 14px; margin: 0 0 4px; }
   .sec .check { margin: 4px 0 12px; }
   .signin-view { max-width: 560px; margin: 0 auto; padding: 28px 16px 40px; }
+  .step-no {
+    display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-size: 11px; margin-right: 8px; letter-spacing: 0; vertical-align: 1px;
+  }
+  .fold { margin-top: 12px; }
+  .fold summary { font-size: 13px; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--link); }
+  .fold[open] summary { margin-bottom: 8px; }
+  #key-status { margin-top: 8px; }
+  .warn-card { border-color: #6b4a12; }
+  .warn-card h3 { color: var(--warn); }
+  a.ghost-btn { display: inline-block; text-decoration: none; }
+  .signed-in { margin: 0 0 12px; font-size: 14px; }
+  .signed-in .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ecf8e; margin-right: 8px; vertical-align: middle; }
+  .id-row { display: flex; align-items: center; gap: 8px; }
+  .id-row code {
+    flex: 1 1 auto; min-width: 0; padding: 10px 12px; background: var(--field); border: 1px solid var(--border); border-radius: 9px;
+    font-size: 14px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; user-select: all;
+  }
+  .id-row button { flex: 0 0 auto; }
+  .signout-panel { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 14px; }
 `;
 
 /**
@@ -849,48 +923,26 @@ ${
       </header>
       <button type="button" class="ghost-btn" id="install-app" hidden>Install the ${ADDON_NAME} app</button>
       ${banners}
-      ${mode === "profile" ? installCard(p) : ""}
+      ${
+        mode === "profile"
+          ? `${installCard(p)}
+      <div class="card warn-card" id="key-warning" hidden>
+        <h3>Your key needs you</h3>
+        <p class="lead" id="key-warning-text"></p>
+        <a class="ghost-btn" href="#account">Fix it under Account</a>
+      </div>`
+          : keysCard({ s, p, tmdbNote, step: true })
+      }
 
       <div class="card">
-        <h3>YouTube API key</h3>
-        <p class="lead">
-          ${ADDON_NAME} searches YouTube with your own key, which is free. A key can search 100 times a day.
-          A search is spent the first time a title is looked up, and nothing is spent after that for a day,
-          however often it is opened again.
-        </p>
-        ${keyField({ id: "youtube-key", label: "YouTube API key", value: s.youtubeKey, placeholder: "AIza..." })}
-        <div class="hint">
-          How to get one:
-          <ol>
-            <li>Open the <a href="${YOUTUBE_KEY_URL}" target="_blank" rel="noopener">YouTube Data API v3</a> page in Google Cloud, pick or create a project, and press <strong>Enable</strong>.</li>
-            <li>Go to <a href="${YOUTUBE_CREDENTIALS_URL}" target="_blank" rel="noopener">Credentials</a>, then <strong>Create credentials &rarr; API key</strong>.</li>
-            <li>Leave <strong>Application restrictions</strong> at <strong>None</strong>: this server makes the calls, not your browser. Limiting the key to the YouTube Data API v3 is fine.</li>
-          </ol>
-          ${
-            p.enabled
-              ? "With a profile, your key is kept on this server, encrypted, and only your password or your install link opens it; without one, it lives only inside your install link"
-              : "Your key is kept only inside your personal addon link; YouStream never stores it"
-          } (see the <a href="/terms" target="_blank" rel="noopener">privacy policy</a>).
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>TMDB key <span class="chip">optional</span></h3>
-        <p class="lead">
-          Lets ${ADDON_NAME} read the <code>tmdb:</code> ids Nuvio uses for some titles, and adds TMDB's cast
-          lists and other names to the evidence a match needs.
-        </p>
-        ${keyField({ id: "tmdb-key", label: "TMDB key", value: s.tmdbKey, placeholder: "API key or Read Access Token" })}
-        <div class="hint">${escapeHtml(tmdbNote)} Get one free under <a href="${TMDB_KEY_URL}" target="_blank" rel="noopener">TMDB settings &rarr; API</a>; either the API key or the Read Access Token works.</div>
-      </div>
-
-      <div class="card">
-        <h3>Your setup</h3>
+        <h3>${mode === "profile" ? "Your setup" : '<span class="step-no">2</span>Your setup'}</h3>
+        ${mode === "profile" ? "" : '<p class="lead">The usual settings suit most people. Tap a line to change it, or go on.</p>'}
         <ul class="summary" id="summary-list"></ul>
       </div>
 
-      ${usable && mode === "new" ? createSection(p) : ""}
-      <div class="card" id="finish">
+      <div class="card" id="finish"${mode === "profile" ? " hidden" : ""}>
+        <h3><span class="step-no">3</span>${usable ? "Your profile" : "Your install link"}</h3>
+        ${usable && mode === "new" ? createSection(p) : ""}
         <label class="check agree"${mode === "profile" ? " hidden" : ""}><input type="checkbox" id="agree"${isReconfigure ? " checked" : ""} />
           <span>I agree to the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a> and to YouStream's <a href="/terms" target="_blank" rel="noopener">terms of use and privacy policy</a>.</span></label>
         <button type="submit" class="submit" id="submit-btn">${submitLabel}</button>
@@ -901,18 +953,22 @@ ${
         }
         <div id="result">
           <p class="warning" id="warning"></p>
-          <a id="install-link" class="install-btn" href="#">Install in Stremio</a>
+          <a id="install-link" class="install-btn" href="#">Install in Nuvio</a>
           <div class="url-row">
             <input id="manifest-url" type="text" readonly aria-label="Addon URL" />
             <button type="button" id="copy-btn">Copy</button>
           </div>
-          <div class="hint">In Nuvio, or if the button does not open Stremio, paste the copied URL into the app's add-addon box. Keep it private: it contains your keys.</div>
+          <div class="hint">If the button does not open your app, copy the link and paste it where it adds addons. Keep it private: it contains your keys.</div>
         </div>
       </div>
     </section>
 
-    <section class="panel" data-tab="search" aria-labelledby="h-search" hidden>
-      ${panelHead("search", "Search", `How ${ADDON_NAME} finds films and episodes on YouTube, and what your app's own YouTube search shows.`)}
+    <section class="panel" data-tab="streams" aria-labelledby="h-streams" hidden>
+      ${panelHead(
+        "streams",
+        "Streams",
+        `When you open a film or an episode, ${ADDON_NAME} searches YouTube for it and keeps only the uploads that are really it. What to look for, and how strict to be.`
+      )}
       <div class="card">
         <h3>Look for</h3>
         <div class="row-box">
@@ -925,6 +981,7 @@ ${
         </div>
         <div class="hint">Each type you switch off saves your daily searches for the rest. Switch both off to use ${ADDON_NAME} for YouTube alone.</div>
       </div>
+
 
       <div class="card">
         <h3>Results</h3>
@@ -966,6 +1023,7 @@ ${
         </div>
       </div>
 
+
       <div class="card">
         <h3>Runtime matching</h3>
         <p class="lead">
@@ -978,30 +1036,6 @@ ${
         ${MARGIN_ROWS.map((row) => marginRow(row, s[row.name])).join("")}
       </div>
 
-      <div class="card" id="youtube-card">
-        <h3>YouTube search in your app</h3>
-        <div class="row-box">
-          <label class="check"><input type="checkbox" id="yt-search"${s.search ? " checked" : ""} />
-            <span><strong>Search YouTube</strong><em>Your app's search shows a row of YouTube's own results, live. Each search costs one of your 100 a day, so ${ADDON_NAME} waits until you stop typing and skips anything under 3 letters.</em></span></label>
-        </div>
-        <div class="grid-2" style="margin-top:10px">
-          <label class="field">
-            <span class="label-text">Order search results by</span>
-            <select id="search-sort">${choiceOptions(catalogs.SORTS, s.searchSort)}</select>
-          </label>
-          <label class="field">
-            <span class="label-text">Video length</span>
-            <select id="search-length">${choiceOptions(catalogs.LENGTHS, s.searchLength)}</select>
-          </label>
-        </div>
-        <label class="field">
-          <span class="label-text">SafeSearch</span>
-          <select id="safe-search">${SAFE_SEARCH.map(
-            (id) => `<option value="${id}"${id === s.safeSearch ? " selected" : ""}>${escapeHtml(SAFE_SEARCH_LABELS[id])}</option>`
-          ).join("")}</select>
-        </label>
-        <div class="hint">SafeSearch applies to this search and to your search catalogs.</div>
-      </div>
 
       <div class="card">
         <details id="fine-tuning">
@@ -1036,58 +1070,15 @@ ${
       </div>
     </section>
 
-    <section class="panel" data-tab="catalogs" aria-labelledby="h-catalogs" hidden>
-      ${panelHead(
-        "catalogs",
-        "Catalogs",
-        "Rows on your app's home screen, <strong>in this order</strong>: YouTube searches, channels, playlists and Trending. A video you open from one plays the ways you choose under Streams, and one you save to your library is listed under the type <strong>youtube</strong>."
-      )}
-      <div class="card">
-        <h3>Your rows</h3>
-        <p class="hint cat-lead">
-          Choose where a row's videos come from, type the search or paste the playlist or channel, then choose
-          how its videos are ordered. Use the arrows to arrange them.
-        </p>
-        <div id="catalog-list"></div>
-        <div class="add-row source-row">
-          <select id="catalog-source" aria-label="Where the catalog's videos come from">${choiceOptions(CATALOG_SOURCES, CATALOG_SOURCES[0].id)}</select>
-          <input type="text" id="catalog-input" maxlength="500" placeholder="${escapeHtml(CATALOG_SOURCES[0].placeholder)}" aria-label="${escapeHtml(CATALOG_SOURCES[0].prompt)}" spellcheck="false" />
-          <button type="button" class="add-btn" id="catalog-add">Add</button>
-        </div>
-        <div class="hint" id="catalog-note" role="status"></div>
-        <span class="sub-label">Trending in your country</span>
-        <div class="chips" id="trending-chips"></div>
-      </div>
-
-      <div class="card">
-        <h3>Refreshing</h3>
-        <div class="field">
-          <span class="label-text">Refresh catalogs every</span>
-          <div class="inline-inputs">
-            <input type="number" id="refresh-value" min="0" step="any" inputmode="decimal" value="${escapeHtml(s.catalogRefresh.value)}" aria-label="Refresh catalogs every" />
-            <select id="refresh-unit" aria-label="Refresh unit">${Object.entries(REFRESH_UNITS)
-              .map(([unit, info]) => `<option value="${unit}"${unit === s.catalogRefresh.unit ? " selected" : ""}>${escapeHtml(info.label)}</option>`)
-              .join("")}</select>
-          </div>
-        </div>
-        <div class="hint">
-          A search catalog costs one of your 100 daily searches each time it refreshes; a channel, a playlist or a
-          Trending row costs almost nothing. A row refreshes only when your app shows it after this long: every
-          ${DEFAULT_CATALOG_REFRESH.value} hours unless you change it, and at most every 30 minutes. YouTube's terms let a
-          server keep its data 30 days at most, so anything longer refreshes then.
-          <span id="quota-note"></span>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel" data-tab="streams" aria-labelledby="h-streams" hidden>
-      ${panelHead("streams", "Streams", "How each video found is offered in your app, and how its stream reads there.")}
+    <section class="panel" data-tab="playback" aria-labelledby="h-playback" hidden>
+      ${panelHead("playback", "Playback", "How each video found is offered in your app, and how its stream reads there.")}
       <div class="card">
         <h3>When you press play</h3>
         <p class="lead">Each video found is offered these ways, in this order. The first one is what the play button lands on.</p>
         <ul id="pb-options">${playbackRows(s.playback)}
         </ul>
       </div>
+
 
       <div class="card format">
         <h3>Stream name and description</h3>
@@ -1128,6 +1119,77 @@ ${
         </details>
       </div>
     </section>
+
+    <section class="panel" data-tab="catalogs" aria-labelledby="h-catalogs" hidden>
+      ${panelHead(
+        "catalogs",
+        "Catalogs",
+        "YouTube in your app: a row of YouTube's own results when you search, and rows of your own on the home screen, <strong>in this order</strong>. A video you open from one plays the ways you choose under Playback, and one you save to your library is listed under the type <strong>youtube</strong>."
+      )}
+      <div class="card" id="youtube-card">
+        <h3>The search row</h3>
+        <div class="row-box">
+          <label class="check"><input type="checkbox" id="yt-search"${s.search ? " checked" : ""} />
+            <span><strong>Search YouTube</strong><em>Your app's search shows a row of YouTube's own results, live. Each search costs one of your 100 a day, so ${ADDON_NAME} waits until you stop typing and skips anything under 3 letters.</em></span></label>
+        </div>
+        <div class="grid-2" style="margin-top:10px">
+          <label class="field">
+            <span class="label-text">Order search results by</span>
+            <select id="search-sort">${choiceOptions(catalogs.SORTS, s.searchSort)}</select>
+          </label>
+          <label class="field">
+            <span class="label-text">Video length</span>
+            <select id="search-length">${choiceOptions(catalogs.LENGTHS, s.searchLength)}</select>
+          </label>
+        </div>
+        <label class="field">
+          <span class="label-text">SafeSearch</span>
+          <select id="safe-search">${SAFE_SEARCH.map(
+            (id) => `<option value="${id}"${id === s.safeSearch ? " selected" : ""}>${escapeHtml(SAFE_SEARCH_LABELS[id])}</option>`
+          ).join("")}</select>
+        </label>
+        <div class="hint">When you search in your app, a row of YouTube's own results comes with the rest. SafeSearch applies to it and to your search rows below.</div>
+      </div>
+
+
+      <div class="card">
+        <h3>Your rows</h3>
+        <p class="hint cat-lead">
+          Choose where a row's videos come from, type the search or paste the playlist or channel, then choose
+          how its videos are ordered. Use the arrows to arrange them.
+        </p>
+        <div id="catalog-list"></div>
+        <div class="add-row source-row">
+          <select id="catalog-source" aria-label="Where the catalog's videos come from">${choiceOptions(CATALOG_SOURCES, CATALOG_SOURCES[0].id)}</select>
+          <input type="text" id="catalog-input" maxlength="500" placeholder="${escapeHtml(CATALOG_SOURCES[0].placeholder)}" aria-label="${escapeHtml(CATALOG_SOURCES[0].prompt)}" spellcheck="false" />
+          <button type="button" class="add-btn" id="catalog-add">Add</button>
+        </div>
+        <div class="hint" id="catalog-note" role="status"></div>
+        <span class="sub-label">Trending in your country</span>
+        <div class="chips" id="trending-chips"></div>
+      </div>
+
+
+      <div class="card">
+        <h3>Refreshing</h3>
+        <div class="field">
+          <span class="label-text">Refresh catalogs every</span>
+          <div class="inline-inputs">
+            <input type="number" id="refresh-value" min="0" step="any" inputmode="decimal" value="${escapeHtml(s.catalogRefresh.value)}" aria-label="Refresh catalogs every" />
+            <select id="refresh-unit" aria-label="Refresh unit">${Object.entries(REFRESH_UNITS)
+              .map(([unit, info]) => `<option value="${unit}"${unit === s.catalogRefresh.unit ? " selected" : ""}>${escapeHtml(info.label)}</option>`)
+              .join("")}</select>
+          </div>
+        </div>
+        <div class="hint">
+          A search catalog costs one of your 100 daily searches each time it refreshes; a channel, a playlist or a
+          Trending row costs almost nothing. A row refreshes only when your app shows it after this long: every
+          ${DEFAULT_CATALOG_REFRESH.value} hours unless you change it, and at most every 30 minutes. YouTube's terms let a
+          server keep its data 30 days at most, so anything longer refreshes then.
+          <span id="quota-note"></span>
+        </div>
+      </div>
+    </section>
   </form>
 
     <section class="panel" data-tab="account" aria-labelledby="h-account" hidden>
@@ -1135,17 +1197,19 @@ ${
         "account",
         p.enabled ? "Account" : "More",
         mode === "profile"
-          ? "Your profile: signing out, backups, its password and its install link."
+          ? "Your profile, your keys, backups, and your password and install link."
           : usable
             ? "Sign in to a profile, or keep your settings in a file."
             : "Keep your settings in a file."
       )}
-      ${mode === "profile" ? profileBar(p) : ""}
+      ${mode === "profile" ? profileCard(p) : ""}
+      ${mode === "profile" ? keysCard({ s, p, tmdbNote, step: false }) : ""}
       ${usable && mode === "new" ? signInCard(p, mode) : ""}
       ${backupsCard()}
       ${mode === "profile" ? securityCard() : ""}
       ${about(credits)}
     </section>
+
   </main>
 </div>
   <div class="toasts" aria-live="polite">

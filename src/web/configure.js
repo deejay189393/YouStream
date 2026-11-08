@@ -658,16 +658,16 @@ module.exports = function start(window, hooks = {}) {
   function renderSummary() {
     const playing = pbOn().map((row) => row.querySelector("strong").textContent);
     const rows = [
-      ["Looks for", lookingFor(), "search"],
-      ["YouTube search in your app", ytSearch.checked ? ["On", shown(searchSort), shown(searchLength)].join(" · ") : "Off", "search"],
+      ["Looks for", lookingFor(), "streams"],
+      ["YouTube search in your app", ytSearch.checked ? ["On", shown(searchSort), shown(searchLength)].join(" · ") : "Off", "catalogs"],
       [
         "Catalogs",
         CATALOGS.length ? CATALOGS.length + (CATALOGS.length === 1 ? " row: " : " rows: ") + CATALOGS.map(catalogName).join(", ") : "None yet",
         "catalogs"
       ],
-      ["When you press play", playing.length ? playing.join(", then ") : "Nothing chosen yet", "streams"],
-      ["Stream text", shown(presetSelect), "streams"],
-      ["Country and language", shown(regionSelect) + " · " + shown($("audio-language")), "search"]
+      ["When you press play", playing.length ? playing.join(", then ") : "Nothing chosen yet", "playback"],
+      ["Stream text", shown(presetSelect), "playback"],
+      ["Country and language", shown(regionSelect) + " · " + shown($("audio-language")), "streams"]
     ];
     summaryList.textContent = "";
     rows.forEach(([name, value, tab]) => {
@@ -828,6 +828,52 @@ module.exports = function start(window, hooks = {}) {
       );
   }
 
+  // --- The keys, checked as soon as they are typed or pasted, so a bad one
+  // is caught at once rather than at saving. A check costs the key 1 unit of
+  // quota, not a search. A signed-in profile's key is checked as the page
+  // opens, and the summary says so only when it needs the reader.
+  const keyStatus = $("key-status");
+  const keyWarning = $("key-warning");
+  let checking = 0;
+
+  function keyProblem(status) {
+    if (KEY_PROBLEMS[status.youtube]) return KEY_PROBLEMS[status.youtube];
+    if (status.youtube === "quota") return QUOTA_WARNING;
+    if (status.tmdb === "invalid") return TMDB_INVALID;
+    return "";
+  }
+
+  function checkKeysNow() {
+    const youtubeKey = $("youtube-key").value.trim();
+    if (!youtubeKey || typeof window.fetch !== "function") return say(keyStatus, "");
+    const mine = ++checking;
+    say(keyStatus, "Checking...");
+    window
+      .fetch("/api/check-keys", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ youtubeKey, tmdbKey: $("tmdb-key").value.trim() })
+      })
+      .then((res) => res.json())
+      .then(
+        (status) => {
+          // A later check answers for the keys as they are now.
+          if (mine !== checking) return;
+          const wrong = keyProblem(status);
+          say(keyStatus, wrong || (status.tmdb === "ok" ? "Both keys work." : "Your key works."), wrong ? "bad" : "good");
+          if (keyWarning) {
+            keyWarning.hidden = !wrong;
+            $("key-warning-text").textContent = wrong;
+          }
+        },
+        () => {
+          if (mine === checking) say(keyStatus, "The keys could not be checked just now; they will be when you save.");
+        }
+      );
+  }
+  ["youtube-key", "tmdb-key"].forEach((id) => $(id).addEventListener("change", checkKeysNow));
+  if (PROFILE.mode === "profile") checkKeysNow();
+
   // --- Profiles -------------------------------------------------------------
   // PROFILE.mode: "profile" (signed in, editing it), "signin" (opened from a
   // profile's install link, not signed in to it) or "new".
@@ -902,21 +948,23 @@ module.exports = function start(window, hooks = {}) {
     document.body.classList.remove("has-save-bar");
   }
 
-  // Any edit to the form: typing, choosing, and every button but the eye on
-  // a key and the preview's tabs. The summary follows every one.
-  form.addEventListener("input", () => {
+  // Any edit to a setting: typing, choosing, and every button but the eye on
+  // a key and the preview's tabs. A setting is whatever belongs to the
+  // settings form, even a key box that sits outside it, in Account. The
+  // summary follows every one.
+  function edited() {
     markDirty();
     renderSummary();
-  });
-  form.addEventListener("change", () => {
-    markDirty();
-    renderSummary();
-  });
-  form.addEventListener("click", (e) => {
+  }
+  ["input", "change"].forEach((type) =>
+    document.addEventListener(type, (e) => {
+      if (e.target.form === form) edited();
+    })
+  );
+  document.addEventListener("click", (e) => {
     const button = e.target.closest("button");
-    if (!button || button.type === "submit" || button.matches(".key-toggle, .preview-tab")) return;
-    markDirty();
-    renderSummary();
+    if (!button || button.form !== form || button.type === "submit" || button.matches(".key-toggle, .preview-tab")) return;
+    edited();
   });
   window.addEventListener("beforeunload", (e) => {
     if (!dirty || leaving) return;
@@ -1058,22 +1106,39 @@ module.exports = function start(window, hooks = {}) {
     });
   }
 
-  function copyText(input, button) {
+  // Copies text, or, where the browser will not, selects it for the reader to copy.
+  function copyText(text, button, select) {
     const clipboard = navigator.clipboard;
-    if (!clipboard) return input.select();
-    clipboard.writeText(input.value).then(
+    if (!clipboard) return select();
+    clipboard.writeText(text).then(
       () => {
         button.textContent = "Copied!";
         window.setTimeout(() => {
           button.textContent = "Copy";
         }, 1500);
       },
-      () => input.select()
+      () => select()
     );
   }
-  $("copy-btn").addEventListener("click", () => copyText($("manifest-url"), $("copy-btn")));
-  const profileCopy = $("profile-copy");
-  if (profileCopy) profileCopy.addEventListener("click", () => copyText($("profile-url"), profileCopy));
+  const copyBox = (boxId, buttonId) => {
+    const button = $(buttonId);
+    if (button) button.addEventListener("click", () => copyText($(boxId).value, button, () => $(boxId).select()));
+  };
+  copyBox("manifest-url", "copy-btn");
+  copyBox("profile-url", "profile-copy");
+  const idCopy = $("profile-id-copy");
+  if (idCopy) {
+    const idText = $("profile-id");
+    idCopy.addEventListener("click", () =>
+      copyText(idText.textContent, idCopy, () => {
+        const range = document.createRange();
+        range.selectNodeContents(idText);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      })
+    );
+  }
 
   // The profile's password, link and existence, each confirmed with the password.
   const value = (id) => $(id).value;

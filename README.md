@@ -256,7 +256,7 @@ watching and the channel, so next-episode autoplay stays on the same choice.
 What each row says comes from two templates in AIOStreams' [custom formatter
 syntax](https://docs.aiostreams.viren070.me/reference/custom-formatter), the
 language PenguPlay uses too, so a template made for either works here. Pick a
-preset on the configure page (Streams → Stream name and description) or
+preset on the configure page (Playback → Stream name and description) or
 write your own; the page previews it live, for a film and an episode, one row
 per way of watching you turned on.
 
@@ -603,18 +603,22 @@ quota extension form.
 
 ## Settings
 
-The configure page is an app, in five tabs: **Summary** (your keys, your
-setup at a glance, and your install link), **Search** (what to look for, the
-results, runtime matching, YouTube search in your app, fine-tuning),
-**Catalogs**, **Streams** (the ways to watch, and how a stream reads), and
-**Account** (signing in, backups, your profile's password and link; **More**
-on a server without profiles). On a phone they are a bar along the bottom; on
-a wider screen, a column down the side. The address says which is open
-(`/configure#catalogs`), so the back button and a bookmark work. Every setting
-is in one form whichever tab shows it, and a problem opens the tab, and the
-field, to fix. A new setup is finished on the Summary, which a bar on every
-other tab leads back to; a profile saves from a bar that appears with
-changes, on any tab.
+The configure page is an app, in five tabs:
+
+| Tab | What it holds |
+|---|---|
+| **Summary** | A new setup's three steps: your YouTube key (checked the moment it is pasted, for 1 unit of quota), your setup at a glance, then your profile or an install link. Signed in: your install link, a warning only when your key needs you, and your setup at a glance |
+| **Streams** | How a film or an episode is found: what to look for, the results kept, runtime matching, and fine-tuning |
+| **Playback** | How each video found is offered in your app, and how its stream reads |
+| **Catalogs** | YouTube in your app: the search row (on or off, its order and length, SafeSearch), your rows, and how often they refresh |
+| **Account** | Signed in: your profile, with its whole ID to sign in with elsewhere, your keys, backups, and your password and link. Otherwise signing in and backups; **More** on a server without profiles |
+
+On a phone the tabs are a bar along the bottom; on a wider screen, a column
+down the side. The address says which is open (`/configure#catalogs`), so the
+back button and a bookmark work. Every setting belongs to one form whichever
+tab shows it, and a problem opens the tab, and the field, to fix. A new setup
+is finished on the Summary, which a bar on every other tab leads back to; a
+profile saves from a bar that appears with changes, on any tab.
 
 Without a profile, everything you choose is encoded into your personal addon
 URL, and nothing is stored on the server; with one, the same settings are kept

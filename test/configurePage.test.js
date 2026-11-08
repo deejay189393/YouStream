@@ -117,20 +117,9 @@ describe("the page as an app", () => {
   const html = page();
 
   test("five tabs, and a panel for each, the summary first", () => {
-    expect([...html.matchAll(/<a class="tab" href="#(\w+)" data-tab="\1">/g)].map((m) => m[1])).toEqual([
-      "summary",
-      "search",
-      "catalogs",
-      "streams",
-      "account"
-    ]);
-    expect([...html.matchAll(/<section class="panel" data-tab="(\w+)"/g)].map((m) => m[1])).toEqual([
-      "summary",
-      "search",
-      "catalogs",
-      "streams",
-      "account"
-    ]);
+    const order = ["summary", "streams", "playback", "catalogs", "account"];
+    expect([...html.matchAll(/<a class="tab" href="#(\w+)" data-tab="\1">/g)].map((m) => m[1])).toEqual(order);
+    expect([...html.matchAll(/<section class="panel" data-tab="(\w+)"/g)].map((m) => m[1])).toEqual(order);
     // Without profiles, the last tab holds only backups and the terms.
     expect(html).toContain("<span>More</span>");
     expect(page(null, { profile: { enabled: true } })).toContain("<span>Account</span>");

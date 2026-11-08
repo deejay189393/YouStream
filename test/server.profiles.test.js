@@ -78,7 +78,10 @@ describe("the configure page", () => {
   test("signed in: the profile's own settings, its install link, and its security", async () => {
     const { b, id, installUrl } = await withProfile({ youtubeKey: "AIzaSyPROFILEKEY", maxResults: 9 });
     const res = await b.get("/configure");
-    expect(res.text).toContain(`profile <code title="${id}">${id.slice(0, 8)}…</code>`);
+    // The whole profile ID, to sign in with elsewhere, and its key in Account, still part of the settings.
+    expect(res.text).toContain(`<code id="profile-id">${id}</code>`);
+    expect(res.text).toMatch(/id="youtube-key" class="key-input" form="config-form"/);
+    expect(res.text).toContain(">Install in Nuvio</a>");
     expect(res.text).toContain(`value="${installUrl}"`);
     expect(res.text).toContain(`href="stremio://${installUrl.slice("http://".length)}"`);
     expect(res.text).toContain('value="AIzaSyPROFILEKEY"');

@@ -109,12 +109,12 @@ describe("tabs", () => {
   test("each of the summary's lines opens the tab it is about", () => {
     const p = open();
     expect([...p.document.querySelectorAll("#summary-list .summary-row")].map((row) => row.getAttribute("href"))).toEqual([
-      "#search",
-      "#search",
+      "#streams",
       "#catalogs",
-      "#streams",
-      "#streams",
-      "#search"
+      "#catalogs",
+      "#playback",
+      "#playback",
+      "#streams"
     ]);
   });
 });
@@ -123,7 +123,7 @@ describe("the bars along the bottom", () => {
   test("a new setup: away from the summary, a bar leads back to finish it", async () => {
     const p = open();
     expect(p.$("#finish-bar").hidden).toBe(true);
-    await tapTab(p, "search");
+    await tapTab(p, "streams");
     expect(p.$("#finish-bar").hidden).toBe(false);
     p.$("#finish-go").click();
     expect([p.tab(), p.focused()]).toEqual(["summary", "submit-btn"]);
@@ -149,13 +149,13 @@ describe("a problem opens the tab, and the field, to fix", () => {
     expect([p.tab(), p.focused()]).toEqual(["summary", "youtube-key"]);
   });
 
-  test("a margin: the search tab, in that margin", () => {
+  test("a margin: the streams tab, in that margin", () => {
     const p = open();
     p.set("youtube-key", "k");
     p.set("margin-episodeMargin", "lots");
     p.submit();
     expect(p.error()).toBe("Episodes: enter the margin as a number, 0 or more.");
-    expect([p.tab(), p.focused()]).toEqual(["search", "margin-episodeMargin"]);
+    expect([p.tab(), p.focused()]).toEqual(["streams", "margin-episodeMargin"]);
   });
 
   test("a search without {title}: the fine-tuning fold opened", () => {
@@ -165,25 +165,25 @@ describe("a problem opens the tab, and the field, to fix", () => {
     expect(p.$("#fine-tuning").open).toBe(false);
     p.submit();
     expect(p.error()).toBe("Both searches need {title} in them.");
-    expect([p.tab(), p.focused(), p.$("#fine-tuning").open]).toEqual(["search", "episode-query", true]);
+    expect([p.tab(), p.focused(), p.$("#fine-tuning").open]).toEqual(["streams", "episode-query", true]);
   });
 
-  test("no way to watch: the streams tab, at the first one", () => {
+  test("no way to watch: the playback tab, at the first one", () => {
     const p = open();
     p.set("youtube-key", "k");
     p.document.querySelectorAll(".pb-on").forEach((box) => (box.checked = false));
     p.submit();
     expect(p.error()).toBe("Turn on at least one way to watch.");
-    expect([p.tab(), p.focused()]).toEqual(["streams", "pb-on-app"]);
+    expect([p.tab(), p.focused()]).toEqual(["playback", "pb-on-app"]);
   });
 
-  test("too long a stream name: the streams tab, in the name", () => {
+  test("too long a stream name: the playback tab, in the name", () => {
     const p = open();
     p.set("youtube-key", "k");
     p.set("name-template", "x".repeat(5000));
     p.submit();
     expect(p.error()).toMatch(/^The stream name can be \d+ characters long/);
-    expect([p.tab(), p.focused()]).toEqual(["streams", "name-template"]);
+    expect([p.tab(), p.focused()]).toEqual(["playback", "name-template"]);
   });
 
   test("too short a refresh: the catalogs tab", () => {
@@ -283,6 +283,134 @@ describe("the summary", () => {
     change("region", "IN");
     change("audio-language", "hi");
     expect(p.summary()["Country and language"]).toBe("India · Hindi");
+  });
+});
+
+describe("the keys, checked as soon as they are pasted", () => {
+  /** Answers each key check in turn with the next of `answers`; an Error is a check that cannot be made. */
+  const checks = (answers) => {
+    let i = 0;
+    return jest.fn(async () => {
+      const answer = answers[Math.min(i++, answers.length - 1)];
+      if (answer instanceof Error) throw answer;
+      return { ok: true, status: 200, json: async () => answer };
+    });
+  };
+  const paste = async (p, id, value) => {
+    p.set(id, value);
+    p.fire(`#${id}`, "change");
+    await settle();
+  };
+  const status = (p) => [p.$("#key-status").textContent, p.$("#key-status").className];
+
+  test("a key that works says so, and both keys when TMDB's works too", async () => {
+    const fetch = checks([{ youtube: "ok", tmdb: "absent" }, { youtube: "ok", tmdb: "ok" }]);
+    const p = open({ fetch });
+    await paste(p, "youtube-key", " AIzaGood ");
+    expect(status(p)).toEqual(["Your key works.", "msg good"]);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ youtubeKey: "AIzaGood", tmdbKey: "" });
+    await paste(p, "tmdb-key", "tmdbGood");
+    expect(status(p)).toEqual(["Both keys work.", "msg good"]);
+  });
+
+  test("a key YouTube refuses, a spent quota, and a TMDB key that is not one, each said plainly", async () => {
+    for (const [answer, says] of [
+      [{ youtube: "restricted", tmdb: "absent" }, /^This key is restricted/],
+      [{ youtube: "quota", tmdb: "absent" }, /quota for today is already spent/],
+      [{ youtube: "ok", tmdb: "invalid" }, /^TMDB says this key is not valid/]
+    ]) {
+      const p = open({ fetch: checks([answer]) });
+      await paste(p, "youtube-key", "AIzaKey");
+      expect(status(p)[0]).toMatch(says);
+      expect(status(p)[1]).toBe("msg bad");
+    }
+  });
+
+  test("no key, no check; a browser that cannot ask, or a check that fails, holds nothing up", async () => {
+    const fetch = checks([new TypeError("Failed to fetch")]);
+    const p = open({ fetch });
+    await paste(p, "youtube-key", "   ");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(p.$("#key-status").hidden).toBe(true);
+    await paste(p, "youtube-key", "AIzaKey");
+    expect(status(p)).toEqual(["The keys could not be checked just now; they will be when you save.", "msg"]);
+    const old = open();
+    await paste(old, "youtube-key", "AIzaKey");
+    expect(old.$("#key-status").hidden).toBe(true);
+  });
+
+  test("only the latest check speaks: an earlier one answering late, or failing late, is not heard", async () => {
+    for (const late of [{ youtube: "invalid", tmdb: "absent" }, new TypeError("Failed to fetch")]) {
+      let release;
+      const held = new Promise((resolve) => (release = resolve));
+      let calls = 0;
+      const fetch = jest.fn(async () => {
+        if (++calls === 1) {
+          await held;
+          if (late instanceof Error) throw late;
+          return { ok: true, json: async () => late };
+        }
+        return { ok: true, json: async () => ({ youtube: "ok", tmdb: "absent" }) };
+      });
+      const p = open({ fetch });
+      p.set("youtube-key", "AIzaOld");
+      p.fire("#youtube-key", "change");
+      await paste(p, "youtube-key", "AIzaNew");
+      expect(status(p)[0]).toBe("Your key works.");
+      release();
+      await settle();
+      expect(status(p)[0]).toBe("Your key works.");
+    }
+  });
+
+  test("a profile's key is checked as the page opens, and the summary speaks only when it needs the reader", async () => {
+    const existing = normalizeConfig({ youtubeKey: "AIzaSaved" });
+    const bad = open({ profile: SIGNED_IN, existing, fetch: checks([{ youtube: "disabled", tmdb: "absent" }]) });
+    await settle();
+    expect(bad.$("#key-warning").hidden).toBe(false);
+    expect(bad.$("#key-warning-text").textContent).toMatch(/does not have the YouTube Data API v3 enabled/);
+    const good = open({ profile: SIGNED_IN, existing, fetch: checks([{ youtube: "ok", tmdb: "absent" }]) });
+    await settle();
+    expect(good.$("#key-warning").hidden).toBe(true);
+    expect(good.$("#key-status").textContent).toBe("Your key works.");
+  });
+});
+
+describe("Account, signed in", () => {
+  const existing = normalizeConfig({ youtubeKey: "AIzaSaved" });
+  const clipboard = (writeText) => (window) => Object.defineProperty(window.navigator, "clipboard", { value: { writeText }, configurable: true });
+
+  test("the whole profile ID, copied with a tap", async () => {
+    const writes = [];
+    const p = open({ profile: SIGNED_IN, existing, before: clipboard(async (text) => writes.push(text)) });
+    expect(p.$("#profile-id").textContent).toBe(ID);
+    p.$("#profile-id-copy").click();
+    await settle();
+    expect(writes).toEqual([ID]);
+    expect(p.$("#profile-id-copy").textContent).toBe("Copied!");
+  });
+
+  test("where the browser will not copy it, the ID is selected, to copy by hand", async () => {
+    const none = open({ profile: SIGNED_IN, existing });
+    none.$("#profile-id-copy").click();
+    expect(String(none.window.getSelection())).toBe(ID);
+    const refused = open({ profile: SIGNED_IN, existing, before: clipboard(() => Promise.reject(new Error("denied"))) });
+    refused.$("#profile-id-copy").click();
+    await settle();
+    expect(String(refused.window.getSelection())).toBe(ID);
+  });
+
+  test("its key boxes are settings like any other; its passwords, backups and buttons are not", async () => {
+    const p = open({ profile: SIGNED_IN, existing });
+    p.set("pw-current", "a password");
+    p.fire("#pw-current", "input");
+    p.$("#export-no-keys").checked = false;
+    p.fire("#export-no-keys", "change");
+    p.$("#signout-btn").click();
+    expect(p.$("#save-bar").hidden).toBe(true);
+    p.set("youtube-key", "AIzaNew");
+    p.fire("#youtube-key", "input");
+    expect(p.$("#save-bar").hidden).toBe(false);
   });
 });
 
