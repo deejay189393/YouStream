@@ -511,9 +511,11 @@ and applies at once, and the row keeps its id and name. Measured on a real
 search, "indian stand up comedy" by relevance, 100 videos: leaving out
 "Gaurav Kapoor" left out 16, 13 of them his own (named in the title or the
 channel) and 3 that thank or tag him in their description, and kept none
-that name him; in the title or channel only, it left out his 13 alone. A
-row whose filter leaves out every video on a page moves on to the next
-page, which for a search costs another 101 units.
+that name him. On a later run of the same search, "In the title or channel
+only" left out the same 11 videos as looking everywhere: all 11 named him in
+the title or the channel, and none of that day's 100 named him only in a
+description. A row whose filter leaves out every video on a page moves on
+to the next page, which for a search costs another 101 units.
 
 ### Metadata and streams
 
