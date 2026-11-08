@@ -72,14 +72,18 @@ jobs:
           curl -fsS http://localhost:3000/health
           curl -fsS http://localhost:3000/manifest.json -o manifest.json
           grep -qF '"id":"org.deejay189393.youstream"' manifest.json
-      # Profiles on Node's own SQLite, in the image as built: there is no
-      # native module, so nothing to compile on Alpine, and this proves it.
-      - name: Start it with profiles on SQLite, and check that they are ready
+      # Profiles, and the cache, on Node's own SQLite, in the image as built:
+      # there is no native module, so nothing to compile on Alpine, and this
+      # proves it.
+      - name: Start it with profiles and the cache on SQLite, and check that they are ready
         run: |
-          docker run -d --name profiles -p 3001:3000 -e IMDB_DATASETS=off \
+          docker run -d --name profiles -p 3001:3000 -e IMDB_DATASETS=off -e CACHE_STORE=database \
             -e DATABASE_URL=sqlite:///data/youstream.db -e SECRET_KEY="$(openssl rand -hex 32)" youstream
           for i in $(seq 1 30); do curl -fsS http://localhost:3001/health | grep -qF '"profiles":"ready"' && break; sleep 1; done
           curl -fsS http://localhost:3001/health | grep -F '"profiles":"ready"'
+          curl -fsS http://localhost:3001/health | grep -F '"cache":"database"'
+          docker logs profiles 2>&1 | grep -F '[cache] database SQLite /data/youstream.db'
+          ! docker logs profiles 2>&1 | grep -F 'could not be opened'
       - name: The server's output, when it did not
         if: failure()
         run: |

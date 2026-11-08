@@ -29,14 +29,17 @@ class PostgresDriver {
   /**
    * @param {string} connectionString  postgres://user:password@host:port/db
    * @param {object} [pg]              the pg module; a stand-in for tests
+   * @param {object} [options]         pool settings over the defaults below,
+   *                                   such as the cache's smaller, quicker pool
    */
-  constructor(connectionString, pg = require("pg")) {
+  constructor(connectionString, pg = require("pg"), options = {}) {
     this.dialect = "postgres";
     this.pool = new pg.Pool({
       connectionString,
       max: 5,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
+      ...options,
       // Times are kept as epoch milliseconds in BIGINT columns, which pg
       // otherwise returns as strings to be safe beyond 2^53.
       types: {

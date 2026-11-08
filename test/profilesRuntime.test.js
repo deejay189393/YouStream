@@ -36,7 +36,7 @@ describe("starting", () => {
     await profiles.start(settings(), { log });
     expect(profiles.status()).toBe("ready");
     expect(profiles.getStore()).not.toBeNull();
-    expect(log.log).toHaveBeenCalledWith("[profiles] on, kept in SQLite :memory:; tables set up: profiles");
+    expect(log.log).toHaveBeenCalledWith("[profiles] on, kept in SQLite :memory:; tables set up: profiles, cache");
   });
 
   test("a database already set up says only where it is", async () => {

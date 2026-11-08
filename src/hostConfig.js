@@ -6,17 +6,21 @@
  * Every variable is optional. A value that cannot be read falls back to its
  * default with a warning in the log, so a typo never stops the server.
  *
- *   CACHE_STORE                 memory | redis | file. Default: redis when
- *                               REDIS_URL is set, otherwise memory.
+ *   CACHE_STORE                 memory | redis | file | database. Default:
+ *                               redis when REDIS_URL is set, otherwise
+ *                               memory. database keeps the cache in a table
+ *                               of DATABASE_URL's database, beside profiles
  *   REDIS_URL                   redis://user:password@host:port/db
  *   CACHE_DIR                   where the file store writes (default .cache);
  *                               on Railway, a volume's mount path
  *   CACHE_PREFIX                namespace for every key (default youstream).
  *                               Two deployments with the same prefix on one
- *                               Redis share their searches; give them
- *                               different prefixes to keep them apart.
+ *                               Redis or database share their searches; give
+ *                               them different prefixes to keep them apart.
  *   CACHE_MEMORY_MB             memory store size (default 64)
  *   CACHE_FILE_MB               file store size (default 512)
+ *   CACHE_DATABASE_MB           database store size, for this prefix
+ *                               (default 512)
  *
  *   CACHE_SEARCH_TTL            how long a YouTube search counts as current
  *                               (default 24h)
@@ -83,7 +87,7 @@
  * Zero turns that cache off.
  */
 
-const { parseDatabaseUrl } = require("./storage");
+const { parseDatabaseUrl, describeDatabase } = require("./storage");
 
 const SECOND_MS = 1000;
 const UNIT_MS = { s: SECOND_MS, m: 60 * SECOND_MS, h: 60 * 60 * SECOND_MS, d: 24 * 60 * 60 * SECOND_MS };
@@ -92,7 +96,7 @@ const DAY_MS = UNIT_MS.d;
 /** YouTube API data may be kept 30 days at most, then refreshed or deleted. */
 const MAX_YOUTUBE_DATA_MS = 30 * DAY_MS;
 
-const STORES = ["memory", "redis", "file"];
+const STORES = ["memory", "redis", "file", "database"];
 const DEFAULT_CONTACT = "https://github.com/deejay189393/YouStream/issues";
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const CHANNEL_ID = /^UC[A-Za-z0-9_-]{22}$/;
@@ -119,6 +123,7 @@ const DEFAULTS = {
   CACHE_PREFIX: "youstream",
   CACHE_MEMORY_MB: 64,
   CACHE_FILE_MB: 512,
+  CACHE_DATABASE_MB: 512,
   CACHE_SEARCH_TTL: "24h",
   CACHE_SEARCH_RECENT_TTL: "3h",
   CACHE_RECENT_DAYS: 30,
@@ -169,6 +174,15 @@ function readHostConfig(env = process.env) {
   }
 
   const redisUrl = given("REDIS_URL") ? env.REDIS_URL.trim() : null;
+  let databaseUrl = null;
+  if (given("DATABASE_URL")) {
+    try {
+      parseDatabaseUrl(env.DATABASE_URL);
+      databaseUrl = env.DATABASE_URL.trim();
+    } catch (_) {
+      // Said once, by readProfiles.
+    }
+  }
   let store = redisUrl ? "redis" : "memory";
   if (given("CACHE_STORE")) {
     const asked = env.CACHE_STORE.trim().toLowerCase();
@@ -176,6 +190,8 @@ function readHostConfig(env = process.env) {
       warnings.push(`CACHE_STORE="${env.CACHE_STORE}" is not one of ${STORES.join(", ")}; using ${store}`);
     } else if (asked === "redis" && !redisUrl) {
       warnings.push("CACHE_STORE=redis needs REDIS_URL; using memory");
+    } else if (asked === "database" && !databaseUrl) {
+      warnings.push(`CACHE_STORE=database needs a usable DATABASE_URL; using ${store}`);
     } else {
       store = asked;
     }
@@ -218,10 +234,12 @@ function readHostConfig(env = process.env) {
     cache: {
       store,
       redisUrl,
+      databaseUrl,
       dir: given("CACHE_DIR") ? env.CACHE_DIR.trim() : DEFAULTS.CACHE_DIR,
       prefix,
       memoryBytes: count("CACHE_MEMORY_MB") * 1024 * 1024,
       fileBytes: count("CACHE_FILE_MB") * 1024 * 1024,
+      databaseBytes: count("CACHE_DATABASE_MB") * 1024 * 1024,
       searchMs: Math.min(searchMs, MAX_YOUTUBE_DATA_MS),
       recentSearchMs: Math.min(recentSearchMs, MAX_YOUTUBE_DATA_MS),
       recentDays: count("CACHE_RECENT_DAYS"),
@@ -314,11 +332,13 @@ function describeCache(cache) {
       .find(([, size]) => ms % size === 0) || ["s", SECOND_MS];
     return `${ms / size}${unit}`;
   };
+  const mb = (bytes) => `${Math.round(bytes / 1048576)} MB`;
   const where = {
-    memory: `memory (${Math.round(cache.memoryBytes / 1048576)} MB)`,
-    redis: `redis ${redactUrl(cache.redisUrl)}`,
-    file: `file ${cache.dir} (${Math.round(cache.fileBytes / 1048576)} MB)`
-  }[cache.store];
+    memory: () => `memory (${mb(cache.memoryBytes)})`,
+    redis: () => `redis ${redactUrl(cache.redisUrl)}`,
+    file: () => `file ${cache.dir} (${mb(cache.fileBytes)})`,
+    database: () => `database ${describeDatabase(cache.databaseUrl)} (${mb(cache.databaseBytes)})`
+  }[cache.store]();
   return (
     `${where}, prefix "${cache.prefix}": searches ${ttl(cache.searchMs)} ` +
     `(${ttl(cache.recentSearchMs)} for releases of the last ${cache.recentDays} days), ` +

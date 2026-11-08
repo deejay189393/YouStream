@@ -205,11 +205,13 @@ const offsetOf = (skip) => Math.max(0, Math.floor(Number(skip) || 0));
 
 /**
  * What a catalog's keyword filter looks in: the video's title, its channel's
- * name and its whole description -- the page keeps only the start of a
- * description, so a longer one is read from the video's own cache entry,
- * where it is whole. Folded (text.js).
+ * name and, unless the filter's scope is the title only, its whole
+ * description -- the page keeps only the start of a description, so a
+ * longer one is read from the video's own cache entry, where it is whole.
+ * Folded (text.js).
  */
-async function filterText(item) {
+async function filterText(item, scope) {
+  if (scope === "title") return fold(`${item.title}\n${item.channelTitle}`);
   let { description } = item;
   if (description.length >= PREVIEW_DESCRIPTION) {
     const whole = await videoCache.get(item.id);
@@ -232,7 +234,7 @@ function mentions(text, word) {
 /** Whether a catalog's filter keeps the video: null keeps all. */
 async function passes(item, filter) {
   if (!filter) return true;
-  const text = await filterText(item);
+  const text = await filterText(item, filter.scope);
   const mentioned = filter.words.some((word) => mentions(text, word));
   return filter.mode === "include" ? mentioned : !mentioned;
 }

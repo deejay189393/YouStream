@@ -19,10 +19,12 @@ describe("readHostConfig", () => {
       cache: {
         store: "memory",
         redisUrl: null,
+        databaseUrl: null,
         dir: ".cache",
         prefix: "youstream",
         memoryBytes: 64 * MB,
         fileBytes: 512 * MB,
+        databaseBytes: 512 * MB,
         searchMs: DAY,
         recentSearchMs: 3 * HOUR,
         recentDays: 30,
@@ -52,10 +54,29 @@ describe("readHostConfig", () => {
   test("a store it cannot use falls back, with a warning", () => {
     const unknown = readHostConfig({ CACHE_STORE: "memcached", REDIS_URL: "redis://x" });
     expect(unknown.cache.store).toBe("redis");
-    expect(unknown.warnings).toEqual(['CACHE_STORE="memcached" is not one of memory, redis, file; using redis']);
+    expect(unknown.warnings).toEqual(['CACHE_STORE="memcached" is not one of memory, redis, file, database; using redis']);
     const noUrl = readHostConfig({ CACHE_STORE: "redis" });
     expect(noUrl.cache.store).toBe("memory");
     expect(noUrl.warnings).toEqual(["CACHE_STORE=redis needs REDIS_URL; using memory"]);
+  });
+
+  test("the database store uses DATABASE_URL, the profiles' database", () => {
+    const both = readHostConfig({ CACHE_STORE: "Database", DATABASE_URL: " postgres://u:pw@postgres.railway.internal:5432/railway " });
+    expect(both.cache).toMatchObject({ store: "database", databaseUrl: "postgres://u:pw@postgres.railway.internal:5432/railway" });
+    expect(both.cache.databaseUrl).toBe(both.profiles.databaseUrl);
+    expect(readHostConfig({ DATABASE_URL: "sqlite:///data/y.db" }).cache.store).toBe("memory");
+  });
+
+  test("without a usable DATABASE_URL, the database store falls back, with a warning", () => {
+    const none = readHostConfig({ CACHE_STORE: "database", REDIS_URL: "redis://x" });
+    expect(none.cache).toMatchObject({ store: "redis", databaseUrl: null });
+    expect(none.warnings).toEqual(["CACHE_STORE=database needs a usable DATABASE_URL; using redis"]);
+    const wrong = readHostConfig({ CACHE_STORE: "database", DATABASE_URL: "mysql://h/db" });
+    expect(wrong.cache).toMatchObject({ store: "memory", databaseUrl: null });
+    expect(wrong.warnings).toEqual([
+      "CACHE_STORE=database needs a usable DATABASE_URL; using memory",
+      "DATABASE_URL must start with sqlite: or postgres:, not mysql:; profiles are off"
+    ]);
   });
 
   test("lifetimes, in any unit", () => {
@@ -92,9 +113,10 @@ describe("readHostConfig", () => {
   });
 
   test("sizes and counts", () => {
-    expect(readHostConfig({ CACHE_MEMORY_MB: "128", CACHE_FILE_MB: "2048" }).cache).toMatchObject({
+    expect(readHostConfig({ CACHE_MEMORY_MB: "128", CACHE_FILE_MB: "2048", CACHE_DATABASE_MB: "256" }).cache).toMatchObject({
       memoryBytes: 128 * MB,
-      fileBytes: 2048 * MB
+      fileBytes: 2048 * MB,
+      databaseBytes: 256 * MB
     });
     const bad = readHostConfig({ CACHE_MEMORY_MB: "lots", CACHE_RECENT_DAYS: "0" });
     expect(bad.cache).toMatchObject({ memoryBytes: 64 * MB, recentDays: 30 });
@@ -253,5 +275,13 @@ describe("describeCache", () => {
     expect(describeCache(redis)).not.toContain("secret");
     const file = readHostConfig({ CACHE_STORE: "file", CACHE_DIR: "/data", CACHE_SEARCH_TTL: "1.5" }).cache;
     expect(describeCache(file)).toMatch(/^file \/data \(512 MB\), prefix "youstream": searches 1\.5s /);
+  });
+
+  test("the database by where it is, never its password", () => {
+    const postgres = readHostConfig({ CACHE_STORE: "database", DATABASE_URL: "postgres://u:pw@db.internal:5432/railway" }).cache;
+    expect(describeCache(postgres)).toMatch(/^database PostgreSQL db\.internal:5432\/railway \(512 MB\), prefix "youstream": /);
+    expect(describeCache(postgres)).not.toContain("pw");
+    const sqlite = readHostConfig({ CACHE_STORE: "database", DATABASE_URL: "sqlite:///data/y.db", CACHE_DATABASE_MB: "64" }).cache;
+    expect(describeCache(sqlite)).toMatch(/^database SQLite \/data\/y\.db \(64 MB\), /);
   });
 });

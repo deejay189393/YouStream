@@ -175,6 +175,13 @@ describe("the Postgres driver", () => {
     expect(pg.Pool.instance.options.connectionString).toBe("postgres://h/db");
   });
 
+  test("a pool's settings can be changed, but never how BIGINT is read", () => {
+    const pg = fakePg();
+    new PostgresDriver("postgres://h/db", pg, { max: 8, connectionTimeoutMillis: 1000, types: "ignored" });
+    expect(pg.Pool.instance.options).toMatchObject({ max: 8, connectionTimeoutMillis: 1000, idleTimeoutMillis: 30000 });
+    expect(pg.Pool.instance.options.types.getTypeParser(20)("12")).toBe(12);
+  });
+
   test("an idle connection the server drops is logged, not fatal", () => {
     const pg = fakePg();
     new PostgresDriver("postgres://h/db", pg);
@@ -222,21 +229,22 @@ describe("the Postgres driver", () => {
 describe("migrations", () => {
   test("a new database gets every table, once", async () => {
     const db = new SqliteDriver(":memory:");
-    expect(await migrate(db)).toEqual(["profiles"]);
+    expect(await migrate(db)).toEqual(["profiles", "cache"]);
     expect(await migrate(db)).toEqual([]);
     const tables = (await db.all("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")).map((r) => r.name);
-    expect(tables).toEqual(["profile_sessions", "profile_store", "profiles", "schema_migrations"]);
+    expect(tables).toEqual(["cache_entries", "profile_sessions", "profile_store", "profiles", "schema_migrations"]);
     await db.close();
   });
 
   test("a later migration is applied on top of the earlier ones", async () => {
     const db = new SqliteDriver(":memory:");
     await migrate(db);
-    const next = [...MIGRATIONS, { id: 2, name: "extra", up: { sqlite: ["CREATE TABLE extra (a INTEGER)"], postgres: [] } }];
+    const next = [...MIGRATIONS, { id: 3, name: "extra", up: { sqlite: ["CREATE TABLE extra (a INTEGER)"], postgres: [] } }];
     expect(await migrate(db, next)).toEqual(["extra"]);
     expect(await db.all("SELECT id, name FROM schema_migrations ORDER BY id")).toEqual([
       { id: 1, name: "profiles" },
-      { id: 2, name: "extra" }
+      { id: 2, name: "cache" },
+      { id: 3, name: "extra" }
     ]);
     await db.close();
   });
@@ -251,10 +259,22 @@ describe("migrations", () => {
   });
 
   test("on Postgres, a lock holds off a second process starting at the same moment", async () => {
-    const pg = fakePg((sql) => (sql.startsWith("SELECT id, name") ? { rows: [{ id: "1", name: "profiles" }], rowCount: 1 } : { rows: [], rowCount: 0 }));
+    const applied = [
+      { id: "1", name: "profiles" },
+      { id: "2", name: "cache" }
+    ];
+    const pg = fakePg((sql) => (sql.startsWith("SELECT id, name") ? { rows: applied, rowCount: 2 } : { rows: [], rowCount: 0 }));
     const db = new PostgresDriver("postgres://h/db", pg);
     expect(await migrate(db)).toEqual([]);
     expect(pg.calls.map((c) => c[1]).slice(0, 2)).toEqual(["BEGIN", "SELECT pg_advisory_xact_lock(59780312)"]);
+  });
+
+  test("on Postgres, the cache's table is unlogged; on SQLite there is no such thing", async () => {
+    const pg = fakePg((sql) => (sql.startsWith("SELECT id, name") ? { rows: [{ id: "1", name: "profiles" }], rowCount: 1 } : { rows: [], rowCount: 0 }));
+    expect(await migrate(new PostgresDriver("postgres://h/db", pg))).toEqual(["cache"]);
+    expect(pg.calls.some((c) => c[1].startsWith("CREATE UNLOGGED TABLE IF NOT EXISTS cache_entries"))).toBe(true);
+    const cache = MIGRATIONS.find((m) => m.name === "cache");
+    expect(cache.up.sqlite[0]).toMatch(/^CREATE TABLE IF NOT EXISTS cache_entries/);
   });
 });
 
@@ -262,15 +282,14 @@ describe("openDatabase", () => {
   test("opens SQLite and brings it up to date", async () => {
     const { db, applied } = await openDatabase("sqlite::memory:");
     expect(db.dialect).toBe("sqlite");
-    expect(applied).toEqual(["profiles"]);
+    expect(applied).toEqual(["profiles", "cache"]);
     await db.close();
   });
 
-  test("opens Postgres with the driver for it", async () => {
+  test("opens Postgres with the driver for it, and the pool settings asked for", async () => {
     class FakePostgres {
-      constructor(connectionString) {
-        this.connectionString = connectionString;
-        this.dialect = "postgres";
+      constructor(connectionString, pg, options) {
+        Object.assign(this, { connectionString, pg, options, dialect: "postgres" });
       }
       async transaction(fn) {
         return fn({ run: async () => ({ changes: 0 }), all: async () => [{ id: 1, name: "profiles" }], get: async () => null });
@@ -278,7 +297,61 @@ describe("openDatabase", () => {
     }
     const { db, applied } = await openDatabase("postgres://h/db", { PostgresDriver: FakePostgres });
     expect(db.connectionString).toBe("postgres://h/db");
-    expect(applied).toEqual([]);
+    expect(db.pg).toBeUndefined();
+    expect(db.options).toEqual({});
+    expect(applied).toEqual(["cache"]);
+    const quick = await openDatabase("postgres://h/db", { PostgresDriver: FakePostgres }, { postgres: { max: 8 } });
+    expect(quick.db.options).toEqual({ max: 8 });
+  });
+
+  describe("a SQLite file opened twice, by profiles and by the cache", () => {
+    const fs = require("fs");
+    const os = require("os");
+    const path = require("path");
+    let dir;
+    let url;
+    beforeEach(() => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), "youstream-db-"));
+      url = `sqlite://${path.join(dir, "shared.db")}`;
+    });
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    test("shares one connection: a write waits for the other's transaction instead of failing on its lock", async () => {
+      const a = await openDatabase(url);
+      const b = await openDatabase(url);
+      expect([a.applied, b.applied]).toEqual([["profiles", "cache"], []]);
+      const order = [];
+      const transaction = a.db.transaction(async (tx) => {
+        await tx.run("INSERT INTO profile_store (name, value) VALUES ('first', '1')");
+        // Real waiting inside the transaction, as across a network.
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        await tx.run("INSERT INTO profile_store (name, value) VALUES ('second', '2')");
+        order.push("transaction");
+      });
+      const write = b.db.run("INSERT INTO cache_entries (id, value, size, expires_at) VALUES ('k', 'v', 2, 1)").then(() => order.push("write"));
+      await Promise.all([transaction, write]);
+      expect(order).toEqual(["transaction", "write"]);
+      expect(await b.db.get("SELECT COUNT(*) AS n FROM profile_store")).toEqual({ n: 2 });
+      await a.db.close();
+      await a.db.close();
+      // Still open for the other.
+      expect(await b.db.get("SELECT value FROM cache_entries WHERE id = 'k'")).toEqual({ value: "v" });
+      await b.db.close();
+      // Opened afresh once both had closed it.
+      const c = await openDatabase(url);
+      expect(c.applied).toEqual([]);
+      expect(await c.db.all("SELECT name FROM profile_store ORDER BY name")).toEqual([{ name: "first" }, { name: "second" }]);
+      await c.db.close();
+    });
+
+    test("in memory, each is a database of its own", async () => {
+      const a = await openDatabase("sqlite::memory:");
+      const b = await openDatabase("sqlite::memory:");
+      await a.db.run("INSERT INTO profile_store (name, value) VALUES ('x', '1')");
+      expect(await b.db.get("SELECT name FROM profile_store")).toBeNull();
+      await a.db.close();
+      await b.db.close();
+    });
   });
 
   test("a database that cannot be migrated is closed again, and the error thrown", async () => {

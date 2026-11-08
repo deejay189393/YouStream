@@ -18,6 +18,7 @@ const {
   MAX_QUERY_LENGTH,
   MAX_NAME_LENGTH,
   FILTER_MODES,
+  FILTER_SCOPES,
   MAX_FILTER_WORDS,
   MAX_FILTER_WORD_LENGTH,
   filterWords,
@@ -143,10 +144,10 @@ describe("a playlist catalog", () => {
 describe("a catalog's keyword filter", () => {
   test("keeps only, or leaves out, the videos mentioning its words; stored under its mode", () => {
     const left = normalizeEntry({ q: "indian stand up comedy", sort: "date", exclude: ["Gaurav Kapoor"] });
-    expect(left.filter).toEqual({ mode: "exclude", words: ["Gaurav Kapoor"] });
+    expect(left.filter).toEqual({ mode: "exclude", words: ["Gaurav Kapoor"], scope: "all" });
     expect(toStoredEntry(left)).toEqual({ q: "indian stand up comedy", sort: "date", exclude: ["Gaurav Kapoor"] });
     const kept = normalizeEntry({ trending: "all", include: ["cricket", "IPL"] });
-    expect(kept.filter).toEqual({ mode: "include", words: ["cricket", "IPL"] });
+    expect(kept.filter).toEqual({ mode: "include", words: ["cricket", "IPL"], scope: "all" });
     expect(toStoredEntry(kept)).toEqual({ trending: "all", include: ["cricket", "IPL"] });
   });
 
@@ -171,11 +172,26 @@ describe("a catalog's keyword filter", () => {
   test("none without words; leaving out wins over keeping, as only a hand-edited catalog has both", () => {
     expect(normalizeEntry({ trending: "all", exclude: [] }).filter).toBeNull();
     expect(normalizeEntry({ trending: "all", include: ", ," }).filter).toBeNull();
-    expect(normalizeEntry({ trending: "all", include: ["a"], exclude: ["b"] }).filter).toEqual({ mode: "exclude", words: ["b"] });
+    expect(normalizeEntry({ trending: "all", include: ["a"], exclude: ["b"] }).filter).toEqual({ mode: "exclude", words: ["b"], scope: "all" });
+  });
+
+  test("looks in the title and channel only when asked, stored as filterIn only then", () => {
+    const titled = normalizeEntry({ q: "stand up", exclude: ["someone"], filterIn: "title" });
+    expect(titled.filter).toEqual({ mode: "exclude", words: ["someone"], scope: "title" });
+    expect(toStoredEntry(titled)).toEqual({ q: "stand up", exclude: ["someone"], filterIn: "title" });
+    expect(normalizeEntry({ q: "stand up", exclude: ["someone"], filterIn: "everywhere" }).filter.scope).toBe("all");
+    expect(normalizeEntry({ q: "stand up", filterIn: "title" }).filter).toBeNull();
+    expect(toStoredEntry(normalizeEntry({ q: "stand up", filterIn: "title" }))).toEqual({ q: "stand up" });
+    expect(FILTER_SCOPES.map((s) => s.id)).toEqual(["all", "title"]);
   });
 
   test("an entry already normalized normalizes to itself, filter and all", () => {
-    for (const raw of [{ q: "x", exclude: ["a"] }, { channel: CHANNEL, name: "N", include: ["b"] }, { playlist: PLAYLIST }]) {
+    for (const raw of [
+      { q: "x", exclude: ["a"] },
+      { q: "y", exclude: ["a"], filterIn: "title" },
+      { channel: CHANNEL, name: "N", include: ["b"] },
+      { playlist: PLAYLIST }
+    ]) {
       const once = normalizeEntry(raw);
       expect(normalizeEntry(once)).toEqual(once);
     }

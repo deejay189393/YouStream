@@ -3,10 +3,12 @@ const { hostConfig, describeCache, MAX_YOUTUBE_DATA_MS, DAY_MS } = require("../h
 const { MemoryStore } = require("./memory");
 const { RedisStore } = require("./redis");
 const { FileStore } = require("./file");
+const { DatabaseStore } = require("./database");
 
 /**
- * What the addon keeps, and for how long. The store -- memory, Redis or
- * files -- and every lifetime are the host's choice (see hostConfig.js).
+ * What the addon keeps, and for how long. The store -- memory, Redis, files
+ * or the database -- and every lifetime are the host's choice (see
+ * hostConfig.js).
  *
  * Only what upstream services said is cached, never a verdict: a YouTube
  * search's raw results and a metadata service's raw answer. Matching runs
@@ -32,9 +34,9 @@ const { FileStore } = require("./file");
  *   by hand    DELETE /admin/cache/<namespace> (see server.js), or a new
  *              CACHE_PREFIX.
  *
- * A store that fails -- Redis unreachable, a disk full -- is logged and
- * treated as empty. The addon answers without its cache rather than not
- * at all.
+ * A store that fails -- Redis or the database unreachable, a disk full --
+ * is logged and treated as empty. The addon answers without its cache
+ * rather than not at all.
  */
 
 const WARN_EVERY_MS = 60 * 1000;
@@ -55,6 +57,9 @@ function createStore(cache) {
     return new RedisStore({ url: cache.redisUrl, onError: (err) => warn(`Redis: ${err.message}`) });
   }
   if (cache.store === "file") return new FileStore({ dir: cache.dir, prefix: cache.prefix, maxBytes: cache.fileBytes });
+  if (cache.store === "database") {
+    return new DatabaseStore({ url: cache.databaseUrl, prefix: cache.prefix, maxBytes: cache.databaseBytes });
+  }
   return new MemoryStore({ maxBytes: cache.memoryBytes });
 }
 

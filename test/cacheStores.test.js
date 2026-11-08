@@ -6,9 +6,11 @@ const RedisMock = require("ioredis-mock");
 const { MemoryStore } = require("../src/cache/memory");
 const { FileStore } = require("../src/cache/file");
 const { RedisStore, CLIENT_OPTIONS } = require("../src/cache/redis");
+const { DatabaseStore, POSTGRES_POOL } = require("../src/cache/database");
+const { openDatabase } = require("../src/storage");
 
 /**
- * The three stores behind the cache, held to the same contract: text by key
+ * The four stores behind the cache, held to the same contract: text by key
  * until an absolute expiry, cleared and counted by key prefix.
  */
 
@@ -318,5 +320,220 @@ describe("RedisStore", () => {
     store.client.disconnect();
     expect(store.client.options).toMatchObject({ family: 0, commandTimeout: 1000, enableOfflineQueue: false, port: 1 });
     expect(CLIENT_OPTIONS.family).toBe(0);
+  });
+});
+
+// --- the database ------------------------------------------------------------
+
+const quietLog = () => ({ warn: jest.fn() });
+
+/** A store on a database that is open before the test starts. */
+async function openStore(url, options = {}) {
+  const store = new DatabaseStore({ url, prefix: "p", maxBytes: 1e6, log: quietLog(), ...options });
+  await store.opening;
+  // The sweep that follows opening, out of the test's way.
+  await store.sweeping;
+  // A shared PostgreSQL keeps what earlier runs left.
+  await store.db.run("DELETE FROM cache_entries WHERE substr(id, 1, 2) IN ('p:', 'q:')");
+  return store;
+}
+
+contract("DatabaseStore on SQLite", () => openStore("sqlite::memory:"));
+
+const postgresUrl = process.env.POSTGRES_TEST_URL;
+if (postgresUrl) {
+  contract("DatabaseStore on PostgreSQL", () => openStore(postgresUrl));
+
+  test("DatabaseStore on PostgreSQL: the table is unlogged, and the pool is the cache's own", async () => {
+    const store = await openStore(postgresUrl);
+    const row = await store.db.get("SELECT relpersistence FROM pg_class WHERE relname = 'cache_entries'");
+    expect(row.relpersistence).toBe("u");
+    expect(store.db.pool.options).toMatchObject({ max: 8, connectionTimeoutMillis: 1000, query_timeout: 2000 });
+    await store.close();
+  });
+} else {
+  test.skip("DatabaseStore on PostgreSQL (set POSTGRES_TEST_URL to run it)", () => {});
+}
+
+describe("DatabaseStore", () => {
+  const stores = [];
+  const track = (store) => {
+    stores.push(store);
+    return store;
+  };
+  afterEach(async () => {
+    await Promise.all(stores.splice(0).map((s) => s.close()));
+  });
+
+  /** An opening that is held until the test lets it go. */
+  function heldOpen() {
+    let release;
+    const open = jest.fn(
+      () =>
+        new Promise((resolve) => {
+          release = async () => resolve(await openDatabase("sqlite::memory:"));
+        })
+    );
+    return { open, release: () => release() };
+  }
+
+  test("opens DATABASE_URL's database with a small, quick pool of its own", async () => {
+    const open = jest.fn(() => openDatabase("sqlite::memory:"));
+    const store = track(new DatabaseStore({ url: "postgres://u:pw@db.internal:5432/railway", prefix: "p", maxBytes: 1e6, open }));
+    await store.opening;
+    expect(open).toHaveBeenCalledWith("postgres://u:pw@db.internal:5432/railway", {}, { postgres: POSTGRES_POOL });
+    expect(store.kind).toBe("database");
+    expect(store.where).toBe("PostgreSQL db.internal:5432/railway");
+  });
+
+  test("waits for its first opening, but not for long", async () => {
+    const { open, release } = heldOpen();
+    const log = quietLog();
+    const store = track(new DatabaseStore({ url: "sqlite::memory:", prefix: "p", maxBytes: 1e6, open, log, firstOpenWaitMs: 30 }));
+    const started = Date.now();
+    await expect(store.get("p:a")).rejects.toThrow("SQLite :memory: is not open yet");
+    expect(Date.now() - started).toBeGreaterThanOrEqual(25);
+    await release();
+    await store.opening;
+    await store.set("p:a", "x", later());
+    expect(await store.get("p:a")).toBe("x");
+  });
+
+  test("an opening that fails is tried again, less and less often, until it works", async () => {
+    const log = quietLog();
+    const open = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("connect ECONNREFUSED"))
+      .mockRejectedValueOnce(new Error("connect ECONNREFUSED"))
+      .mockImplementation(() => openDatabase("sqlite::memory:"));
+    const store = track(new DatabaseStore({ url: "sqlite::memory:", prefix: "p", maxBytes: 1e6, open, log, retryFirstMs: 10 }));
+    await expect(store.get("p:a")).rejects.toThrow("is not open yet");
+    await sleep(100);
+    await store.opening;
+    expect(open).toHaveBeenCalledTimes(3);
+    expect(log.warn.mock.calls.map((c) => c[0])).toEqual([
+      "[cache] SQLite :memory: could not be opened: connect ECONNREFUSED; trying again in 0.01s",
+      "[cache] SQLite :memory: could not be opened: connect ECONNREFUSED; trying again in 0.02s"
+    ]);
+    expect(await store.get("p:a")).toBeNull();
+  });
+
+  test("after a statement fails, it stops asking for a while, then asks again", async () => {
+    const store = track(await openStore("sqlite::memory:", { pauseMs: 40 }));
+    const get = jest.spyOn(store.db, "get").mockRejectedValueOnce(new Error("Connection terminated"));
+    await expect(store.get("p:a")).rejects.toThrow("Connection terminated");
+    await expect(store.get("p:a")).rejects.toThrow("SQLite :memory: failed a moment ago");
+    expect(get).toHaveBeenCalledTimes(1);
+    await sleep(60);
+    expect(await store.get("p:a")).toBeNull();
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  test("does not keep an entry larger than the whole store, and rounds the expiry to a whole millisecond", async () => {
+    const store = track(await openStore("sqlite::memory:", { maxBytes: 20 }));
+    await store.set("p:a", "x".repeat(50), later());
+    expect(await store.get("p:a")).toBeNull();
+    await store.set("p:b", "x", Date.now() + 60000.4);
+    expect(Number.isInteger((await store.db.get("SELECT expires_at FROM cache_entries WHERE id = 'p:b'")).expires_at)).toBe(true);
+  });
+
+  describe("the sweep", () => {
+    const row = (store, id, expiresAt, size = 10) =>
+      store.db.run("INSERT INTO cache_entries (id, value, size, expires_at) VALUES (?, ?, ?, ?)", [id, "x".repeat(size), size, expiresAt]);
+    // Sorted here, not by the database, whose collation may differ.
+    const ids = async (store) =>
+      (await store.db.all("SELECT id FROM cache_entries WHERE substr(id, 1, 2) IN ('p:', 'q:')")).map((r) => r.id).sort();
+
+    const onEach = (name, url) =>
+      describe(`on ${name}`, () => {
+        test("removes every expired row, whoever wrote it", async () => {
+          const store = track(await openStore(url));
+          await row(store, "p:old", Date.now() - 1000);
+          await row(store, "q:old", Date.now() - 1000);
+          await row(store, "p:new", later());
+          await store.sweep();
+          expect(await ids(store)).toEqual(["p:new"]);
+        });
+
+        test("over its size, removes what of its own prefix expires soonest, down to 90%", async () => {
+          const store = track(await openStore(url, { maxBytes: 100 }));
+          await row(store, "p:soon", later(60000), 40);
+          await row(store, "p:mid", later(120000), 40);
+          await row(store, "p:last", later(180000), 40);
+          await row(store, "q:other", later(30000), 400);
+          await store.sweep();
+          expect(await ids(store)).toEqual(["p:last", "p:mid", "q:other"]);
+          expect(store.lastTotal).toBe(80);
+        });
+
+        test("runs on its own once writes pass the size", async () => {
+          const store = track(await openStore(url, { maxBytes: 80 }));
+          await store.sweeping;
+          await store.set("p:a", "x".repeat(30), later(60000));
+          await store.set("p:b", "x".repeat(30), later(120000));
+          expect(store.sweeping).toBeNull();
+          await store.set("p:c", "x".repeat(30), later(180000));
+          await store.sweeping;
+          expect(await ids(store)).toEqual(["p:b", "p:c"]);
+        });
+      });
+    onEach("SQLite", "sqlite::memory:");
+    if (postgresUrl) onEach("PostgreSQL", postgresUrl);
+
+    test("runs once the database opens, and then on a timer", async () => {
+      const store = track(await openStore("sqlite::memory:", { sweepEveryMs: 20 }));
+      await row(store, "p:old", Date.now() - 1000);
+      await sleep(80);
+      await store.sweeping;
+      expect(await ids(store)).toEqual([]);
+    });
+
+    test("one at a time, and nothing to do before the database is open", async () => {
+      const store = track(await openStore("sqlite::memory:"));
+      expect(store.sweep()).toBe(store.sweep());
+      await store.sweeping;
+      const { open, release } = heldOpen();
+      const waiting = track(new DatabaseStore({ url: "sqlite::memory:", prefix: "p", maxBytes: 1e6, open, log: quietLog() }));
+      await waiting.sweep();
+      expect(waiting.lastTotal).toBe(0);
+      await release();
+    });
+
+    test("a sweep that fails is logged, not thrown", async () => {
+      const log = quietLog();
+      const store = track(await openStore("sqlite::memory:", { log }));
+      jest.spyOn(store.db, "run").mockRejectedValueOnce(new Error("disk I/O error"));
+      await store.sweep();
+      expect(log.warn).toHaveBeenCalledWith("[cache] database sweep failed: disk I/O error");
+    });
+  });
+
+  test("closing stops its timers, waits for a sweep under way, and closes the database", async () => {
+    const store = await openStore("sqlite::memory:");
+    const close = jest.spyOn(store.db, "close");
+    const running = store.sweep();
+    await store.close();
+    await running;
+    expect(close).toHaveBeenCalled();
+    expect(store.db).toBeNull();
+    await store.close();
+  });
+
+  test("closed while opening, it closes the database once it opens, and tries no more", async () => {
+    const { open, release } = heldOpen();
+    const store = new DatabaseStore({ url: "sqlite::memory:", prefix: "p", maxBytes: 1e6, open, log: quietLog() });
+    const closing = store.close();
+    await release();
+    await closing;
+    expect(store.db).toBeNull();
+    const failing = new DatabaseStore({
+      url: "sqlite::memory:",
+      prefix: "p",
+      maxBytes: 1e6,
+      open: () => Promise.reject(new Error("refused")),
+      log: quietLog()
+    });
+    await failing.close();
+    expect(failing.retryTimer).toBeNull();
   });
 });

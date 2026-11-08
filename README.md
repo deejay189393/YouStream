@@ -497,19 +497,23 @@ non-embeddable videos when you asked for embeddable only.
 words, or hide them: under the row, choose "Only videos mentioning" or
 "Hide videos mentioning" and type the words, separated by commas. A
 word or a name is looked for in the video's title, its channel's name and
-its whole description; whole words, in any case, with or without accents,
-in any script. A plural or a possessive counts ("Kapoor's"), and so does a
-name written as one word, the way a hashtag or a handle writes it
-(`#GauravKapoor`). Up to 20 words, of up to 60 characters each, stored with
-the row: `{ q: "indian stand up comedy", exclude: ["Gaurav Kapoor"] }`.
+its whole description, or, choosing "In the title or channel only", in the
+first two alone, for when descriptions that credit or tag someone hide too
+much. Whole words, in any case, with or without accents, in any script. A
+plural or a possessive counts ("Kapoor's"), and so does a name written as
+one word, the way a hashtag or a handle writes it (`#GauravKapoor`). Up to
+20 words, of up to 60 characters each, stored with the row:
+`{ q: "indian stand up comedy", exclude: ["Gaurav Kapoor"] }`, with
+`filterIn: "title"` when only titles and channels count.
 
 The filter works on the pages already kept, so changing it costs nothing
 and applies at once, and the row keeps its id and name. Measured on a real
 search, "indian stand up comedy" by relevance, 100 videos: leaving out
 "Gaurav Kapoor" left out 16, 13 of them his own (named in the title or the
 channel) and 3 that thank or tag him in their description, and kept none
-that name him. A row whose filter leaves out every video on a page moves on
-to the next page, which for a search costs another 101 units.
+that name him; in the title or channel only, it left out his 13 alone. A
+row whose filter leaves out every video on a page moves on to the next
+page, which for a search costs another 101 units.
 
 ### Metadata and streams
 
@@ -800,7 +804,7 @@ has, so an app that installs it anyway never asks it about anything.
 ```bash
 npm install
 npm start                 # http://localhost:3000/configure
-npm test                  # about 1,600 tests
+npm test                  # about 1,700 tests
 npm run test:coverage     # pinned at 100% statements, branches, functions, lines
 ```
 
@@ -850,7 +854,17 @@ them.
 and redeploy. Set `REDIS_URL` and it is Redis: kept across redeploys, shared
 by every instance (prod and beta too, if they share a Redis and a prefix).
 Or `CACHE_STORE=file` with `CACHE_DIR` on a Railway volume: kept across
-redeploys, one instance.
+redeploys, one instance. Or `CACHE_STORE=database`: a table in the database
+`DATABASE_URL` names, the one profiles are kept in, so a host with profiles
+needs nothing more; kept across redeploys, and shared like Redis. Measured
+on SQLite: a catalog that took YouTube 0.8 s came back after a restart, with
+YouTube cut off, in 8 ms.
+
+The database store keeps to `CACHE_DATABASE_MB` for its prefix, deleting
+what expires soonest, and deletes expired rows every hour. On PostgreSQL
+its table is unlogged: Postgres writes no log for what is only a copy, and
+empties the table after a crash, which is how a database restored from a
+backup starts, so a backup never brings old YouTube data back.
 
 **For how long, and how it is invalidated.**
 
@@ -873,10 +887,13 @@ in its key, so when the code changes what it stores, old entries are never
 read again and expire on their own. To empty the cache by hand, use
 `DELETE /admin/cache/<namespace>` or change `CACHE_PREFIX`.
 
-**When the store fails** (Redis unreachable, a disk full), the addon answers
-without its cache rather than not at all, and says so in the log once a
-minute at most. Measured with Redis down: lookups answered in 0.05 s; when
-Redis came back, caching resumed without a restart.
+**When the store fails** (Redis or the database unreachable, a disk full),
+the addon answers without its cache rather than not at all, and says so in
+the log once a minute at most. Measured with Redis down: lookups answered in
+0.05 s; when Redis came back, caching resumed without a restart. The
+database store waits two seconds at most for its first connection, and
+after a failed statement stops asking for ten, so a database that is down
+costs one short wait, not one per lookup.
 
 **In the app.** Stream lists tell Stremio and Nuvio how long to reuse them: 6
 hours with videos in them, 1 hour when empty (no longer than the server's own
@@ -895,8 +912,8 @@ project, `youstream`, with a service per release channel.
 | Service | Branch | Domain | Region | Variables |
 |---|---|---|---|---|
 | `youstream` | `main` | [youstream.up.railway.app](https://youstream.up.railway.app/configure) | Singapore | `PORT=3000`, `TVDB_API_KEY`, optionally `TMDB_API_KEY`, `REDIS_URL` |
-| `youstream-beta` | `beta` | [youstream-beta.up.railway.app](https://youstream-beta.up.railway.app/configure) | Singapore | the same, plus `RELEASE_CHANNEL=beta`, and for profiles `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `SECRET_KEY=${{shared.SECRET_KEY}}` |
-| `Postgres` | | private network only | Singapore | Railway's PostgreSQL template: the profiles |
+| `youstream-beta` | `beta` | [youstream-beta.up.railway.app](https://youstream-beta.up.railway.app/configure) | Singapore | the same, plus `RELEASE_CHANNEL=beta`, for profiles `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `SECRET_KEY=${{shared.SECRET_KEY}}`, and `CACHE_STORE=database` |
+| `Postgres` | | private network only | Singapore | Railway's PostgreSQL template: the profiles, and beta's cache. Its volume is backed up daily (kept 6 days) and weekly (kept 27 days) |
 
 `SECRET_KEY` is a shared variable of the project's environment, generated
 by Railway (`${{ secret(64, "abcdef0123456789") }}`), so its value is in no
@@ -911,9 +928,12 @@ image, against a real Redis and PostgreSQL, and a build of the production
 image, started and asked for `/health` and its manifest, and started again
 with profiles on SQLite.
 
-For a cache that survives redeploys, add Railway's Redis to the project and
-set `REDIS_URL=${{Redis.REDIS_URL}}` on each service. Railway's private
-network is IPv6; the Redis client is already set up for it.
+Beta's cache survives redeploys in that same database. Prod can do the
+same with the same two references and `CACHE_STORE=database`; with the same
+`CACHE_PREFIX` (the default), the two then share their searches. Or add
+Railway's Redis to the project and set `REDIS_URL=${{Redis.REDIS_URL}}` on
+each service; Railway's private network is IPv6, and the Redis client is
+already set up for it.
 
 ### Hosting profiles
 
@@ -950,11 +970,11 @@ saying so, and YouStream tries again every few seconds, then minutes.
 | `RELEASE_CHANNEL` | `beta` gives the manifest its own id (`org.deejay189393.youstream.beta`) and name ("YouStream Beta"), so prod and beta can be installed side by side |
 | `STREMIO_ADDONS_CONFIG_SIGNATURE` | The stremio-addons.net listing claim, once issued for this addon's manifest URL. Left out of the manifest until set |
 | `STREMIO_ADDONS_CONFIG_ISSUER` | Overrides the claim issuer (defaults to `https://stremio-addons.net`) |
-| `CACHE_STORE` | `memory`, `redis` or `file`. Default: `redis` when `REDIS_URL` is set, otherwise `memory` |
+| `CACHE_STORE` | `memory`, `redis`, `file` or `database` (a table in `DATABASE_URL`'s database). Default: `redis` when `REDIS_URL` is set, otherwise `memory` |
 | `REDIS_URL` | `redis://user:password@host:port` |
 | `CACHE_DIR` | Where the file store writes (default `.cache`); a Railway volume's mount path |
 | `CACHE_PREFIX` | Namespace for every key (default `youstream`). Prod and beta on one Redis with the same prefix share their searches; different prefixes keep them apart |
-| `CACHE_MEMORY_MB`, `CACHE_FILE_MB` | Size of the memory store (default 64) and the file store (default 512) |
+| `CACHE_MEMORY_MB`, `CACHE_FILE_MB`, `CACHE_DATABASE_MB` | Size of the memory store (default 64), the file store (default 512) and the database store, for this `CACHE_PREFIX` (default 512) |
 | `CACHE_SEARCH_TTL` | How long a search is current (default `24h`) |
 | `CACHE_SEARCH_RECENT_TTL` | The same for a recent release (default `3h`) |
 | `CACHE_RECENT_DAYS` | What counts as recent (default `30`) |

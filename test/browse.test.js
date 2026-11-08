@@ -157,6 +157,15 @@ describe("a catalog's keyword filter", () => {
     expect(items.map((i) => i.id)).toEqual(["clean", "hindi", "kapoors"]);
   });
 
+  test("in the title and channel only: a description that credits the name hides nothing", async () => {
+    routeFetch([["/search?", searchBody(ALL)], ["/videos?", comedy]]);
+    const entry = entryWith({ exclude: ["Gaurav Kapoor"], filterIn: "title" });
+    const items = await browse.catalogItems({ entry, settings: settingsFor() });
+    expect(items.map((i) => i.id)).toEqual(["gk3", "clean", "hindi", "kapoors"]);
+    const kept = await browse.catalogItems({ entry: entryWith({ include: ["Gaurav Kapoor"], filterIn: "title" }), settings: settingsFor() });
+    expect(kept.map((i) => i.id)).toEqual(["gk1", "gk2", "gk4"]);
+  });
+
   test("keeping only the videos that mention a word, in any script", async () => {
     routeFetch([["/search?", searchBody(ALL)], ["/videos?", comedy]]);
     const items = await browse.catalogItems({ entry: entryWith({ include: ["Zakir", "गौरव कपूर"] }), settings: settingsFor() });

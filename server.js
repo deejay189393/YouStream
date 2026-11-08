@@ -12,7 +12,7 @@ const { formatDuration, formatOffset } = require("./src/text");
 const youtube = require("./src/youtube");
 const tmdb = require("./src/metadata/tmdb");
 const { hostConfig, describeCache, DAY_MS } = require("./src/hostConfig");
-const { NAMESPACES, cacheSettings, cacheStats, clearAllCaches } = require("./src/cache");
+const { NAMESPACES, cacheSettings, cacheStats, clearAllCaches, closeCache } = require("./src/cache");
 const imdb = require("./src/metadata/imdb");
 const { resolveSource } = require("./src/browse");
 const { SOURCE_KINDS } = require("./src/catalogs");
@@ -377,6 +377,6 @@ if (require.main === module) {
   // database cleanly (SQLite folds its write-ahead log back in), then exit.
   process.once("SIGTERM", () => {
     server.close();
-    profiles.stop().finally(() => process.exit(0));
+    Promise.allSettled([profiles.stop(), closeCache()]).finally(() => process.exit(0));
   });
 }

@@ -115,11 +115,17 @@ const MAX_NAME_LENGTH = 80;
 /**
  * A catalog's keyword filter: keep only the videos that mention one of its
  * words, or leave them out. Words are matched whole, in any case, with or
- * without accents (text.js).
+ * without accents (text.js), in the title, the channel's name and the
+ * description, or in the first two only, for when a description that
+ * credits or tags someone would hide too much.
  */
 const FILTER_MODES = [
   { id: "include", label: "Only videos mentioning" },
   { id: "exclude", label: "Hide videos mentioning" }
+];
+const FILTER_SCOPES = [
+  { id: "all", label: "In the title, channel or description" },
+  { id: "title", label: "In the title or channel only" }
 ];
 const MAX_FILTER_WORDS = 20;
 const MAX_FILTER_WORD_LENGTH = 60;
@@ -234,15 +240,18 @@ function filterWords(raw) {
 }
 
 /**
- * A stored catalog's filter, { mode, words }, or null. Leaving out wins if
- * a catalog somehow has both, as only a hand-edited one could. Also reads an
- * entry already normalized, whose filter is under `filter`.
+ * A stored catalog's filter, { mode, words, scope }, or null. Leaving out
+ * wins if a catalog somehow has both, as only a hand-edited one could. The
+ * scope is stored as filterIn only when it is not the whole video. Also
+ * reads an entry already normalized, whose filter is under `filter`.
  */
 function filterOf(raw) {
-  const stored = raw.filter && typeof raw.filter === "object" ? { [raw.filter.mode]: raw.filter.words } : raw;
+  const normalized = raw.filter && typeof raw.filter === "object";
+  const stored = normalized ? { [raw.filter.mode]: raw.filter.words } : raw;
+  const scope = (normalized ? raw.filter.scope : raw.filterIn) === "title" ? "title" : "all";
   for (const { id } of [...FILTER_MODES].reverse()) {
     const words = filterWords(stored[id]);
-    if (words.length) return { mode: id, words };
+    if (words.length) return { mode: id, words, scope };
   }
   return null;
 }
@@ -278,7 +287,9 @@ function normalizeCatalogs(raw) {
 /** The compact form the install URL carries. */
 function toStoredEntry(entry) {
   const source = toStoredSource(entry);
-  return entry.filter ? { ...source, [entry.filter.mode]: entry.filter.words } : source;
+  if (!entry.filter) return source;
+  const { mode, words, scope } = entry.filter;
+  return { ...source, [mode]: words, ...(scope === "title" ? { filterIn: "title" } : {}) };
 }
 
 function toStoredSource(entry) {
@@ -420,6 +431,7 @@ module.exports = {
   MAX_QUERY_LENGTH,
   MAX_NAME_LENGTH,
   FILTER_MODES,
+  FILTER_SCOPES,
   MAX_FILTER_WORDS,
   MAX_FILTER_WORD_LENGTH,
   filterWords,

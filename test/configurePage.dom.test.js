@@ -768,11 +768,14 @@ describe("the YouTube card", () => {
     add(p, "latest indian stand up comedy");
     const row = () => p.document.querySelector("#catalog-list .cat-row");
     const filter = () => row().querySelector(".cat-filter select");
+    const scope = () => row().querySelectorAll(".cat-filter select")[1];
     const words = () => row().querySelector(".cat-words");
     expect([...filter().options].map((o) => o.textContent)).toEqual(["No keyword filter", "Only videos mentioning", "Hide videos mentioning"]);
-    expect(words().hidden).toBe(true);
+    expect([words().hidden, scope().hidden]).toEqual([true, true]);
     pick(p, filter(), "exclude");
-    expect(words().hidden).toBe(false);
+    expect([words().hidden, scope().hidden]).toEqual([false, false]);
+    expect([...scope().options].map((o) => o.textContent)).toEqual(["In the title, channel or description", "In the title or channel only"]);
+    expect(scope().value).toBe("all");
     words().value = " Gaurav  Kapoor, gaurav kapoor ,, Someone Else";
     words().dispatchEvent(new p.dom.window.Event("input", { bubbles: true }));
     // Another option of the row changed: the filter stays.
@@ -783,8 +786,17 @@ describe("the YouTube card", () => {
     pick(p, filter(), "include");
     p.submit();
     expect(p.rawGenerated().catalogs[0].include).toEqual(["Gaurav Kapoor", "Someone Else"]);
+    // Titles and channels only: said once, and only then.
+    pick(p, scope(), "title");
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([
+      { q: "latest indian stand up comedy", sort: "date", include: ["Gaurav Kapoor", "Someone Else"], filterIn: "title" }
+    ]);
+    pick(p, scope(), "all");
+    p.submit();
+    expect(p.rawGenerated().catalogs[0].filterIn).toBeUndefined();
     pick(p, filter(), "");
-    expect(words().hidden).toBe(true);
+    expect([words().hidden, scope().hidden]).toEqual([true, true]);
     p.submit();
     expect(p.rawGenerated().catalogs).toEqual([{ q: "latest indian stand up comedy", sort: "date" }]);
   });
@@ -796,12 +808,13 @@ describe("the YouTube card", () => {
     p.set("youtube-key", "k");
     p.submit();
     expect(p.rawGenerated().catalogs).toEqual([{ q: "comedy" }]);
-    const existing = normalizeConfig({ youtubeKey: "k", catalogs: [{ trending: "all", include: ["cricket", "IPL"] }] });
+    const existing = normalizeConfig({ youtubeKey: "k", catalogs: [{ trending: "all", include: ["cricket", "IPL"], filterIn: "title" }] });
     const again = loadPage({ existing });
-    expect(again.$("#catalog-list .cat-filter select").value).toBe("include");
+    const [mode, scope] = again.document.querySelectorAll("#catalog-list .cat-filter select");
+    expect([mode.value, scope.value]).toEqual(["include", "title"]);
     expect(again.$("#catalog-list .cat-words").value).toBe("cricket, IPL");
     again.submit();
-    expect(again.rawGenerated().catalogs).toEqual([{ trending: "all", include: ["cricket", "IPL"] }]);
+    expect(again.rawGenerated().catalogs).toEqual([{ trending: "all", include: ["cricket", "IPL"], filterIn: "title" }]);
   });
 
   test("a search row's order, length and date, and a channel row's videos and order, are saved compactly", () => {

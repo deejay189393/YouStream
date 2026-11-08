@@ -5,8 +5,8 @@
  * new migration.
  *
  * Times are epoch milliseconds in BIGINT columns, which both databases read
- * the same way. Each migration lists its statements per database, though
- * the first needs no difference between them.
+ * the same way. Each migration lists its statements per database; only the
+ * cache's differ.
  */
 
 const PROFILES = [
@@ -48,7 +48,28 @@ const PROFILES = [
   "CREATE TABLE IF NOT EXISTS profile_store (name TEXT PRIMARY KEY, value TEXT NOT NULL)"
 ];
 
-const MIGRATIONS = [{ id: 1, name: "profiles", up: { sqlite: PROFILES, postgres: PROFILES } }];
+/**
+ * The cache's entries, when CACHE_STORE=database (cache/database.js): a key,
+ * the stored text, its size for the size limit, and when it expires. Only a
+ * copy of what YouTube and the metadata services said, so on PostgreSQL the
+ * table is UNLOGGED: written without the write-ahead log, and emptied by
+ * Postgres after a crash -- which is how a database restored from a backup
+ * starts, so a backup never brings old YouTube data back.
+ */
+const cache = (unlogged) => [
+  `CREATE ${unlogged ? "UNLOGGED " : ""}TABLE IF NOT EXISTS cache_entries (
+    id TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    expires_at BIGINT NOT NULL
+  )`,
+  "CREATE INDEX IF NOT EXISTS cache_entries_expires ON cache_entries (expires_at)"
+];
+
+const MIGRATIONS = [
+  { id: 1, name: "profiles", up: { sqlite: PROFILES, postgres: PROFILES } },
+  { id: 2, name: "cache", up: { sqlite: cache(false), postgres: cache(true) } }
+];
 
 /** Any number: it only has to be the same for every YouStream process. */
 const POSTGRES_LOCK = 59780312;

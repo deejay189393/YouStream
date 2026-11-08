@@ -3,6 +3,7 @@ const { hostConfig, DAY_MS } = require("../src/hostConfig");
 const { MemoryStore } = require("../src/cache/memory");
 const { FileStore } = require("../src/cache/file");
 const { RedisStore } = require("../src/cache/redis");
+const { DatabaseStore } = require("../src/cache/database");
 const { freshCache, TEST_CACHE } = require("./helpers");
 
 const { searchCache, metadataCache, keyCooldown, Namespace, isNewRelease, searchMsFor } = cache;
@@ -115,8 +116,23 @@ describe("configureCache", () => {
     redis.client.emit("error", new Error("ECONNREFUSED"));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("Redis: ECONNREFUSED"));
     redis.client.disconnect();
+    const database = cache.configureCache({ ...TEST_CACHE, store: "database", databaseUrl: "sqlite::memory:" });
+    expect(database).toBeInstanceOf(DatabaseStore);
+    expect(database).toMatchObject({ prefix: "youstream:", maxBytes: 512 * 1024 * 1024 });
+    await database.opening;
     freshCache();
     require("fs").rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("namespaces work the same on the database store", async () => {
+    const database = freshCache({ store: "database", databaseUrl: "sqlite::memory:" });
+    await database.opening;
+    await searchCache.set("query", [{ id: "a" }]);
+    expect(await searchCache.get("query")).toEqual({ value: [{ id: "a" }], fresh: true });
+    expect(await searchCache.count()).toBe(1);
+    expect(await cache.cacheStats()).toMatchObject({ store: "database", entries: { search: 1, metadata: 0 } });
+    expect(await cache.clearAllCaches()).toBe(1);
+    freshCache();
   });
 
   test("with no settings, the host's", () => {

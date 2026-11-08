@@ -422,6 +422,7 @@ function youtubeData(entries) {
     shows: pick(catalogs.CHANNEL_SHOWS),
     channelSorts: pick(catalogs.CHANNEL_SORTS),
     filterModes: catalogs.FILTER_MODES,
+    filterScopes: catalogs.FILTER_SCOPES,
     maxFilterWords: catalogs.MAX_FILTER_WORDS,
     maxFilterWord: catalogs.MAX_FILTER_WORD_LENGTH,
     trending: catalogs.TRENDING.map(({ id, label, chip }) => ({ id, label, chip })),
@@ -640,21 +641,23 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .sub-label { display: block; font-size: 12px; color: var(--muted); margin: 16px 0 8px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
   #catalog-list { display: flex; flex-direction: column; gap: 6px; }
   .cat-row {
-    display: flex; align-items: flex-start; gap: 10px; background: #121318; border: 1px solid var(--border);
+    display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 10px; background: #121318; border: 1px solid var(--border);
     border-radius: 9px; padding: 9px 10px;
   }
   .cat-rank {
     flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: #fff;
     font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 3px;
   }
-  .cat-main { flex: 1 1 auto; min-width: 0; }
+  .cat-main { flex: 1 1 0; min-width: 0; }
   .cat-label { font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; padding-top: 3px; }
   .cat-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
   .cat-opts select { width: auto; max-width: 100%; padding: 5px 8px; font-size: 12.5px; border-radius: 7px; }
   .cat-empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
   .cat-lead { margin: 0 0 10px; }
   .cat-fixed { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
-  .cat-filter { margin-top: 7px; display: flex; flex-direction: column; gap: 6px; }
+  /* A line of its own under the row, as wide as the row past its number, so a
+     phone shows the filter's choices whole. */
+  .cat-filter { flex: 0 0 calc(100% - 32px); margin: 7px 0 0 32px; display: flex; flex-direction: column; gap: 6px; }
   .cat-filter select { width: 100%; padding: 5px 8px; font-size: 12.5px; border-radius: 7px; }
   .cat-filter .cat-words { padding: 7px 9px; font-size: 13px; border-radius: 7px; }
   .btns { flex: 0 0 auto; display: flex; gap: 4px; }
@@ -1360,7 +1363,10 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   // keyword filter when it has words.
   function storedCatalog(entry) {
     var stored = storedSource(entry);
-    if (entry.filter && entry.filter.words.length) stored[entry.filter.mode] = entry.filter.words;
+    if (entry.filter && entry.filter.words.length) {
+      stored[entry.filter.mode] = entry.filter.words;
+      if (entry.filter.scope === "title") stored.filterIn = "title";
+    }
     return stored;
   }
   function storedSource(entry) {
@@ -1443,7 +1449,8 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     return words;
   }
   // Under a catalog: keep only, or leave out, the videos that mention words
-  // in their title, channel name or description.
+  // in their title and channel name, and in their description unless asked
+  // not to look there.
   // Changing a catalog's other options replaces its object in CATALOGS, so
   // the filter is always read and written there, by the row's index.
   function filterControls(index, title) {
@@ -1455,20 +1462,25 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     words.setAttribute("aria-label", "Words to filter " + title + " by, comma separated");
     words.placeholder = "Words or names, comma separated";
     words.value = entry.filter ? entry.filter.words.join(", ") : "";
-    var hint = node("div", "cat-fixed", "Matched in the title, the channel's name and the description, whole words, in any case.");
+    var scope = optionSelect(YT.filterScopes, entry.filter ? entry.filter.scope : "all", "Where to look for the words in " + title, function () { update(); });
+    var hint = node("div", "cat-fixed", "Whole words, in any case.");
     var select = optionSelect(modes, entry.filter ? entry.filter.mode : "", "Keyword filter for " + title, function () { update(); });
+    function show(on) {
+      words.hidden = !on;
+      scope.hidden = !on;
+      hint.hidden = !on;
+    }
     function update() {
       var mode = select.value;
-      words.hidden = !mode;
-      hint.hidden = !mode;
-      CATALOGS[index].filter = mode ? { mode: mode, words: filterWords(words.value) } : null;
+      show(Boolean(mode));
+      CATALOGS[index].filter = mode ? { mode: mode, words: filterWords(words.value), scope: scope.value } : null;
     }
     words.addEventListener("input", update);
     box.appendChild(select);
     box.appendChild(words);
+    box.appendChild(scope);
     box.appendChild(hint);
-    words.hidden = !entry.filter;
-    hint.hidden = !entry.filter;
+    show(Boolean(entry.filter));
     return box;
   }
   function renderCatalogs() {
@@ -1503,7 +1515,6 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       // The rest have one order, which YouTube keeps.
       if (entry.kind === "playlist") main.appendChild(node("div", "cat-fixed", "In the playlist's own order"));
       if (entry.kind === "trending") main.appendChild(node("div", "cat-fixed", "Ranked by YouTube, for your country"));
-      main.appendChild(filterControls(index, title));
       row.appendChild(main);
       var btns = node("div", "btns");
       var up = smallButton("▲", "cat-up", "Move " + title + " up", function () { moveCatalog(index, index - 1); });
@@ -1517,6 +1528,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
         renderCatalogs();
       }));
       row.appendChild(btns);
+      row.appendChild(filterControls(index, title));
       catalogList.appendChild(row);
     });
     renderTrendingChips();
