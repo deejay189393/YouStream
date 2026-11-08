@@ -19,7 +19,7 @@ const { SOURCE_KINDS } = require("./src/catalogs");
 const { trackRequest } = require("./src/requestContext");
 const { getBaseUrl } = require("./src/baseUrl");
 const profiles = require("./src/profiles");
-const { webAppManifest, serviceWorkerSource } = require("./src/webApp");
+const { webAppManifest, serviceWorkerSource, configureScript } = require("./src/webApp");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -94,6 +94,27 @@ const DONE = {
  *                that profile's page only for its signed-in owner, and asks
  *                anyone else to sign in
  */
+/**
+ * What the configure page may load, which is only its own: its one script
+ * (/configure.js; the JSON blocks in it are data, never run), its icons, the
+ * profile API and its service worker. Should anything ever slip markup into
+ * the page, no script of it runs, and nothing it reads leaves for another
+ * site. Its styles are inline, so those are allowed.
+ */
+const CONFIGURE_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'"
+].join("; ");
+
 async function sendConfigurePage(req, res, { existing = null, source = null, linkSegment = null, fileName = "" } = {}) {
   const state = await profiles.pageState(req, res, linkSegment);
   const { signedIn, link } = state;
@@ -112,10 +133,12 @@ async function sendConfigurePage(req, res, { existing = null, source = null, lin
   };
   res.set({
     "Content-Type": "text/html; charset=utf-8",
-    // The page can hold the reader's keys: kept by no cache, shown in no frame.
+    // The page can hold the reader's keys: kept by no cache, shown in no
+    // frame, and running no script but its own (CONFIGURE_POLICY).
     "Cache-Control": "no-store",
     "Referrer-Policy": "same-origin",
-    "X-Frame-Options": "DENY"
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": CONFIGURE_POLICY
   });
   res.send(
     renderConfigurePage({
@@ -156,6 +179,14 @@ app.get("/app.webmanifest", (req, res) => {
   res.set("Content-Type", "application/manifest+json; charset=utf-8");
   res.set("Cache-Control", "public, max-age=3600");
   res.send(JSON.stringify(webAppManifest()));
+});
+
+/** The configure page's script. Its address carries its version, so a browser keeps it for a year. */
+app.get("/configure.js", (req, res) => {
+  const script = configureScript();
+  res.set("Content-Type", "text/javascript; charset=utf-8");
+  res.set("Cache-Control", req.query.v === script.version ? "public, max-age=31536000, immutable" : "no-cache");
+  res.send(script.body);
 });
 
 app.get("/sw.js", (req, res) => {
@@ -379,23 +410,26 @@ app.use(trackRequest, createResourceRouter());
 // other unknown path.
 app.use((req, res) => res.status(404).json({ error: "Not found" }));
 
-module.exports = { app, getBaseUrl, credits };
-
-/* istanbul ignore next -- exercised for real by test/startup.test.js, which
-   boots this file as a child process; coverage instrumentation does not span
-   process boundaries. */
-if (require.main === module) {
-  hostConfig.warnings.forEach((w) => console.warn(`[config] ${w}`));
-  console.log(`[cache] ${describeCache(cacheSettings())}`);
+/**
+ * Starts the server: says what the host set, and anything it could not
+ * read, starts IMDb's data and profiles, and listens. A redeploy stops the
+ * old container with SIGTERM: what is in flight finishes, the database
+ * closes cleanly (SQLite folds its write-ahead log back in), then the
+ * process ends. start.js calls it; the tests call it with stand-ins.
+ *
+ * @returns {import("http").Server}
+ */
+function start({ port = PORT, signals = process, exit = process.exit, log = console } = {}) {
+  hostConfig.warnings.forEach((w) => log.warn(`[config] ${w}`));
+  log.log(`[cache] ${describeCache(cacheSettings())}`);
   if (hostConfig.metadata.imdbDatasets) imdb.start();
   profiles.start(hostConfig.profiles);
-  const server = app.listen(PORT, () => {
-    console.log(`YouStream addon listening on port ${PORT}`);
-  });
-  // A redeploy stops the old container: finish what is in flight, close the
-  // database cleanly (SQLite folds its write-ahead log back in), then exit.
-  process.once("SIGTERM", () => {
+  const server = app.listen(port, () => log.log(`YouStream addon listening on port ${server.address().port}`));
+  signals.once("SIGTERM", () => {
     server.close();
-    Promise.allSettled([profiles.stop(), closeCache()]).finally(() => process.exit(0));
+    Promise.allSettled([profiles.stop(), closeCache()]).finally(() => exit(0));
   });
+  return server;
 }
+
+module.exports = { app, getBaseUrl, credits, start };

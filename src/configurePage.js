@@ -1,4 +1,3 @@
-const fs = require("fs");
 const { DESCRIPTION, ADDON_NAME, identity } = require("./manifest");
 const { orderedPlaybackOptions, PLAYBACK_VERSION } = require("./playback");
 const {
@@ -30,7 +29,7 @@ const {
 } = require("./config");
 const catalogs = require("./catalogs");
 const { PASSWORD_MIN } = require("./profiles/api");
-const { BACKGROUND } = require("./webApp");
+const { BACKGROUND, configureScript } = require("./webApp");
 
 /** Where the addon's source lives, linked from the footer. */
 const REPO_URL = "https://github.com/deejay189393/YouStream";
@@ -38,19 +37,6 @@ const YOUTUBE_KEY_URL = "https://console.cloud.google.com/apis/library/youtube.g
 const YOUTUBE_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials";
 const TMDB_KEY_URL = "https://www.themoviedb.org/settings/api";
 const FORMATTER_DOCS_URL = "https://docs.aiostreams.viren070.me/reference/custom-formatter";
-
-/**
- * A module's code as a plain script for the page: the file as written,
- * without its module.exports line. Read from disk rather than taken from
- * the loaded function, whose text a coverage tool may have rewritten.
- */
-function browserSource(file) {
-  const text = fs.readFileSync(require.resolve(file), "utf8").replace(/\nmodule\.exports = [^\n]*\n*$/, "\n");
-  if (/<\/script/i.test(text)) throw new Error(`${file} cannot be inlined in a page`);
-  return text;
-}
-const FORMATTER_SOURCE = browserSource("./formatter");
-const TEMPLATE_CHECK_SOURCE = browserSource("./templateCheck");
 
 /**
  * The fields the configure page lists. Every field AIOStreams' formatter
@@ -207,7 +193,7 @@ function profileBanners(p, mode, usable, isReconfigure) {
 /** Signed in: who, and the way out. */
 function profileBar(p) {
   return `
-  <div class="profile-bar">
+  <div class="profile-bar card">
     <span><span class="dot" aria-hidden="true"></span>Signed in <span class="muted">· profile <code title="${escapeHtml(
       p.signedIn.id
     )}">${escapeHtml(shortId(p.signedIn.id))}</code></span></span>
@@ -231,7 +217,7 @@ function installCard(p) {
   const url = p.signedIn.installUrl;
   return `
   <div class="card" id="install-card">
-    <h2>Your install link</h2>
+    <h3>Your install link</h3>
     <p class="lead">Install it once, in Stremio, Nuvio or AIOStreams. It never changes: whatever you save here reaches your apps without reinstalling.</p>
     <a id="profile-install" class="install-btn" href="${escapeHtml(stremioLink(url))}">Install in Stremio</a>
     <div class="url-row">
@@ -271,7 +257,7 @@ function signInCard(p, mode) {
 function createSection(p) {
   return `
     <div class="card create" id="create-card">
-      <h2>Your profile</h2>
+      <h3>Your profile</h3>
       <p class="lead">Your settings are kept on this server, encrypted, behind a password. You get one install link that never changes: change anything here later, from any device, and your apps use it without reinstalling.</p>
       <input type="text" id="create-id" name="username" autocomplete="username" readonly hidden />
       ${passwordField({ id: "create-password", label: `Password (at least ${PASSWORD_MIN} characters)`, autocomplete: "new-password", name: "new-password" })}
@@ -286,7 +272,7 @@ function createSection(p) {
 function backupsCard() {
   return `
   <div class="card" id="backups-card">
-    <h2>Backups</h2>
+    <h3>Backups</h3>
     <p class="lead">Save your settings to a file, or fill the form from one. An import is only saved when you save.</p>
     <label class="check"><input type="checkbox" id="export-no-keys" checked />
       <span><strong>Leave my keys out of the file</strong><em>Your YouTube and TMDB keys. Importing a file without keys keeps the keys already filled in.</em></span></label>
@@ -305,7 +291,7 @@ function securityCard() {
   <details class="card" id="security-card">
     <summary>Profile and security</summary>
     <div class="sec">
-      <h3>Change your password</h3>
+      <h4>Change your password</h4>
       <p class="lead">Signs out every other device. Your install link stays the same.</p>
       ${passwordField({ id: "pw-current", label: "Current password", autocomplete: "current-password" })}
       ${passwordField({ id: "pw-new", label: `New password (at least ${PASSWORD_MIN} characters)`, autocomplete: "new-password" })}
@@ -314,14 +300,14 @@ function securityCard() {
       <div class="msg" id="pw-msg" role="alert" hidden></div>
     </div>
     <div class="sec">
-      <h3>Replace your install link</h3>
+      <h4>Replace your install link</h4>
       <p class="lead">If your link got out. The old link stops working at once, so install YouStream again with the new one wherever you use it.</p>
       ${passwordField({ id: "link-password", label: "Password", autocomplete: "current-password" })}
       <button type="button" class="ghost-btn" id="link-btn">Replace install link</button>
       <div class="msg" id="link-msg" role="alert" hidden></div>
     </div>
     <div class="sec">
-      <h3>Delete your profile</h3>
+      <h4>Delete your profile</h4>
       <p class="lead">Deletes your settings from this server, and your install link stops working. Export your settings first if you may want them again.</p>
       ${passwordField({ id: "delete-password", label: "Password", autocomplete: "current-password" })}
       <label class="check"><input type="checkbox" id="delete-sure" /><span><strong>Yes, delete my profile</strong></span></label>
@@ -366,7 +352,7 @@ function marginRow(row, margin) {
             <div class="margin-label"><strong>${escapeHtml(row.label)}</strong><em>${escapeHtml(row.note)}</em></div>
             <div class="margin-inputs">
               <span class="pm" aria-hidden="true">&plusmn;</span>
-              <input type="number" class="margin-value" min="0" step="any" inputmode="decimal" value="${escapeHtml(
+              <input type="number" class="margin-value" id="margin-${row.name}" min="0" step="any" inputmode="decimal" value="${escapeHtml(
                 margin.value
               )}" aria-label="${escapeHtml(row.label)} margin" />
               <select class="margin-unit" aria-label="${escapeHtml(row.label)} margin unit">${units}</select>
@@ -380,7 +366,7 @@ function playbackRows(enabled) {
       (option) => `
             <li class="pb-option" data-option="${escapeHtml(option.id)}">
               <label class="check">
-                <input type="checkbox" class="pb-on"${option.enabled ? " checked" : ""} />
+                <input type="checkbox" class="pb-on" id="pb-on-${escapeHtml(option.id)}"${option.enabled ? " checked" : ""} />
                 <span><strong>${escapeHtml(option.label)}</strong><em>${escapeHtml(option.note)}</em></span>
               </label>
               <div class="pb-move">
@@ -445,80 +431,151 @@ function options(list, selected, anyLabel) {
   );
 }
 
-/**
- * The configure page. Also the RE-configure page: an installed addon's
- * "Configure" button opens /<config>/configure, and the decoded `existing`
- * config pre-fills every field, so the reader edits their setup rather than
- * starting over.
- *
- * @param {object} p
- * @param {string} p.baseUrl
- * @param {object|null} p.existing   a decoded config, or null for a new setup
- * @param {boolean} [p.serverTmdb]   whether this server has its own TMDB key
- * @param {Array<{ text: string, href: string }>} [p.credits]
- *                                   the data sources' attribution, shown in
- *                                   the footer as their terms ask
- */
-function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = [], profile = {} }) {
-  const isReconfigure = Boolean(existing);
-  const s = normalizeConfig(existing);
-  const p = { ...NO_PROFILES, ...profile };
-  // profile: signed in, editing it. signin: opened from a profile's install
-  // link by someone not signed in to it. new: everything else.
-  const mode = p.signedIn ? "profile" : p.signInId ? "signin" : "new";
-  // Whether a profile can be made or signed in to right now.
-  const usable = p.enabled && !p.unavailable;
-  const clientProfile = {
-    mode,
-    usable,
-    id: p.signedIn ? p.signedIn.id : null,
-    imported: p.source === "import",
-    passwordMin: PASSWORD_MIN
-  };
-  const submitLabel = mode === "profile" ? "Save changes" : usable ? "Create profile and get install link" : "Generate install link";
-  // A new setup starts with no catalogs, for the reader to add the rows
-  // they want; reconfiguring shows exactly what was saved. Search is on
-  // unless switched off, either way.
-  const startCatalogs = isReconfigure ? s.catalogs : [];
+/** The page's sections: a bar of tabs along the bottom of a phone, a column down the side of a wider screen. */
+const ICONS = {
+  summary:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="4.5" rx="1.5"/><rect x="13.5" y="11" width="7" height="9.5" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/></svg>',
+  search:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20.5 20.5"/></svg>',
+  catalogs:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="4" width="17" height="6.5" rx="1.5"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="1.5"/></svg>',
+  streams:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><path d="M10.2 8.6v6.8l5.6-3.4z"/></svg>',
+  account:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c1.4-3.6 4.3-5.5 7.5-5.5s6.1 1.9 7.5 5.5"/></svg>'
+};
 
-  const tmdbNote = serverTmdb
-    ? "This server already has a TMDB key that everyone shares, so you can leave this blank. Add your own only if you prefer to."
-    : "Optional.";
+function tabs(accountLabel) {
+  const list = [
+    ["summary", "Summary"],
+    ["search", "Search"],
+    ["catalogs", "Catalogs"],
+    ["streams", "Streams"],
+    ["account", accountLabel]
+  ];
+  return list.map(([id, label]) => `<a class="tab" href="#${id}" data-tab="${id}">${ICONS[id]}<span>${label}</span></a>`).join("\n      ");
+}
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>${ADDON_NAME} — Configure</title>
-<link rel="icon" href="/logo.png" />
-<link rel="manifest" href="/app.webmanifest" />
-<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-<meta name="theme-color" content="${BACKGROUND}" />
-<meta name="mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-title" content="${ADDON_NAME}" />
-<style>
+/** A section of the page, as a tab shows it. */
+const panelHead = (id, title, lead) => `<h2 class="panel-title" id="h-${id}">${title}</h2>
+      <p class="panel-lead">${lead}</p>`;
+
+/** Where the addon comes from, its data's credits, and the terms: the end of the Account tab, and of the sign-in page. */
+function about(credits) {
+  return `<footer class="about">
+      <a href="${REPO_URL}" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        Source code on GitHub
+      </a>${
+        credits.length
+          ? `
+      <p class="credits">${credits
+        .map(
+          (c) =>
+            `<a href="${escapeHtml(c.href)}" target="_blank" rel="noopener">${
+              c.image ? `<img src="${escapeHtml(c.image)}" alt="${escapeHtml(c.imageAlt || "")}" height="11" />` : ""
+            }${escapeHtml(c.text)}</a>`
+        )
+        .join("<br />")}</p>`
+          : ""
+      }
+      <p class="disclaimer">YouStream links to videos hosted on YouTube; it does not host, store or download any video. YouTube is a trademark of Google LLC. YouStream is not affiliated with or endorsed by YouTube, Google, Stremio or Nuvio. <a href="/terms">Terms of use and privacy</a></p>
+    </footer>`;
+}
+
+const STYLE = `
   :root {
-    --bg: #0f1013; --card: #17181d; --border: #2b2d36; --field: #0c0d10;
+    --bg: #0f1013; --card: #17181d; --raised: #121318; --border: #2b2d36; --field: #0c0d10;
     --text: #eef0f4; --muted: #9ea3ae; --accent: #7a1a2b; --accent-2: #a3263c; --link: #e29aa7; --warn: #ffb020;
+    --tabbar: 62px; --nav: 240px; --safe-bottom: env(safe-area-inset-bottom, 0px);
   }
   * { box-sizing: border-box; }
   html, body {
     margin: 0; background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+    -webkit-text-size-adjust: 100%;
   }
-  .wrap { max-width: 640px; margin: 0 auto; padding: 32px 16px 60px; }
-  header { text-align: center; margin-bottom: 28px; }
-  header img { width: 72px; height: 72px; border-radius: 16px; margin-bottom: 12px; }
-  header h1 { font-size: 22px; margin: 0 0 6px; }
-  header p { color: var(--muted); margin: 0 0 4px; font-size: 14px; line-height: 1.5; }
+  body { padding-top: env(safe-area-inset-top, 0px); }
+  [hidden] { display: none !important; }
+  a { color: var(--link); }
+
+  /* Phones first: the content in one column, the tabs in a bar along the bottom. */
+  .content { max-width: 720px; margin: 0 auto; padding: 18px 16px calc(var(--tabbar) + 120px + var(--safe-bottom)); }
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex;
+    background: rgba(18,19,24,.97); border-top: 1px solid var(--border); padding: 0 4px var(--safe-bottom);
+    -webkit-backdrop-filter: saturate(140%) blur(12px); backdrop-filter: saturate(140%) blur(12px);
+  }
+  .tabbar .brand { display: none; }
+  .tab {
+    flex: 1 1 0; min-width: 0; height: var(--tabbar); display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px; color: var(--muted); text-decoration: none; font-size: 11px; font-weight: 600; -webkit-tap-highlight-color: transparent;
+  }
+  .tab svg { width: 23px; height: 23px; flex: 0 0 auto; }
+  .tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab[aria-current="page"] { color: var(--text); }
+  .tab[aria-current="page"] svg { color: var(--link); }
+  .tab:focus-visible { outline: 2px solid var(--link); outline-offset: -4px; border-radius: 10px; }
+
+  .action-bar {
+    position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar) + var(--safe-bottom)); z-index: 25;
+    display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 10px 16px;
+    background: rgba(23,24,29,.97); border-top: 1px solid var(--border); font-size: 14px; color: var(--muted);
+  }
+  .action-bar > span { margin-right: auto; }
+  .action-bar .primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; border: 0; border-radius: 9px;
+    padding: 10px 18px; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap;
+  }
+  .toasts {
+    position: fixed; left: 12px; right: 12px; bottom: calc(var(--tabbar) + 70px + var(--safe-bottom)); z-index: 40;
+    max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+  }
+  .toasts > * { pointer-events: auto; }
+  /* Notes over the page: what is wrong, or that it saved. A tap dismisses one. */
+  .toasts > p {
+    position: relative; margin: 0; padding: 12px 38px 12px 14px; border-radius: 11px; font-size: 13.5px; line-height: 1.5; cursor: pointer;
+    background: #1d1f26; border: 1px solid var(--border); box-shadow: 0 8px 28px rgba(0,0,0,.45);
+  }
+  .toasts > p::after { content: "\\00d7"; position: absolute; right: 13px; top: 9px; font-size: 18px; color: var(--muted); }
+  .toasts #error, .toasts .msg.bad { color: #ff8d8d; border-color: #6b2630; }
+  .toasts .msg.good { color: #6fdca6; border-color: #1f5a41; }
+
+  /* A wider screen: the tabs in a column down the side, the content beside it. */
+  @media (min-width: 900px) {
+    .app { display: grid; grid-template-columns: var(--nav) minmax(0, 1fr); min-height: 100vh; }
+    .tabbar {
+      position: sticky; top: 0; height: 100vh; flex-direction: column; align-items: stretch; gap: 3px;
+      padding: 22px 14px; border-top: 0; border-right: 1px solid var(--border); background: var(--raised);
+    }
+    .tabbar .brand {
+      display: flex; align-items: center; gap: 11px; padding: 2px 10px 22px; color: var(--text); text-decoration: none;
+      font-weight: 700; font-size: 16px;
+    }
+    .tabbar .brand img { width: 36px; height: 36px; border-radius: 10px; }
+    .tab { flex: 0 0 auto; height: auto; flex-direction: row; justify-content: flex-start; gap: 12px; padding: 10px 12px; border-radius: 10px; font-size: 14.5px; }
+    .tab:hover { background: rgba(255,255,255,.045); color: var(--text); }
+    .tab[aria-current="page"] { background: rgba(122,26,43,.34); }
+    .content { padding: 36px 40px 150px; }
+    .action-bar { left: var(--nav); bottom: 0; padding: 12px 40px; }
+    .toasts { left: calc(var(--nav) + 24px); right: 24px; bottom: 86px; }
+  }
+
+  .panel-title { font-size: 24px; margin: 6px 0 6px; letter-spacing: -.01em; }
+  .panel-lead { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 0 0 20px; }
+  .hero { display: flex; align-items: flex-start; gap: 14px; margin: 4px 0 18px; }
+  .hero img { width: 52px; height: 52px; border-radius: 14px; flex: 0 0 auto; margin-top: 2px; }
+  .hero h1 { font-size: 22px; margin: 0 0 4px; }
+  .hero p { color: var(--muted); margin: 0; font-size: 13px; line-height: 1.5; }
+  @media (min-width: 900px) { .hero img { display: none; } }
+  #install-app { margin: 0 0 16px; }
+
   .banner {
     background: rgba(122,26,43,.25); border: 1px solid var(--accent-2);
-    border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 18px;
+    border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 16px; line-height: 1.5;
   }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 18px; }
-  .card h2 { font-size: 15px; margin: 0 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin-bottom: 14px; }
+  .card h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
   .card .lead { font-size: 13px; color: var(--muted); margin: 0 0 14px; line-height: 1.5; }
   .chip {
     display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
@@ -527,7 +584,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   }
   input[type="password"], input[type="text"], input[type="number"], select, textarea {
     width: 100%; background: var(--field); border: 1px solid var(--border); color: var(--text);
-    padding: 11px 12px; border-radius: 9px; font-size: 15px; font-family: inherit;
+    padding: 11px 12px; border-radius: 9px; font-size: 16px; font-family: inherit;
   }
   textarea { min-height: 96px; resize: vertical; font-size: 13px; line-height: 1.5; }
   input:focus, select:focus, textarea:focus { outline: 2px solid var(--link); }
@@ -546,52 +603,43 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .key-toggle[aria-pressed="true"] { color: var(--link); border-color: var(--link); }
   .key-toggle[aria-pressed="true"] .eye-slash { display: inline; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.55; }
-  .hint a, .lead a { color: var(--link); }
   .hint ol { margin: 6px 0 0; padding-left: 18px; }
   .check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0; flex: 1 1 auto; }
-  .check input { width: 16px; height: 16px; margin-top: 2px; flex: 0 0 auto; accent-color: var(--accent-2); }
+  .check input { width: 18px; height: 18px; margin-top: 1px; flex: 0 0 auto; accent-color: var(--accent-2); }
   .check strong { display: block; font-size: 14px; font-weight: 600; }
   .check em { display: block; font-size: 12px; color: var(--muted); font-style: normal; margin-top: 2px; line-height: 1.45; }
-  .row-box {
-    display: flex; align-items: center; gap: 10px; background: #121318;
+  .row-box, .margin-row, .pb-option {
+    display: flex; align-items: center; gap: 10px; background: var(--raised);
     border: 1px solid var(--border); border-radius: 9px; padding: 10px 11px; margin-bottom: 6px;
   }
-  .margin-row {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 10px; background: #121318;
-    border: 1px solid var(--border); border-radius: 9px; padding: 10px 11px; margin-bottom: 6px;
-  }
+  .margin-row { flex-wrap: wrap; }
   .margin-label { flex: 1 1 200px; min-width: 0; }
   .margin-label strong { display: block; font-size: 14px; }
   .margin-label em { display: block; font-size: 12px; color: var(--muted); font-style: normal; margin-top: 2px; }
   .margin-inputs { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
   .margin-inputs .pm { color: var(--muted); font-size: 16px; }
-  .margin-inputs input { width: 84px; padding: 8px 10px; font-size: 14px; }
-  .margin-inputs select { width: auto; padding: 8px 10px; font-size: 14px; }
+  .margin-inputs input { width: 84px; padding: 8px 10px; font-size: 15px; }
+  .margin-inputs select { width: auto; padding: 8px 10px; font-size: 15px; }
   #pb-options { list-style: none; margin: 0; padding: 0; }
-  .pb-option {
-    display: flex; align-items: center; gap: 10px; background: #121318;
-    border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; margin-bottom: 6px;
-  }
   .pb-move { display: flex; gap: 4px; flex: 0 0 auto; }
-  .pb-move button {
-    width: 28px; height: 28px; background: var(--field); border: 1px solid var(--border);
+  .pb-move button, .btns button {
+    width: 30px; height: 30px; background: var(--field); border: 1px solid var(--border);
     color: var(--muted); border-radius: 7px; cursor: pointer; font-size: 10px; line-height: 1; padding: 0;
   }
-  .pb-move button:disabled { opacity: .3; cursor: default; }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .pb-move button:disabled, .btns button:disabled { opacity: .3; cursor: default; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
   @media (max-width: 480px) { .grid-2 { grid-template-columns: 1fr; } }
-  details summary { cursor: pointer; font-size: 15px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+  details summary { cursor: pointer; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
   details[open] summary { margin-bottom: 12px; }
   .reset { background: none; border: none; color: var(--link); font-size: 12px; cursor: pointer; padding: 0; margin-top: 6px; }
   .submit {
     width: 100%; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; border: none;
-    padding: 14px; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer;
+    padding: 14px; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; font-family: inherit;
   }
   .submit:disabled { opacity: .6; cursor: progress; }
-  #result { margin-top: 18px; display: none; }
+  #result { margin-top: 16px; display: none; }
   #result.show { display: block; }
-  .result-box { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
-  .result-box a.install-btn {
+  .install-btn {
     display: block; text-align: center; text-decoration: none;
     background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; padding: 14px;
     border-radius: 10px; font-weight: 600; margin-bottom: 10px;
@@ -602,31 +650,33 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     flex: 0 0 auto; background: var(--field); border: 1px solid var(--border); color: var(--text);
     padding: 10px 14px; border-radius: 9px; font-size: 13px; cursor: pointer;
   }
-  .error { color: #ff6b6b; font-size: 13px; margin-top: 10px; line-height: 1.5; }
   .warning { color: var(--warn); font-size: 13px; margin: 0 0 10px; line-height: 1.5; display: none; }
-  footer { margin: 26px 0 8px; text-align: center; }
-  footer a { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; text-decoration: none; }
-  footer a:hover { color: var(--text); text-decoration: underline; }
-  footer .credits, footer .disclaimer { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
-  footer .credits a, footer .disclaimer a { display: inline; font-size: 12px; }
-  footer .credits img { vertical-align: middle; margin-right: 4px; }
-  footer .disclaimer a { text-decoration: underline; }
+  .summary { list-style: none; margin: 0; padding: 0; }
+  .summary-row { display: flex; align-items: baseline; gap: 12px; padding: 11px 2px; border-top: 1px solid var(--border); color: inherit; text-decoration: none; }
+  .summary li:first-child .summary-row { border-top: 0; padding-top: 2px; }
+  .summary-row::after { content: "\\203a"; color: var(--muted); font-size: 18px; line-height: 1; }
+  .summary-row:hover .s-value { color: var(--link); }
+  .s-name { flex: 0 0 36%; color: var(--muted); font-size: 13px; }
+  .s-value { flex: 1 1 auto; min-width: 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+  .about { margin: 26px 0 8px; text-align: center; }
+  .about a { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; text-decoration: none; }
+  .about a:hover { color: var(--text); text-decoration: underline; }
+  .about .credits, .about .disclaimer { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+  .about .credits a, .about .disclaimer a { display: inline; font-size: 12px; }
+  .about .credits img { vertical-align: middle; margin-right: 4px; }
+  .about .disclaimer a { text-decoration: underline; }
   textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; min-height: 0; }
-  .format { margin-bottom: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
   .format .hint code, .fields-help code { color: var(--text); font-size: 11.5px; }
-  .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+  .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
   .preview-head .label-text { margin: 0; }
   .preview-tabs { display: flex; gap: 6px; }
   .preview-tabs button {
     background: var(--field); border: 1px solid var(--border); color: var(--muted); border-radius: 7px;
-    padding: 4px 10px; font-size: 12px; cursor: pointer;
+    padding: 5px 10px; font-size: 12px; cursor: pointer;
   }
   .preview-tabs button[aria-pressed="true"] { color: var(--text); border-color: var(--link); }
   .preview { list-style: none; margin: 0 0 10px; padding: 0; }
-  .preview li {
-    display: flex; gap: 12px; background: #121318; border: 1px solid var(--border); border-radius: 9px;
-    padding: 10px 12px; margin-bottom: 6px;
-  }
+  .preview li { display: flex; gap: 12px; background: var(--raised); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; margin-bottom: 6px; }
   .preview .p-name { flex: 0 0 32%; font-weight: 700; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .preview .p-desc { flex: 1 1 auto; min-width: 0; font-size: 12.5px; color: #d8dbe2; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
   @media (max-width: 480px) { .preview li { flex-direction: column; gap: 4px; } .preview .p-name { flex-basis: auto; } }
@@ -636,14 +686,10 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .fields-help table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
   .fields-help td { padding: 3px 8px 3px 0; vertical-align: top; color: var(--muted); line-height: 1.45; }
   .fields-help td:first-child { white-space: nowrap; }
-  .agree { margin: 18px 0 4px; font-size: 13px; color: var(--muted); }
-  .agree a { color: var(--link); }
-  .sub-label { display: block; font-size: 12px; color: var(--muted); margin: 16px 0 8px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+  .agree { margin: 4px 0 14px; font-size: 13px; color: var(--muted); }
+  .sub-label { display: block; font-size: 12px; color: var(--muted); margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
   #catalog-list { display: flex; flex-direction: column; gap: 6px; }
-  .cat-row {
-    display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 10px; background: #121318; border: 1px solid var(--border);
-    border-radius: 9px; padding: 9px 10px;
-  }
+  .cat-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 10px; background: var(--raised); border: 1px solid var(--border); border-radius: 9px; padding: 9px 10px; }
   .cat-rank {
     flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: #fff;
     font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 3px;
@@ -651,21 +697,16 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .cat-main { flex: 1 1 0; min-width: 0; }
   .cat-label { font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; padding-top: 3px; }
   .cat-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
-  .cat-opts select { width: auto; max-width: 100%; padding: 5px 8px; font-size: 12.5px; border-radius: 7px; }
+  .cat-opts select { width: auto; max-width: 100%; padding: 6px 8px; font-size: 13px; border-radius: 7px; }
   .cat-empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
-  .cat-lead { margin: 0 0 10px; }
   .cat-fixed { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
   /* A line of its own under the row, as wide as the row past its number, so a
      phone shows the filter's choices whole. */
   .cat-filter { flex: 0 0 calc(100% - 32px); margin: 7px 0 0 32px; display: flex; flex-direction: column; gap: 6px; }
-  .cat-filter select { width: 100%; padding: 5px 8px; font-size: 12.5px; border-radius: 7px; }
-  .cat-filter .cat-words { padding: 7px 9px; font-size: 13px; border-radius: 7px; }
+  .cat-filter select { width: 100%; padding: 6px 8px; font-size: 13px; border-radius: 7px; }
+  .cat-filter .cat-words { padding: 8px 9px; font-size: 14px; border-radius: 7px; }
   .btns { flex: 0 0 auto; display: flex; gap: 4px; }
-  .btns button {
-    width: 28px; height: 28px; padding: 0; font-size: 11px; background: var(--field); border: 1px solid var(--border);
-    color: var(--muted); border-radius: 7px; cursor: pointer;
-  }
-  .btns button:disabled { opacity: .3; cursor: default; }
+  .btns button { font-size: 11px; }
   .btns button.remove { color: #ff6b6b; }
   .add-row { display: flex; gap: 8px; margin-top: 10px; }
   .add-row input { flex: 1 1 0; min-width: 0; }
@@ -677,20 +718,13 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   }
   .add-btn:disabled { opacity: .5; cursor: progress; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chips button {
-    background: var(--field); border: 1px solid var(--border); color: var(--text); padding: 6px 11px;
-    font-size: 13px; border-radius: 999px; cursor: pointer;
-  }
+  .chips button { background: var(--field); border: 1px solid var(--border); color: var(--text); padding: 7px 12px; font-size: 13px; border-radius: 999px; cursor: pointer; }
   .chips button:hover { border-color: var(--link); }
   .inline-inputs { display: flex; gap: 8px; }
   .inline-inputs input { flex: 1 1 auto; min-width: 0; }
   .inline-inputs select { width: auto; flex: 0 0 auto; }
   .note-warn { color: var(--warn); }
-  [hidden] { display: none !important; }
-  .profile-bar {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--card);
-    border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px 10px 14px; margin-bottom: 12px; font-size: 14px;
-  }
+  .profile-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; font-size: 14px; }
   .profile-bar .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ecf8e; margin-right: 8px; vertical-align: middle; }
   .profile-bar .muted { color: var(--muted); }
   .profile-bar code, .sec code { font-size: 12.5px; color: var(--text); }
@@ -707,132 +741,326 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .msg { font-size: 13px; margin-top: 10px; line-height: 1.5; }
   .msg.good { color: #6fdca6; }
   .msg.bad { color: #ff6b6b; }
-  .install-btn {
-    display: block; text-align: center; text-decoration: none;
-    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; padding: 14px;
-    border-radius: 10px; font-weight: 600; margin-bottom: 10px;
-  }
   .stay { margin: 4px 0 14px; }
-  #backups-card { margin-top: 18px; }
   #signin-card .submit { margin-top: 2px; }
   .sec { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
   .sec:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
-  .sec h3 { font-size: 14px; margin: 0 0 4px; }
+  .sec h4 { font-size: 14px; margin: 0 0 4px; }
   .sec .check { margin: 4px 0 12px; }
-  .header-actions { margin-top: 12px; }
-  .save-bar {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; align-items: center; justify-content: center; gap: 14px;
-    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); background: rgba(23,24,29,.96); border-top: 1px solid var(--border);
-    font-size: 14px; color: var(--muted);
-  }
-  #save-bar-btn {
-    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; border: 0; border-radius: 9px;
-    padding: 10px 22px; font-size: 15px; font-weight: 600; cursor: pointer;
-  }
-  body.has-save-bar .wrap { padding-bottom: 110px; }
-</style>
+  .signin-view { max-width: 560px; margin: 0 auto; padding: 28px 16px 40px; }
+`;
+
+/**
+ * The configure page. Also the RE-configure page: an installed addon's
+ * "Configure" button opens /<config>/configure, and the decoded `existing`
+ * config pre-fills every field, so the reader edits their setup rather than
+ * starting over.
+ *
+ * Laid out as an app: Summary (the keys, the setup at a glance, the install
+ * link), Search, Catalogs, Streams, and Account (profiles, backups, the
+ * terms), one at a time, chosen from a bar of tabs along the bottom of a
+ * phone or a column down the side of a wider screen. Every setting is in
+ * one form whichever tab shows it; web/configure.js makes it all work.
+ *
+ * @param {object} p
+ * @param {string} p.baseUrl
+ * @param {object|null} p.existing   a decoded config, or null for a new setup
+ * @param {boolean} [p.serverTmdb]   whether this server has its own TMDB key
+ * @param {Array<{ text: string, href: string }>} [p.credits]
+ *                                   the data sources' attribution, shown in
+ *                                   the Account tab as their terms ask
+ * @param {object} [p.profile]       profiles' state for this request (profiles/index.js)
+ */
+function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = [], profile = {} }) {
+  const isReconfigure = Boolean(existing);
+  const s = normalizeConfig(existing);
+  const p = { ...NO_PROFILES, ...profile };
+  // profile: signed in, editing it. signin: opened from a profile's install
+  // link by someone not signed in to it. new: everything else.
+  const mode = p.signedIn ? "profile" : p.signInId ? "signin" : "new";
+  // Whether a profile can be made or signed in to right now.
+  const usable = p.enabled && !p.unavailable;
+  const submitLabel = mode === "profile" ? "Save changes" : usable ? "Create profile and get install link" : "Generate install link";
+  // A new setup starts with no catalogs, for the reader to add the rows
+  // they want; reconfiguring shows exactly what was saved. Search is on
+  // unless switched off, either way.
+  const startCatalogs = isReconfigure ? s.catalogs : [];
+  const banners = profileBanners(p, mode, usable, isReconfigure);
+
+  const tmdbNote = serverTmdb
+    ? "This server already has a TMDB key that everyone shares, so you can leave this blank. Add your own only if you prefer to."
+    : "Optional.";
+
+  const pageData = {
+    baseUrl,
+    isReconfigure,
+    playbackVersion: PLAYBACK_VERSION,
+    marginUnits: MARGIN_UNITS,
+    defaultMargins: DEFAULT_MARGINS,
+    defaultExclude: DEFAULT_EXCLUDE,
+    defaultExcludeDescription: DEFAULT_EXCLUDE_DESCRIPTION,
+    defaultMovieQuery: DEFAULT_MOVIE_QUERY,
+    defaultEpisodeQuery: DEFAULT_EPISODE_QUERY,
+    defaultMaxResults: DEFAULT_MAX_RESULTS,
+    maxResultsLimit: MAX_RESULTS_LIMIT,
+    defaultMinViews: DEFAULT_MIN_VIEWS,
+    maxMinViews: MAX_MIN_VIEWS,
+    profile: { mode, usable, id: p.signedIn ? p.signedIn.id : null, imported: p.source === "import", passwordMin: PASSWORD_MIN }
+  };
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>${ADDON_NAME} — Configure</title>
+<link rel="icon" href="/logo.png" />
+<link rel="manifest" href="/app.webmanifest" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta name="theme-color" content="${BACKGROUND}" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="${ADDON_NAME}" />
+<style>${STYLE}</style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <img src="/logo.png" alt="${ADDON_NAME}" />
-    <h1>${ADDON_NAME}</h1>
-    <p>${escapeHtml(DESCRIPTION)}</p>
-    <div class="header-actions"><button type="button" class="ghost-btn" id="install-app" hidden>Install the ${ADDON_NAME} app</button></div>
-  </header>
-  ${mode === "profile" ? profileBar(p) : ""}
-  ${profileBanners(p, mode, usable, isReconfigure)}
-  ${mode === "profile" ? installCard(p) : ""}
-  ${usable && mode !== "profile" ? signInCard(p, mode) : ""}
-  ${mode === "signin" ? '<p class="hint">Not your profile, or starting over? <a href="/configure">Start a new setup</a>.</p>' : ""}
-
-  <div id="setup"${mode === "signin" ? " hidden" : ""}>
+${
+  mode === "signin"
+    ? `<div class="signin-view" id="signin-view">
+  <header class="hero"><img src="/logo.png" alt="" /><div><h1>${ADDON_NAME}</h1><p>${escapeHtml(DESCRIPTION)}</p></div></header>
+  ${banners}
+  ${signInCard(p, mode)}
+  <p class="hint">Not your profile, or starting over? <a href="/configure">Start a new setup</a>.</p>
+  ${about(credits)}
+</div>
+`
+    : ""
+}<div id="setup"${mode === "signin" ? " hidden" : ""}>
+<div class="app">
+  <nav class="tabbar" aria-label="Sections">
+      <a class="brand" href="#summary"><img src="/logo.png" alt="" /><span>${ADDON_NAME}</span></a>
+      ${tabs(p.enabled ? "Account" : "More")}
+  </nav>
+  <main class="content">
   <form id="config-form" novalidate>
-    <div class="card">
-      <h2>YouTube API key</h2>
-      <p class="lead">
-        ${ADDON_NAME} searches YouTube with your own key, which is free. A key can search 100 times a day.
-        A search is spent the first time a title is looked up, and nothing is spent after that for a day,
-        however often it is opened again.
-      </p>
-      ${keyField({ id: "youtube-key", label: "YouTube API key", value: s.youtubeKey, placeholder: "AIza..." })}
-      <div class="hint">
-        How to get one:
-        <ol>
-          <li>Open the <a href="${YOUTUBE_KEY_URL}" target="_blank" rel="noopener">YouTube Data API v3</a> page in Google Cloud, pick or create a project, and press <strong>Enable</strong>.</li>
-          <li>Go to <a href="${YOUTUBE_CREDENTIALS_URL}" target="_blank" rel="noopener">Credentials</a>, then <strong>Create credentials &rarr; API key</strong>.</li>
-          <li>Leave <strong>Application restrictions</strong> at <strong>None</strong>: this server makes the calls, not your browser. Limiting the key to the YouTube Data API v3 is fine.</li>
-        </ol>
+    <section class="panel" data-tab="summary" aria-labelledby="h-summary">
+      <header class="hero">
+        <img src="/logo.png" alt="" />
+        <div><h1 id="h-summary">${ADDON_NAME}</h1><p>${escapeHtml(DESCRIPTION)}</p></div>
+      </header>
+      <button type="button" class="ghost-btn" id="install-app" hidden>Install the ${ADDON_NAME} app</button>
+      ${banners}
+      ${mode === "profile" ? installCard(p) : ""}
+
+      <div class="card">
+        <h3>YouTube API key</h3>
+        <p class="lead">
+          ${ADDON_NAME} searches YouTube with your own key, which is free. A key can search 100 times a day.
+          A search is spent the first time a title is looked up, and nothing is spent after that for a day,
+          however often it is opened again.
+        </p>
+        ${keyField({ id: "youtube-key", label: "YouTube API key", value: s.youtubeKey, placeholder: "AIza..." })}
+        <div class="hint">
+          How to get one:
+          <ol>
+            <li>Open the <a href="${YOUTUBE_KEY_URL}" target="_blank" rel="noopener">YouTube Data API v3</a> page in Google Cloud, pick or create a project, and press <strong>Enable</strong>.</li>
+            <li>Go to <a href="${YOUTUBE_CREDENTIALS_URL}" target="_blank" rel="noopener">Credentials</a>, then <strong>Create credentials &rarr; API key</strong>.</li>
+            <li>Leave <strong>Application restrictions</strong> at <strong>None</strong>: this server makes the calls, not your browser. Limiting the key to the YouTube Data API v3 is fine.</li>
+          </ol>
+          ${
+            p.enabled
+              ? "With a profile, your key is kept on this server, encrypted, and only your password or your install link opens it; without one, it lives only inside your install link"
+              : "Your key is kept only inside your personal addon link; YouStream never stores it"
+          } (see the <a href="/terms" target="_blank" rel="noopener">privacy policy</a>).
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>TMDB key <span class="chip">optional</span></h3>
+        <p class="lead">
+          Lets ${ADDON_NAME} read the <code>tmdb:</code> ids Nuvio uses for some titles, and adds TMDB's cast
+          lists and other names to the evidence a match needs.
+        </p>
+        ${keyField({ id: "tmdb-key", label: "TMDB key", value: s.tmdbKey, placeholder: "API key or Read Access Token" })}
+        <div class="hint">${escapeHtml(tmdbNote)} Get one free under <a href="${TMDB_KEY_URL}" target="_blank" rel="noopener">TMDB settings &rarr; API</a>; either the API key or the Read Access Token works.</div>
+      </div>
+
+      <div class="card">
+        <h3>Your setup</h3>
+        <ul class="summary" id="summary-list"></ul>
+      </div>
+
+      ${usable && mode === "new" ? createSection(p) : ""}
+      <div class="card" id="finish">
+        <label class="check agree"${mode === "profile" ? " hidden" : ""}><input type="checkbox" id="agree"${isReconfigure ? " checked" : ""} />
+          <span>I agree to the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a> and to YouStream's <a href="/terms" target="_blank" rel="noopener">terms of use and privacy policy</a>.</span></label>
+        <button type="submit" class="submit" id="submit-btn">${submitLabel}</button>
         ${
-          p.enabled
-            ? "With a profile, your key is kept on this server, encrypted, and only your password or your install link opens it; without one, it lives only inside your install link"
-            : "Your key is kept only inside your personal addon link; YouStream never stores it"
-        } (see the <a href="/terms" target="_blank" rel="noopener">privacy policy</a>).
+          usable && mode === "new"
+            ? '<button type="button" class="link-btn" id="no-profile-btn">Or make an install link that carries your settings, without a profile</button>'
+            : ""
+        }
+        <div id="result">
+          <p class="warning" id="warning"></p>
+          <a id="install-link" class="install-btn" href="#">Install in Stremio</a>
+          <div class="url-row">
+            <input id="manifest-url" type="text" readonly aria-label="Addon URL" />
+            <button type="button" id="copy-btn">Copy</button>
+          </div>
+          <div class="hint">In Nuvio, or if the button does not open Stremio, paste the copied URL into the app's add-addon box. Keep it private: it contains your keys.</div>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>TMDB key <span class="chip">optional</span></h2>
-      <p class="lead">
-        Lets ${ADDON_NAME} read the <code>tmdb:</code> ids Nuvio uses for some titles, and adds TMDB's cast
-        lists and other names to the evidence a match needs.
-      </p>
-      ${keyField({ id: "tmdb-key", label: "TMDB key", value: s.tmdbKey, placeholder: "API key or Read Access Token" })}
-      <div class="hint">${escapeHtml(tmdbNote)} Get one free under <a href="${TMDB_KEY_URL}" target="_blank" rel="noopener">TMDB settings &rarr; API</a>; either the API key or the Read Access Token works.</div>
-    </div>
+    <section class="panel" data-tab="search" aria-labelledby="h-search" hidden>
+      ${panelHead("search", "Search", `How ${ADDON_NAME} finds films and episodes on YouTube, and what your app's own YouTube search shows.`)}
+      <div class="card">
+        <h3>Look for</h3>
+        <div class="row-box">
+          <label class="check"><input type="checkbox" id="type-movie"${s.types.includes("movie") ? " checked" : ""} />
+            <span><strong>Movies</strong><em>Full films uploaded to YouTube.</em></span></label>
+        </div>
+        <div class="row-box">
+          <label class="check"><input type="checkbox" id="type-series"${s.types.includes("series") ? " checked" : ""} />
+            <span><strong>Series</strong><em>Episodes, including web series that only exist on YouTube, and anime from channels like Muse Asia and Ani-One.</em></span></label>
+        </div>
+        <div class="hint">Each type you switch off saves your daily searches for the rest. Switch both off to use ${ADDON_NAME} for YouTube alone.</div>
+      </div>
 
-    <div class="card">
-      <h2>Look for</h2>
-      <div class="row-box">
-        <label class="check"><input type="checkbox" id="type-movie"${s.types.includes("movie") ? " checked" : ""} />
-          <span><strong>Movies</strong><em>Full films uploaded to YouTube.</em></span></label>
+      <div class="card">
+        <h3>Results</h3>
+        <div class="grid-2">
+          <label class="field">
+            <span class="label-text">Videos to list per title</span>
+            <input type="number" id="max-results" min="1" max="${MAX_RESULTS_LIMIT}" step="1" inputmode="numeric" value="${s.maxResults}" />
+          </label>
+          <label class="field">
+            <span class="label-text">Your country</span>
+            <select id="region">${options(COUNTRIES, s.region, "Any country")}</select>
+          </label>
+        </div>
+        <div class="grid-2">
+          <label class="field">
+            <span class="label-text">Audio language</span>
+            <select id="audio-language">${options(LANGUAGES, s.audioLanguage, "Any language")}</select>
+          </label>
+          <label class="field">
+            <span class="label-text">Minimum views</span>
+            <input type="number" id="min-views" min="0" max="${MAX_MIN_VIEWS}" step="1" inputmode="numeric" value="${s.minViews}" />
+          </label>
+        </div>
+        <div class="hint" style="margin-top:0;margin-bottom:12px">
+          Your country hides videos that are blocked there and ranks results for it, YouTube search and Trending
+          included. An audio language drops
+          videos in another one &mdash; going by what the title says (&ldquo;Hindi dub&rdquo;) before YouTube's own
+          tag, which channels often get wrong &mdash; adds it to movie searches (good for dubbed films), and ranks
+          it first. Videos with no language known are kept. The view minimum keeps out nearly unwatched lookalikes;
+          0 turns it off.
+        </div>
+        <div class="row-box">
+          <label class="check"><input type="checkbox" id="official-only"${s.officialOnly ? " checked" : ""} />
+            <span><strong>Only official channels</strong><em>Only uploads from YouTube content partners: studios, TV networks and the channels they license. Leaves out every unofficial copy, and with it some public-domain classics.</em></span></label>
+        </div>
+        <div class="row-box">
+          <label class="check"><input type="checkbox" id="embeddable-only"${s.embeddableOnly ? " checked" : ""} />
+            <span><strong>Only videos that allow embedding</strong><em>Turn on if you use Stremio Web, which plays YouTube in an embedded player. Nuvio and the YouTube app do not need it.</em></span></label>
+        </div>
       </div>
-      <div class="row-box">
-        <label class="check"><input type="checkbox" id="type-series"${s.types.includes("series") ? " checked" : ""} />
-          <span><strong>Series</strong><em>Episodes, including web series that only exist on YouTube, and anime from channels like Muse Asia and Ani-One.</em></span></label>
-      </div>
-      <div class="hint">Each type you switch off saves your daily searches for the rest. Switch both off to use ${ADDON_NAME} for YouTube alone.</div>
-    </div>
 
-    <div class="card" id="youtube-card">
-      <h2>YouTube in your app</h2>
-      <p class="lead">
-        Search YouTube from your app, and keep searches, channels, playlists and Trending as rows on its home
-        screen. A video you open there plays the ways you choose under &ldquo;When you press play&rdquo;, and one
-        you save to your library is listed under the type <strong>youtube</strong>.
-      </p>
-      <div class="row-box">
-        <label class="check"><input type="checkbox" id="yt-search"${s.search ? " checked" : ""} />
-          <span><strong>Search YouTube</strong><em>Your app's search shows a row of YouTube's own results, live. Each search costs one of your 100 a day, so ${ADDON_NAME} waits until you stop typing and skips anything under 3 letters.</em></span></label>
+      <div class="card">
+        <h3>Runtime matching</h3>
+        <p class="lead">
+          A video only counts when its length is close to the listed runtime. This is what keeps trailers
+          and clips out. A margin can be in seconds, minutes, or a percentage of the runtime. For example,
+          a 23-minute episode with a 25-second margin accepts anything from 22m 35s to 23m 25s. The defaults
+          come from measuring real uploads against their listings; the episode number, not the length, is
+          what keeps the wrong episode out.
+        </p>
+        ${MARGIN_ROWS.map((row) => marginRow(row, s[row.name])).join("")}
       </div>
-      <div class="grid-2" style="margin-top:10px">
+
+      <div class="card" id="youtube-card">
+        <h3>YouTube search in your app</h3>
+        <div class="row-box">
+          <label class="check"><input type="checkbox" id="yt-search"${s.search ? " checked" : ""} />
+            <span><strong>Search YouTube</strong><em>Your app's search shows a row of YouTube's own results, live. Each search costs one of your 100 a day, so ${ADDON_NAME} waits until you stop typing and skips anything under 3 letters.</em></span></label>
+        </div>
+        <div class="grid-2" style="margin-top:10px">
+          <label class="field">
+            <span class="label-text">Order search results by</span>
+            <select id="search-sort">${choiceOptions(catalogs.SORTS, s.searchSort)}</select>
+          </label>
+          <label class="field">
+            <span class="label-text">Video length</span>
+            <select id="search-length">${choiceOptions(catalogs.LENGTHS, s.searchLength)}</select>
+          </label>
+        </div>
         <label class="field">
-          <span class="label-text">Order search results by</span>
-          <select id="search-sort">${choiceOptions(catalogs.SORTS, s.searchSort)}</select>
+          <span class="label-text">SafeSearch</span>
+          <select id="safe-search">${SAFE_SEARCH.map(
+            (id) => `<option value="${id}"${id === s.safeSearch ? " selected" : ""}>${escapeHtml(SAFE_SEARCH_LABELS[id])}</option>`
+          ).join("")}</select>
         </label>
-        <label class="field">
-          <span class="label-text">Video length</span>
-          <select id="search-length">${choiceOptions(catalogs.LENGTHS, s.searchLength)}</select>
-        </label>
+        <div class="hint">SafeSearch applies to this search and to your search catalogs.</div>
       </div>
 
-      <span class="sub-label">Catalogs</span>
-      <p class="hint cat-lead">
-        Each one is a row on your app's home screen, <strong>in this order</strong>: use the arrows to arrange
-        them. Choose where a row's videos come from, type the search or paste the playlist or channel, then choose
-        how its videos are ordered.
-      </p>
-      <div id="catalog-list"></div>
-      <div class="add-row source-row">
-        <select id="catalog-source" aria-label="Where the catalog's videos come from">${choiceOptions(CATALOG_SOURCES, CATALOG_SOURCES[0].id)}</select>
-        <input type="text" id="catalog-input" maxlength="500" placeholder="${escapeHtml(CATALOG_SOURCES[0].placeholder)}" aria-label="${escapeHtml(CATALOG_SOURCES[0].prompt)}" spellcheck="false" />
-        <button type="button" class="add-btn" id="catalog-add">Add</button>
+      <div class="card">
+        <details id="fine-tuning">
+          <summary>Fine-tuning</summary>
+          <label class="field">
+            <span class="label-text">Movie search</span>
+            <input type="text" id="movie-query" maxlength="${MAX_QUERY_LENGTH}" value="${escapeHtml(s.movieQuery)}" spellcheck="false" />
+            <button type="button" class="reset" data-reset="movie-query">Reset to default</button>
+          </label>
+          <label class="field">
+            <span class="label-text">Episode search</span>
+            <input type="text" id="episode-query" maxlength="${MAX_QUERY_LENGTH}" value="${escapeHtml(s.episodeQuery)}" spellcheck="false" />
+            <button type="button" class="reset" data-reset="episode-query">Reset to default</button>
+          </label>
+          <div class="hint" style="margin-bottom:14px">
+            Placeholders: {title} {year} {season} {episode} {s00e00} {episodeTitle} {absolute} {language}.
+            {title} is required. Every search costs one of your 100 a day, so there is one per title.
+          </div>
+          <label class="field">
+            <span class="label-text">Skip videos whose title says (comma separated)</span>
+            <textarea id="exclude" spellcheck="false">${escapeHtml(s.exclude.join(", "))}</textarea>
+            <button type="button" class="reset" data-reset="exclude">Reset to default</button>
+          </label>
+          <div class="hint" style="margin-bottom:14px">A word that is part of the title's own name is ignored for that title, so &ldquo;trailer&rdquo; never hides Trailer Park Boys.</div>
+          <label class="field">
+            <span class="label-text">Skip videos whose description says (comma separated)</span>
+            <textarea id="exclude-description" spellcheck="false">${escapeHtml(s.excludeDescription.join(", "))}</textarea>
+            <button type="button" class="reset" data-reset="exclude-description">Reset to default</button>
+          </label>
+          <div class="hint">How fan films, explainers, video essays and unofficial copies describe themselves: &ldquo;fan movie&rdquo;, &ldquo;in this video&rdquo;, &ldquo;video essay&rdquo;, &ldquo;fair use&rdquo;.</div>
+        </details>
       </div>
-      <div class="hint" id="catalog-note" role="status"></div>
-      <span class="sub-label">Trending in your country</span>
-      <div class="chips" id="trending-chips"></div>
+    </section>
 
-      <div class="grid-2" style="margin-top:16px">
+    <section class="panel" data-tab="catalogs" aria-labelledby="h-catalogs" hidden>
+      ${panelHead(
+        "catalogs",
+        "Catalogs",
+        "Rows on your app's home screen, <strong>in this order</strong>: YouTube searches, channels, playlists and Trending. A video you open from one plays the ways you choose under Streams, and one you save to your library is listed under the type <strong>youtube</strong>."
+      )}
+      <div class="card">
+        <h3>Your rows</h3>
+        <p class="hint cat-lead">
+          Choose where a row's videos come from, type the search or paste the playlist or channel, then choose
+          how its videos are ordered. Use the arrows to arrange them.
+        </p>
+        <div id="catalog-list"></div>
+        <div class="add-row source-row">
+          <select id="catalog-source" aria-label="Where the catalog's videos come from">${choiceOptions(CATALOG_SOURCES, CATALOG_SOURCES[0].id)}</select>
+          <input type="text" id="catalog-input" maxlength="500" placeholder="${escapeHtml(CATALOG_SOURCES[0].placeholder)}" aria-label="${escapeHtml(CATALOG_SOURCES[0].prompt)}" spellcheck="false" />
+          <button type="button" class="add-btn" id="catalog-add">Add</button>
+        </div>
+        <div class="hint" id="catalog-note" role="status"></div>
+        <span class="sub-label">Trending in your country</span>
+        <div class="chips" id="trending-chips"></div>
+      </div>
+
+      <div class="card">
+        <h3>Refreshing</h3>
         <div class="field">
           <span class="label-text">Refresh catalogs every</span>
           <div class="inline-inputs">
@@ -842,202 +1070,96 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
               .join("")}</select>
           </div>
         </div>
-        <label class="field">
-          <span class="label-text">SafeSearch</span>
-          <select id="safe-search">${SAFE_SEARCH.map(
-            (id) => `<option value="${id}"${id === s.safeSearch ? " selected" : ""}>${escapeHtml(SAFE_SEARCH_LABELS[id])}</option>`
-          ).join("")}</select>
-        </label>
+        <div class="hint">
+          A search catalog costs one of your 100 daily searches each time it refreshes; a channel, a playlist or a
+          Trending row costs almost nothing. A row refreshes only when your app shows it after this long: every
+          ${DEFAULT_CATALOG_REFRESH.value} hours unless you change it, and at most every 30 minutes. YouTube's terms let a
+          server keep its data 30 days at most, so anything longer refreshes then.
+          <span id="quota-note"></span>
+        </div>
       </div>
-      <div class="hint">
-        A search catalog costs one of your 100 daily searches each time it refreshes; a channel, a playlist or a
-        Trending row costs almost nothing. A row refreshes only when your app shows it after this long: every
-        ${DEFAULT_CATALOG_REFRESH.value} hours unless you change it, and at most every 30 minutes. YouTube's terms let a
-        server keep its data 30 days at most, so anything longer refreshes then. SafeSearch applies to searches.
-        <span id="quota-note"></span>
-      </div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>Runtime matching</h2>
-      <p class="lead">
-        A video only counts when its length is close to the listed runtime. This is what keeps trailers
-        and clips out. A margin can be in seconds, minutes, or a percentage of the runtime. For example,
-        a 23-minute episode with a 25-second margin accepts anything from 22m 35s to 23m 25s. The defaults
-        come from measuring real uploads against their listings; the episode number, not the length, is
-        what keeps the wrong episode out.
-      </p>
-      ${MARGIN_ROWS.map((row) => marginRow(row, s[row.name])).join("")}
-    </div>
+    <section class="panel" data-tab="streams" aria-labelledby="h-streams" hidden>
+      ${panelHead("streams", "Streams", "How each video found is offered in your app, and how its stream reads there.")}
+      <div class="card">
+        <h3>When you press play</h3>
+        <p class="lead">Each video found is offered these ways, in this order. The first one is what the play button lands on.</p>
+        <ul id="pb-options">${playbackRows(s.playback)}
+        </ul>
+      </div>
 
-    <div class="card">
-      <h2>When you press play</h2>
-      <p class="lead">Each video found is offered these ways, in this order. The first one is what the play button lands on.</p>
-      <ul id="pb-options">${playbackRows(s.playback)}
-      </ul>
-    </div>
-
-    <div class="card">
-      <h2>Results</h2>
-      <div class="grid-2">
+      <div class="card format">
+        <h3>Stream name and description</h3>
+        <p class="hint" style="margin:0 0 12px">
+          How each stream reads in your app. Templates use AIOStreams' formatter syntax, which PenguPlay uses too,
+          so one made for either works here: <code>{video.channel::upper}</code>,
+          <code>{video.live::istrue["🔴 Live"||""]}</code>, and <code>{? … ?}</code> for a part shown only when its
+          fields have values. <a href="${FORMATTER_DOCS_URL}" target="_blank" rel="noopener">The syntax</a>
+        </p>
         <label class="field">
-          <span class="label-text">Videos to list per title</span>
-          <input type="number" id="max-results" min="1" max="${MAX_RESULTS_LIMIT}" step="1" inputmode="numeric" value="${s.maxResults}" />
+          <span class="label-text">Preset</span>
+          <select id="format-preset">${presetOptions(s.format)}</select>
         </label>
         <label class="field">
-          <span class="label-text">Your country</span>
-          <select id="region">${options(COUNTRIES, s.region, "Any country")}</select>
-        </label>
-      </div>
-      <div class="grid-2">
-        <label class="field">
-          <span class="label-text">Audio language</span>
-          <select id="audio-language">${options(LANGUAGES, s.audioLanguage, "Any language")}</select>
+          <span class="label-text">Name</span>
+          <textarea id="name-template" class="code" rows="2" maxlength="${MAX_NAME_TEMPLATE}" spellcheck="false">${escapeHtml(s.nameTemplate)}</textarea>
         </label>
         <label class="field">
-          <span class="label-text">Minimum views</span>
-          <input type="number" id="min-views" min="0" max="${MAX_MIN_VIEWS}" step="1" inputmode="numeric" value="${s.minViews}" />
+          <span class="label-text">Description</span>
+          <textarea id="description-template" class="code" rows="8" maxlength="${MAX_DESCRIPTION_TEMPLATE}" spellcheck="false">${escapeHtml(s.descriptionTemplate)}</textarea>
         </label>
-      </div>
-      <div class="hint" style="margin-top:0;margin-bottom:12px">
-        Your country hides videos that are blocked there and ranks results for it, YouTube search and Trending
-        included. An audio language drops
-        videos in another one &mdash; going by what the title says (&ldquo;Hindi dub&rdquo;) before YouTube's own
-        tag, which channels often get wrong &mdash; adds it to movie searches (good for dubbed films), and ranks
-        it first. Videos with no language known are kept. The view minimum keeps out nearly unwatched lookalikes;
-        0 turns it off.
-      </div>
-      <div class="row-box">
-        <label class="check"><input type="checkbox" id="official-only"${s.officialOnly ? " checked" : ""} />
-          <span><strong>Only official channels</strong><em>Only uploads from YouTube content partners: studios, TV networks and the channels they license. Leaves out every unofficial copy, and with it some public-domain classics.</em></span></label>
-      </div>
-      <div class="row-box">
-        <label class="check"><input type="checkbox" id="embeddable-only"${s.embeddableOnly ? " checked" : ""} />
-          <span><strong>Only videos that allow embedding</strong><em>Turn on if you use Stremio Web, which plays YouTube in an embedded player. Nuvio and the YouTube app do not need it.</em></span></label>
-      </div>
-    </div>
-
-    <div class="card">
-      <details id="advanced">
-        <summary>Advanced</summary>
-        <div class="format">
-          <span class="label-text">Stream name and description</span>
-          <p class="hint" style="margin:0 0 10px">
-            How each stream reads in your app. Templates use AIOStreams' formatter syntax, which PenguPlay uses too,
-            so one made for either works here: <code>{video.channel::upper}</code>,
-            <code>{video.live::istrue["🔴 Live"||""]}</code>, and <code>{? … ?}</code> for a part shown only when its
-            fields have values. <a href="${FORMATTER_DOCS_URL}" target="_blank" rel="noopener">The syntax</a>
-          </p>
-          <label class="field">
-            <span class="label-text">Preset</span>
-            <select id="format-preset">${presetOptions(s.format)}</select>
-          </label>
-          <label class="field">
-            <span class="label-text">Name</span>
-            <textarea id="name-template" class="code" rows="2" maxlength="${MAX_NAME_TEMPLATE}" spellcheck="false">${escapeHtml(s.nameTemplate)}</textarea>
-          </label>
-          <label class="field">
-            <span class="label-text">Description</span>
-            <textarea id="description-template" class="code" rows="8" maxlength="${MAX_DESCRIPTION_TEMPLATE}" spellcheck="false">${escapeHtml(s.descriptionTemplate)}</textarea>
-          </label>
-          <div class="preview-head">
-            <span class="label-text">Preview</span>
-            <div class="preview-tabs">
-              <button type="button" class="preview-tab" data-sample="film" aria-pressed="true">Film</button>
-              <button type="button" class="preview-tab" data-sample="episode" aria-pressed="false">Episode</button>
-              <button type="button" class="preview-tab" data-sample="video" aria-pressed="false">YouTube video</button>
-            </div>
+        <div class="preview-head">
+          <span class="label-text">Preview</span>
+          <div class="preview-tabs">
+            <button type="button" class="preview-tab" data-sample="film" aria-pressed="true">Film</button>
+            <button type="button" class="preview-tab" data-sample="episode" aria-pressed="false">Episode</button>
+            <button type="button" class="preview-tab" data-sample="video" aria-pressed="false">YouTube video</button>
           </div>
-          <ul id="format-preview" class="preview" aria-live="polite"></ul>
-          <ul id="format-warnings" class="format-warnings"></ul>
-          <details class="fields-help">
-            <summary>Fields</summary>
-            <table>${FIELD_HELP.map(([field, about]) => `<tr><td><code>{${escapeHtml(field)}}</code></td><td>${escapeHtml(about)}</td></tr>`).join("")}</table>
-            <p class="hint">Every field AIOStreams documents works too; those YouTube has nothing for, such as sizes and seeders, are empty.
-            AIOStreams itself reads each stream's resolution, quality, year, episode and language from the release name,
-            so its filters and sorting work the same whatever these templates say.</p>
-          </details>
         </div>
-        <label class="field">
-          <span class="label-text">Movie search</span>
-          <input type="text" id="movie-query" maxlength="${MAX_QUERY_LENGTH}" value="${escapeHtml(s.movieQuery)}" spellcheck="false" />
-          <button type="button" class="reset" data-reset="movie-query">Reset to default</button>
-        </label>
-        <label class="field">
-          <span class="label-text">Episode search</span>
-          <input type="text" id="episode-query" maxlength="${MAX_QUERY_LENGTH}" value="${escapeHtml(s.episodeQuery)}" spellcheck="false" />
-          <button type="button" class="reset" data-reset="episode-query">Reset to default</button>
-        </label>
-        <div class="hint" style="margin-bottom:14px">
-          Placeholders: {title} {year} {season} {episode} {s00e00} {episodeTitle} {absolute} {language}.
-          {title} is required. Every search costs one of your 100 a day, so there is one per title.
-        </div>
-        <label class="field">
-          <span class="label-text">Skip videos whose title says (comma separated)</span>
-          <textarea id="exclude" spellcheck="false">${escapeHtml(s.exclude.join(", "))}</textarea>
-          <button type="button" class="reset" data-reset="exclude">Reset to default</button>
-        </label>
-        <div class="hint" style="margin-bottom:14px">A word that is part of the title's own name is ignored for that title, so &ldquo;trailer&rdquo; never hides Trailer Park Boys.</div>
-        <label class="field">
-          <span class="label-text">Skip videos whose description says (comma separated)</span>
-          <textarea id="exclude-description" spellcheck="false">${escapeHtml(s.excludeDescription.join(", "))}</textarea>
-          <button type="button" class="reset" data-reset="exclude-description">Reset to default</button>
-        </label>
-        <div class="hint">How fan films, explainers, video essays and unofficial copies describe themselves: &ldquo;fan movie&rdquo;, &ldquo;in this video&rdquo;, &ldquo;video essay&rdquo;, &ldquo;fair use&rdquo;.</div>
-      </details>
-    </div>
-
-    ${usable && mode === "new" ? createSection(p) : ""}
-    <label class="check agree"${mode === "profile" ? " hidden" : ""}><input type="checkbox" id="agree"${isReconfigure ? " checked" : ""} />
-      <span>I agree to the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a> and to YouStream's <a href="/terms" target="_blank" rel="noopener">terms of use and privacy policy</a>.</span></label>
-
-    <button type="submit" class="submit" id="submit-btn">${submitLabel}</button>
-    ${
-      usable && mode === "new"
-        ? '<button type="button" class="link-btn" id="no-profile-btn">Or make an install link that carries your settings, without a profile</button>'
-        : ""
-    }
-    <div class="msg" id="save-status" role="status" hidden></div>
-    <div class="error" id="error" style="display:none" role="alert"></div>
+        <ul id="format-preview" class="preview" aria-live="polite"></ul>
+        <ul id="format-warnings" class="format-warnings"></ul>
+        <details class="fields-help">
+          <summary>Fields</summary>
+          <table>${FIELD_HELP.map(([field, about]) => `<tr><td><code>{${escapeHtml(field)}}</code></td><td>${escapeHtml(about)}</td></tr>`).join("")}</table>
+          <p class="hint">Every field AIOStreams documents works too; those YouTube has nothing for, such as sizes and seeders, are empty.
+          AIOStreams itself reads each stream's resolution, quality, year, episode and language from the release name,
+          so its filters and sorting work the same whatever these templates say.</p>
+        </details>
+      </div>
+    </section>
   </form>
 
-  <div id="result">
-    <div class="result-box">
-      <p class="warning" id="warning"></p>
-      <a id="install-link" class="install-btn" href="#">Install in Stremio</a>
-      <div class="url-row">
-        <input id="manifest-url" type="text" readonly aria-label="Addon URL" />
-        <button type="button" id="copy-btn">Copy</button>
-      </div>
-      <div class="hint">In Nuvio, or if the button does not open Stremio, paste the copied URL into the app's add-addon box. Keep it private: it contains your keys.</div>
-    </div>
+    <section class="panel" data-tab="account" aria-labelledby="h-account" hidden>
+      ${panelHead(
+        "account",
+        p.enabled ? "Account" : "More",
+        mode === "profile"
+          ? "Your profile: signing out, backups, its password and its install link."
+          : usable
+            ? "Sign in to a profile, or keep your settings in a file."
+            : "Keep your settings in a file."
+      )}
+      ${mode === "profile" ? profileBar(p) : ""}
+      ${usable && mode === "new" ? signInCard(p, mode) : ""}
+      ${backupsCard()}
+      ${mode === "profile" ? securityCard() : ""}
+      ${about(credits)}
+    </section>
+  </main>
+</div>
+  <div class="toasts" aria-live="polite">
+    <p id="error" style="display:none" role="alert" title="Dismiss"></p>
+    <p class="msg" id="save-status" role="status" hidden></p>
   </div>
-  ${backupsCard()}
-  ${mode === "profile" ? securityCard() : ""}
-  </div>
-  ${mode === "profile" ? '<div class="save-bar" id="save-bar" hidden><span>Unsaved changes</span><button type="button" class="ghost-btn" id="save-bar-discard">Discard</button><button type="button" id="save-bar-btn">Save</button></div>' : ""}
-
-  <footer>
-    <a href="${REPO_URL}" target="_blank" rel="noopener">
-      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-      Source code on GitHub
-    </a>${
-      credits.length
-        ? `
-    <p class="credits">${credits
-      .map(
-        (c) =>
-          `<a href="${escapeHtml(c.href)}" target="_blank" rel="noopener">${
-            c.image ? `<img src="${escapeHtml(c.image)}" alt="${escapeHtml(c.imageAlt || "")}" height="11" />` : ""
-          }${escapeHtml(c.text)}</a>`
-      )
-      .join("<br />")}</p>`
-        : ""
-    }
-    <p class="disclaimer">YouStream links to videos hosted on YouTube; it does not host, store or download any video. YouTube is a trademark of Google LLC. YouStream is not affiliated with or endorsed by YouTube, Google, Stremio or Nuvio. <a href="/terms">Terms of use and privacy</a></p>
-  </footer>
+  ${
+    mode === "profile"
+      ? '<div class="action-bar" id="save-bar" hidden><span>Unsaved changes</span><button type="button" class="ghost-btn" id="save-bar-discard">Discard</button><button type="button" class="primary" id="save-bar-btn">Save</button></div>'
+      : '<div class="action-bar" id="finish-bar" hidden><span>Ready to install?</span><button type="button" class="primary" id="finish-go">Get install link</button></div>'
+  }
 </div>
 
+<script type="application/json" id="page-data">${jsonForScript(pageData)}</script>
 <script type="application/json" id="youtube-data">${jsonForScript(youtubeData(startCatalogs))}</script>
 <script type="application/json" id="format-data">${jsonForScript({
     presets: PRESETS,
@@ -1047,1241 +1169,9 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     maxDescription: MAX_DESCRIPTION_TEMPLATE,
     ...previewData(identity().name)
   })}</script>
-<script>${FORMATTER_SOURCE}</script>
-<script>${TEMPLATE_CHECK_SOURCE}</script>
-<script>
-  // NOTE: this script lives inside a JS template literal, which consumes
-  // backslash escapes before the browser sees them. A regex or escape written
-  // here arrives mangled and can kill the whole script at parse time, which
-  // silently disables every control on the page. Keep this block
-  // backslash-free; test/configurePage.dom.test.js runs it and enforces that.
-  var BASE_URL = ${jsonForScript(baseUrl)};
-  var IS_RECONFIGURE = ${isReconfigure ? "true" : "false"};
-  var PLAYBACK_VERSION = ${PLAYBACK_VERSION};
-  var MARGIN_UNITS = ${jsonForScript(MARGIN_UNITS)};
-  var DEFAULT_MARGINS = ${jsonForScript(DEFAULT_MARGINS)};
-  var DEFAULT_EXCLUDE = ${jsonForScript(DEFAULT_EXCLUDE)};
-  var DEFAULT_EXCLUDE_DESCRIPTION = ${jsonForScript(DEFAULT_EXCLUDE_DESCRIPTION)};
-  var DEFAULT_MOVIE_QUERY = ${jsonForScript(DEFAULT_MOVIE_QUERY)};
-  var DEFAULT_EPISODE_QUERY = ${jsonForScript(DEFAULT_EPISODE_QUERY)};
-  var DEFAULT_MAX_RESULTS = ${DEFAULT_MAX_RESULTS};
-  var MAX_RESULTS_LIMIT = ${MAX_RESULTS_LIMIT};
-  var DEFAULT_MIN_VIEWS = ${DEFAULT_MIN_VIEWS};
-  var MAX_MIN_VIEWS = ${MAX_MIN_VIEWS};
-  var DEFAULTS = {
-    "movie-query": DEFAULT_MOVIE_QUERY,
-    "episode-query": DEFAULT_EPISODE_QUERY,
-    exclude: DEFAULT_EXCLUDE.join(", "),
-    "exclude-description": DEFAULT_EXCLUDE_DESCRIPTION.join(", ")
-  };
-
-  // A comma-separated list as the server stores it: lower case, trimmed,
-  // without blanks or repeats.
-  function readList(id) {
-    var out = [];
-    document.getElementById(id).value.split(",").forEach(function (word) {
-      var w = word.trim().toLowerCase();
-      if (w && out.indexOf(w) === -1) out.push(w);
-    });
-    return out;
-  }
-  var KEY_PROBLEMS = {
-    missing: "Enter your YouTube API key.",
-    invalid: "YouTube says this key is not valid. Copy it again from the Google Cloud console.",
-    disabled: "This key's Google Cloud project does not have the YouTube Data API v3 enabled. Enable it, wait a minute, and try again.",
-    restricted: "This key is restricted to certain websites, apps or IP addresses, so this server cannot use it. In the Google Cloud console set Application restrictions to None. Limiting it to the YouTube Data API v3 is fine."
-  };
-  var TMDB_INVALID = "TMDB says this key is not valid. Paste the API key or the Read Access Token from your TMDB settings, or leave it blank.";
-  var QUOTA_WARNING = "Your key works, but its YouTube quota for today is already spent. It refills at midnight Pacific time; until then nothing new can be searched.";
-
-  var form = document.getElementById("config-form");
-  var errorEl = document.getElementById("error");
-  var warningEl = document.getElementById("warning");
-  var resultEl = document.getElementById("result");
-  var submitBtn = document.getElementById("submit-btn");
-  var installLink = document.getElementById("install-link");
-  var manifestUrlInput = document.getElementById("manifest-url");
-  var copyBtn = document.getElementById("copy-btn");
-
-  function showError(message) {
-    errorEl.textContent = message;
-    errorEl.style.display = "block";
-    resultEl.classList.remove("show");
-  }
-
-  function hideError() {
-    errorEl.style.display = "none";
-  }
-
-  // Characters that may appear in a key: letters, digits, dot, dash and
-  // underscore. Checked by hand because this script cannot hold a regex.
-  function isKeyText(text) {
-    var allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-";
-    for (var i = 0; i < text.length; i++) {
-      if (allowed.indexOf(text.charAt(i)) === -1) return false;
-    }
-    return true;
-  }
-
-  // Digits only: no sign, no exponent.
-  function isWholeNumber(text) {
-    if (!text.length) return false;
-    for (var i = 0; i < text.length; i++) {
-      if ("0123456789".indexOf(text.charAt(i)) === -1) return false;
-    }
-    return true;
-  }
-
-  // Digits with at most one decimal point.
-  function isDecimal(text) {
-    var parts = text.split(".");
-    if (parts.length > 2) return false;
-    if (!isWholeNumber(parts[0])) return false;
-    return parts.length === 1 || isWholeNumber(parts[1]);
-  }
-
-  // Show or hide a key so it can be read back when reconfiguring.
-  Array.prototype.forEach.call(document.querySelectorAll(".key-toggle"), function (btn) {
-    btn.addEventListener("click", function () {
-      var input = document.getElementById(btn.getAttribute("data-for"));
-      var reveal = input.type === "password";
-      input.type = reveal ? "text" : "password";
-      btn.setAttribute("aria-pressed", reveal ? "true" : "false");
-      btn.setAttribute("title", (reveal ? "Hide " : "Show ") + (btn.getAttribute("data-what") || "key"));
-    });
-  });
-
-  // The ways to watch: each on or off, and movable. Their order is the
-  // order the app lists them.
-  var pbList = document.getElementById("pb-options");
-  function pbRows() {
-    return Array.prototype.slice.call(pbList.querySelectorAll(".pb-option"));
-  }
-  function refreshPbArrows() {
-    var rows = pbRows();
-    rows.forEach(function (row, i) {
-      row.querySelector(".pb-up").disabled = i === 0;
-      row.querySelector(".pb-down").disabled = i === rows.length - 1;
-    });
-  }
-  function movePb(row, delta) {
-    var rows = pbRows();
-    var target = rows.indexOf(row) + delta;
-    if (target < 0 || target >= rows.length) return;
-    if (delta < 0) pbList.insertBefore(row, rows[target]);
-    else pbList.insertBefore(rows[target], row);
-    refreshPbArrows();
-    renderPreview();
-  }
-  pbRows().forEach(function (row) {
-    row.querySelector(".pb-up").addEventListener("click", function () { movePb(row, -1); });
-    row.querySelector(".pb-down").addEventListener("click", function () { movePb(row, 1); });
-  });
-  refreshPbArrows();
-
-  Array.prototype.forEach.call(document.querySelectorAll(".reset"), function (btn) {
-    btn.addEventListener("click", function (e) {
-      e.preventDefault();
-      var id = btn.getAttribute("data-reset");
-      document.getElementById(id).value = DEFAULTS[id];
-    });
-  });
-
-  // The stream name and description: a preset or the reader's own
-  // templates, previewed live with the very formatter the server uses
-  // (formatter.js, inlined above), for each way of watching turned on.
-  var FORMAT = JSON.parse(document.getElementById("format-data").textContent);
-  var formatter = createFormatter({ languages: FORMAT.languages });
-  var presetSelect = document.getElementById("format-preset");
-  var nameInput = document.getElementById("name-template");
-  var descriptionInput = document.getElementById("description-template");
-  var previewList = document.getElementById("format-preview");
-  var formatWarnings = document.getElementById("format-warnings");
-  var previewSample = "film";
-
-  function matchingPreset(name, description) {
-    var ids = Object.keys(FORMAT.presets);
-    for (var i = 0; i < ids.length; i++) {
-      var preset = FORMAT.presets[ids[i]];
-      if (preset.name === name && preset.description === description) return ids[i];
-    }
-    return "";
-  }
-  // What the server will use: a blank template is the default preset's.
-  function templatesInUse() {
-    var fallback = FORMAT.presets[FORMAT.defaultFormat];
-    return {
-      name: nameInput.value.trim() || fallback.name,
-      description: descriptionInput.value.trim() || fallback.description
-    };
-  }
-  function previewScope(optionId) {
-    var base = FORMAT.samples[previewSample];
-    var scope = {};
-    Object.keys(base).forEach(function (key) { scope[key] = base[key]; });
-    var stream = {};
-    Object.keys(base.stream).forEach(function (key) { stream[key] = base.stream[key]; });
-    stream.type = optionId === "app" ? "youtube" : "external";
-    scope.stream = stream;
-    scope.play = FORMAT.play[optionId];
-    return scope;
-  }
-  function addLine(list, className, text) {
-    var item = document.createElement("li");
-    if (className) item.className = className;
-    item.textContent = text;
-    list.appendChild(item);
-    return item;
-  }
-  function renderPreview() {
-    var templates = templatesInUse();
-    var options = pbRows()
-      .filter(function (row) { return row.querySelector(".pb-on").checked; })
-      .map(function (row) { return row.getAttribute("data-option"); });
-    if (!options.length) options = ["app"];
-    var broken = false;
-    previewList.innerHTML = "";
-    options.forEach(function (optionId) {
-      var scope = previewScope(optionId);
-      var name = formatter.render(templates.name, scope) || scope.addon.name;
-      var description = formatter.render(templates.description, scope) || scope.video.title;
-      if ((name + description).indexOf("{unknown_") !== -1 || (name + description).indexOf("{cannot_") !== -1) broken = true;
-      var row = addLine(previewList, "", "");
-      var nameEl = document.createElement("div");
-      nameEl.className = "p-name";
-      nameEl.textContent = name;
-      var descriptionEl = document.createElement("div");
-      descriptionEl.className = "p-desc";
-      descriptionEl.textContent = description;
-      row.appendChild(nameEl);
-      row.appendChild(descriptionEl);
-    });
-    formatWarnings.innerHTML = "";
-    var warnings = templateWarnings(nameInput.value, descriptionInput.value);
-    if (broken) warnings.unshift("A field or modifier in these templates is unknown: the preview shows it in braces, as your app would.");
-    warnings.forEach(function (text) { addLine(formatWarnings, "", text); });
-  }
-  function syncPreset() {
-    var templates = templatesInUse();
-    presetSelect.value = matchingPreset(templates.name, templates.description) || "custom";
-  }
-  presetSelect.addEventListener("change", function () {
-    var preset = FORMAT.presets[presetSelect.value];
-    if (preset) {
-      nameInput.value = preset.name;
-      descriptionInput.value = preset.description;
-    }
-    renderPreview();
-  });
-  [nameInput, descriptionInput].forEach(function (input) {
-    input.addEventListener("input", function () {
-      syncPreset();
-      renderPreview();
-    });
-  });
-  Array.prototype.forEach.call(document.querySelectorAll(".preview-tab"), function (tab) {
-    tab.addEventListener("click", function () {
-      previewSample = tab.getAttribute("data-sample");
-      Array.prototype.forEach.call(document.querySelectorAll(".preview-tab"), function (other) {
-        other.setAttribute("aria-pressed", other === tab ? "true" : "false");
-      });
-      renderPreview();
-    });
-  });
-  pbRows().forEach(function (row) {
-    row.querySelector(".pb-on").addEventListener("change", renderPreview);
-  });
-  syncPreset();
-  renderPreview();
-
-  // A new setup starts in the reader's own country, read from the browser's
-  // language tag ("en-IN" is India). Reconfiguring keeps what was saved.
-  var regionSelect = document.getElementById("region");
-  if (!IS_RECONFIGURE && !regionSelect.value) {
-    var tag = (navigator.language || "").split("-");
-    var guess = tag.length > 1 ? tag[tag.length - 1].toUpperCase() : "";
-    for (var r = 0; r < regionSelect.options.length; r++) {
-      if (guess && regionSelect.options[r].value === guess) regionSelect.value = guess;
-    }
-  }
-
-  // The YouTube card: search, and the reader's catalogs in their order.
-  // CATALOGS is the source of truth for the list on screen and for what is
-  // saved; rows are built with createElement and textContent, so nothing a
-  // reader typed or YouTube named can be read as markup.
-  var YT = JSON.parse(document.getElementById("youtube-data").textContent);
-  var CATALOGS = YT.catalogs;
-  var catalogList = document.getElementById("catalog-list");
-  var catalogInput = document.getElementById("catalog-input");
-  var catalogSource = document.getElementById("catalog-source");
-  var catalogAdd = document.getElementById("catalog-add");
-  var catalogNote = document.getElementById("catalog-note");
-  var trendingChips = document.getElementById("trending-chips");
-  var ytSearch = document.getElementById("yt-search");
-  var searchSort = document.getElementById("search-sort");
-  var searchLength = document.getElementById("search-length");
-  var refreshValue = document.getElementById("refresh-value");
-  var refreshUnit = document.getElementById("refresh-unit");
-  var quotaNote = document.getElementById("quota-note");
-
-  function node(tag, className, text) {
-    var el = document.createElement(tag);
-    if (className) el.className = className;
-    if (text !== undefined) el.textContent = text;
-    return el;
-  }
-  function choice(list, id) {
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].id === id) return list[i];
-    }
-    return list[0];
-  }
-  // What a row is called: the names the server gives catalogs.
-  function catalogName(entry) {
-    if (entry.kind === "search") {
-      return [entry.q, choice(YT.sorts, entry.sort).short, choice(YT.lengths, entry.length).short, choice(YT.periods, entry.within).short]
-        .filter(Boolean)
-        .join(" · ");
-    }
-    if (entry.kind === "channel") {
-      return [entry.title, choice(YT.shows, entry.show).short, choice(YT.channelSorts, entry.sort).short].filter(Boolean).join(" · ");
-    }
-    if (entry.kind === "playlist") return entry.title;
-    return choice(YT.trending, entry.trending).label;
-  }
-  // Two rows that would list the same videos.
-  function sameCatalog(a, b) {
-    if (a.kind !== b.kind) return false;
-    if (a.kind === "search") {
-      return a.q.toLowerCase() === b.q.toLowerCase() && a.sort === b.sort && a.length === b.length && a.within === b.within;
-    }
-    if (a.kind === "channel") return a.channel === b.channel && a.show === b.show && a.sort === b.sort;
-    if (a.kind === "playlist") return a.playlist === b.playlist;
-    return a.trending === b.trending;
-  }
-  // The compact form the install link carries, defaults left out, and the
-  // keyword filter when it has words.
-  function storedCatalog(entry) {
-    var stored = storedSource(entry);
-    if (entry.filter && entry.filter.words.length) {
-      stored[entry.filter.mode] = entry.filter.words;
-      if (entry.filter.scope === "title") stored.filterIn = "title";
-    }
-    return stored;
-  }
-  function storedSource(entry) {
-    if (entry.kind === "search") {
-      var search = { q: entry.q };
-      if (entry.sort !== "relevance") search.sort = entry.sort;
-      if (entry.length !== "any") search.length = entry.length;
-      if (entry.within !== "any") search.within = entry.within;
-      return search;
-    }
-    if (entry.kind === "channel") {
-      var channel = { channel: entry.channel, name: entry.title };
-      if (entry.show !== "videos") channel.show = entry.show;
-      if (entry.sort !== "date") channel.sort = entry.sort;
-      return channel;
-    }
-    if (entry.kind === "playlist") return { playlist: entry.playlist, name: entry.title };
-    return { trending: entry.trending };
-  }
-  function note(text, warn) {
-    catalogNote.textContent = text;
-    catalogNote.className = warn ? "hint note-warn" : "hint";
-  }
-  function smallButton(text, className, title, onClick) {
-    var b = node("button", className, text);
-    b.type = "button";
-    b.title = title;
-    b.setAttribute("aria-label", title);
-    b.addEventListener("click", onClick);
-    return b;
-  }
-  function optionSelect(list, value, label, onChange) {
-    var select = node("select");
-    select.setAttribute("aria-label", label);
-    list.forEach(function (item) {
-      var option = node("option", "", item.label);
-      option.value = item.id;
-      if (item.id === value) option.selected = true;
-      select.appendChild(option);
-    });
-    select.addEventListener("change", function () { onChange(select); });
-    return select;
-  }
-  function moveCatalog(from, to) {
-    if (to < 0 || to >= CATALOGS.length) return;
-    var moved = CATALOGS.splice(from, 1)[0];
-    CATALOGS.splice(to, 0, moved);
-    renderCatalogs();
-  }
-  // A row's option changed: kept, unless the row would then repeat another.
-  function changeCatalog(index, field, select, nameEl) {
-    var entry = CATALOGS[index];
-    var changed = {};
-    Object.keys(entry).forEach(function (key) { changed[key] = entry[key]; });
-    changed[field] = select.value;
-    for (var i = 0; i < CATALOGS.length; i++) {
-      if (i !== index && sameCatalog(CATALOGS[i], changed)) {
-        select.value = entry[field];
-        note("You already have that catalog.", true);
-        return;
-      }
-    }
-    CATALOGS[index] = changed;
-    nameEl.textContent = catalogName(changed);
-    note("");
-    renderQuota();
-  }
-  // A filter's words as the server keeps them: comma separated, trimmed,
-  // without blanks or repeats in any case.
-  function filterWords(text) {
-    var seen = {};
-    var words = [];
-    text.split(",").forEach(function (part) {
-      var word = part.split(" ").filter(function (bit) { return bit; }).join(" ").slice(0, YT.maxFilterWord).trim();
-      var key = word.toLowerCase();
-      if (!word || seen[key] || words.length >= YT.maxFilterWords) return;
-      seen[key] = true;
-      words.push(word);
-    });
-    return words;
-  }
-  // Under a catalog: keep only, or leave out, the videos that mention words
-  // in their title and channel name, and in their description unless asked
-  // not to look there.
-  // Changing a catalog's other options replaces its object in CATALOGS, so
-  // the filter is always read and written there, by the row's index.
-  function filterControls(index, title) {
-    var entry = CATALOGS[index];
-    var box = node("div", "cat-filter");
-    var modes = [{ id: "", label: "No keyword filter" }].concat(YT.filterModes);
-    var words = node("input", "cat-words");
-    words.type = "text";
-    words.setAttribute("aria-label", "Words to filter " + title + " by, comma separated");
-    words.placeholder = "Words or names, comma separated";
-    words.value = entry.filter ? entry.filter.words.join(", ") : "";
-    var scope = optionSelect(YT.filterScopes, entry.filter ? entry.filter.scope : "all", "Where to look for the words in " + title, function () { update(); });
-    var hint = node("div", "cat-fixed", "Whole words, in any case.");
-    var select = optionSelect(modes, entry.filter ? entry.filter.mode : "", "Keyword filter for " + title, function () { update(); });
-    function show(on) {
-      words.hidden = !on;
-      scope.hidden = !on;
-      hint.hidden = !on;
-    }
-    function update() {
-      var mode = select.value;
-      show(Boolean(mode));
-      CATALOGS[index].filter = mode ? { mode: mode, words: filterWords(words.value), scope: scope.value } : null;
-    }
-    words.addEventListener("input", update);
-    box.appendChild(select);
-    box.appendChild(words);
-    box.appendChild(scope);
-    box.appendChild(hint);
-    show(Boolean(entry.filter));
-    return box;
-  }
-  function renderCatalogs() {
-    catalogList.textContent = "";
-    if (!CATALOGS.length) {
-      catalogList.appendChild(node("div", "cat-empty", "No catalogs yet. Add a search, a channel, a playlist or a Trending row below."));
-    }
-    CATALOGS.forEach(function (entry, index) {
-      var title = catalogName(entry);
-      var row = node("div", "cat-row");
-      row.setAttribute("data-kind", entry.kind);
-      row.appendChild(node("div", "cat-rank", String(index + 1)));
-      var main = node("div", "cat-main");
-      var label = node("div", "cat-label");
-      var name = node("span", "cat-name", title);
-      label.appendChild(name);
-      label.appendChild(node("span", "chip", entry.kind));
-      main.appendChild(label);
-      var opts = node("div", "cat-opts");
-      var addOption = function (list, field, what) {
-        opts.appendChild(optionSelect(list, entry[field], what, function (select) { changeCatalog(index, field, select, name); }));
-      };
-      if (entry.kind === "search") {
-        addOption(YT.sorts, "sort", "Order of " + title);
-        addOption(YT.lengths, "length", "Length of videos in " + title);
-        addOption(YT.periods, "within", "Upload date of videos in " + title);
-      } else if (entry.kind === "channel") {
-        addOption(YT.shows, "show", "What to list from " + title);
-        addOption(YT.channelSorts, "sort", "Order of " + title);
-      }
-      if (opts.childNodes.length) main.appendChild(opts);
-      // The rest have one order, which YouTube keeps.
-      if (entry.kind === "playlist") main.appendChild(node("div", "cat-fixed", "In the playlist's own order"));
-      if (entry.kind === "trending") main.appendChild(node("div", "cat-fixed", "Ranked by YouTube, for your country"));
-      row.appendChild(main);
-      var btns = node("div", "btns");
-      var up = smallButton("▲", "cat-up", "Move " + title + " up", function () { moveCatalog(index, index - 1); });
-      var down = smallButton("▼", "cat-down", "Move " + title + " down", function () { moveCatalog(index, index + 1); });
-      up.disabled = index === 0;
-      down.disabled = index === CATALOGS.length - 1;
-      btns.appendChild(up);
-      btns.appendChild(down);
-      btns.appendChild(smallButton("×", "remove", "Remove " + title, function () {
-        CATALOGS.splice(index, 1);
-        renderCatalogs();
-      }));
-      row.appendChild(btns);
-      row.appendChild(filterControls(index, title));
-      catalogList.appendChild(row);
-    });
-    renderTrendingChips();
-    renderQuota();
-  }
-  // Only the Trending rows not added yet.
-  function renderTrendingChips() {
-    trendingChips.textContent = "";
-    YT.trending.forEach(function (chart) {
-      for (var i = 0; i < CATALOGS.length; i++) {
-        if (CATALOGS[i].kind === "trending" && CATALOGS[i].trending === chart.id) return;
-      }
-      trendingChips.appendChild(smallButton("+ " + chart.chip, "", "Add " + chart.label, function () {
-        addCatalog({ kind: "trending", trending: chart.id });
-      }));
-    });
-    if (!trendingChips.childNodes.length) trendingChips.appendChild(node("div", "cat-empty", "Every Trending row is added."));
-  }
-  function addCatalog(entry) {
-    if (CATALOGS.length >= YT.maxCatalogs) return note("You can have at most " + YT.maxCatalogs + " catalogs.", true);
-    for (var i = 0; i < CATALOGS.length; i++) {
-      if (sameCatalog(CATALOGS[i], entry)) return note("You already have that catalog.", true);
-    }
-    CATALOGS.push(entry);
-    catalogInput.value = "";
-    note("");
-    renderCatalogs();
-  }
-  function addSearch(q) {
-    if (q.length > YT.maxQuery) return note("A search can be at most " + YT.maxQuery + " characters long.", true);
-    addCatalog({ kind: "search", q: q, sort: "relevance", length: "any", within: "any" });
-  }
-  // The add row asks for what the chosen source needs.
-  function syncSource() {
-    var source = choice(YT.sources, catalogSource.value);
-    catalogInput.placeholder = source.placeholder;
-    catalogInput.setAttribute("aria-label", source.prompt);
-    note("");
-  }
-  catalogSource.addEventListener("change", syncSource);
-  // A link added as a search is a slip: YouTube would be searched for it.
-  function isYoutubeLink(text) {
-    return text.indexOf("youtube.com/") !== -1 || text.indexOf("youtu.be/") !== -1;
-  }
-  // Runs of whitespace as single spaces, by character code: this script
-  // cannot hold the escape a whitespace regex needs.
-  function collapseSpaces(text) {
-    var words = [];
-    var word = "";
-    for (var i = 0; i < text.length; i++) {
-      if (text.charCodeAt(i) <= 32) {
-        if (word) words.push(word);
-        word = "";
-      } else {
-        word += text.charAt(i);
-      }
-    }
-    if (word) words.push(word);
-    return words.join(" ");
-  }
-  function addFromInput() {
-    var text = collapseSpaces(catalogInput.value);
-    if (!text) return;
-    var kind = catalogSource.value;
-    if (kind === "search") {
-      if (isYoutubeLink(text)) return note("That is a YouTube link. To add it, choose YouTube playlist or YouTube channel.", true);
-      return addSearch(text);
-    }
-    var key = document.getElementById("youtube-key").value.trim();
-    if (!key) return note("Enter your YouTube API key above first: it is used to look the link up.", true);
-    if (typeof fetch !== "function") return note("This browser cannot look links up.", true);
-    catalogAdd.disabled = true;
-    note("Looking it up...");
-    fetch("/api/youtube-source", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ youtubeKey: key, input: text, kind: kind })
-    })
-      .then(function (res) { return res.json(); })
-      .then(function (answer) {
-        catalogAdd.disabled = false;
-        if (answer.entry) return addCatalog(answer.entry);
-        note(answer.error || "That could not be looked up.", true);
-      })
-      .catch(function () {
-        catalogAdd.disabled = false;
-        note("The link could not be looked up. Check your connection and try again.", true);
-      });
-  }
-  catalogAdd.addEventListener("click", addFromInput);
-  // Enter in the box adds what was typed rather than submitting the form.
-  catalogInput.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      addFromInput();
-    }
-  });
-  // Minutes between refreshes as typed, or NaN.
-  function refreshMinutes() {
-    var text = refreshValue.value.trim();
-    if (!isDecimal(text)) return NaN;
-    return (parseFloat(text) * YT.refreshUnits[refreshUnit.value].ms) / 60000;
-  }
-  // What the search catalogs could cost a day at this interval, shown all day.
-  function renderQuota() {
-    var searches = CATALOGS.filter(function (c) { return c.kind === "search"; }).length;
-    var minutes = refreshMinutes();
-    quotaNote.className = "";
-    quotaNote.textContent = "";
-    if (!searches || !(minutes >= 30)) return;
-    var most = Math.ceil(1440 / minutes) * searches;
-    if (most >= 100) {
-      quotaNote.className = "note-warn";
-      quotaNote.textContent = "Shown all day, your search catalogs could spend all 100 of your daily searches, leaving none for films and episodes: refresh them less often, or use channels and playlists.";
-    } else {
-      quotaNote.textContent = "Shown all day, your search catalogs would spend at most " + most + " of your 100 daily searches.";
-    }
-  }
-  refreshValue.addEventListener("input", renderQuota);
-  refreshUnit.addEventListener("change", renderQuota);
-  function syncSearch() {
-    searchSort.disabled = !ytSearch.checked;
-    searchLength.disabled = !ytSearch.checked;
-  }
-  ytSearch.addEventListener("change", syncSearch);
-  syncSearch();
-  renderCatalogs();
-
-  // Reads the form into a config, or returns an error message. For an
-  // export, a missing key and the unticked terms box are no error.
-  function readConfig(forExport) {
-    var youtubeKey = document.getElementById("youtube-key").value.trim();
-    var tmdbKey = document.getElementById("tmdb-key").value.trim();
-    if (!youtubeKey && !forExport) return "Enter your YouTube API key.";
-    if (!isKeyText(youtubeKey)) return "That YouTube key has characters a key never has. Copy it again, without spaces.";
-    if (tmdbKey && !isKeyText(tmdbKey)) return "That TMDB key has characters a key never has. Copy it again, without spaces.";
-
-    var types = [];
-    if (document.getElementById("type-movie").checked) types.push("movie");
-    if (document.getElementById("type-series").checked) types.push("series");
-    if (!types.length && !ytSearch.checked && !CATALOGS.length) {
-      return "Choose something for YouStream to do: movies, series, YouTube search, or a catalog.";
-    }
-
-    var config = {};
-    if (youtubeKey) config.youtubeKey = youtubeKey;
-    if (tmdbKey) config.tmdbKey = tmdbKey;
-
-    var rows = document.querySelectorAll(".margin-row");
-    for (var i = 0; i < rows.length; i++) {
-      var row = rows[i];
-      var name = row.getAttribute("data-margin");
-      var text = row.querySelector(".margin-value").value.trim();
-      var unit = row.querySelector(".margin-unit").value;
-      var label = row.querySelector("strong").textContent;
-      if (!isDecimal(text)) return label + ": enter the margin as a number, 0 or more.";
-      var value = parseFloat(text);
-      if (value > MARGIN_UNITS[unit].max) return label + ": at most " + MARGIN_UNITS[unit].max + " " + MARGIN_UNITS[unit].label + ".";
-      var d = DEFAULT_MARGINS[name];
-      if (value !== d.value || unit !== d.unit) config[name] = value + unit;
-    }
-
-    var playback = pbRows()
-      .filter(function (row) { return row.querySelector(".pb-on").checked; })
-      .map(function (row) { return row.getAttribute("data-option"); });
-    if (!playback.length) return "Turn on at least one way to watch.";
-    config.playback = playback;
-    config.playbackVersion = PLAYBACK_VERSION;
-
-    if (types.length < 2) config.types = types;
-
-    var maxText = document.getElementById("max-results").value.trim();
-    if (!isWholeNumber(maxText) || parseInt(maxText, 10) < 1 || parseInt(maxText, 10) > MAX_RESULTS_LIMIT) {
-      return "Videos to list: a whole number from 1 to " + MAX_RESULTS_LIMIT + ".";
-    }
-    var maxResults = parseInt(maxText, 10);
-    if (maxResults !== DEFAULT_MAX_RESULTS) config.maxResults = maxResults;
-
-    var minViewsText = document.getElementById("min-views").value.trim();
-    if (!isWholeNumber(minViewsText) || parseInt(minViewsText, 10) > MAX_MIN_VIEWS) {
-      return "Minimum views: a whole number, 0 or more.";
-    }
-    var minViews = parseInt(minViewsText, 10);
-    if (minViews !== DEFAULT_MIN_VIEWS) config.minViews = minViews;
-
-    var region = regionSelect.value;
-    if (region) config.region = region;
-    var audioLanguage = document.getElementById("audio-language").value;
-    if (audioLanguage) config.audioLanguage = audioLanguage;
-    if (document.getElementById("embeddable-only").checked) config.embeddableOnly = true;
-    if (document.getElementById("official-only").checked) config.officialOnly = true;
-
-    var movieQuery = document.getElementById("movie-query").value.trim();
-    var episodeQuery = document.getElementById("episode-query").value.trim();
-    if (movieQuery.indexOf("{title}") === -1 || episodeQuery.indexOf("{title}") === -1) {
-      return "Both searches need {title} in them.";
-    }
-    if (movieQuery !== DEFAULT_MOVIE_QUERY) config.movieQuery = movieQuery;
-    if (episodeQuery !== DEFAULT_EPISODE_QUERY) config.episodeQuery = episodeQuery;
-
-    var templates = templatesInUse();
-    if (templates.name.length > FORMAT.maxName || templates.description.length > FORMAT.maxDescription) {
-      return "The stream name can be " + FORMAT.maxName + " characters long and the description " + FORMAT.maxDescription + ".";
-    }
-    var preset = matchingPreset(templates.name, templates.description);
-    if (!preset) {
-      config.nameTemplate = templates.name;
-      config.descriptionTemplate = templates.description;
-    } else if (preset !== FORMAT.defaultFormat) {
-      config.format = preset;
-    }
-
-    var exclude = readList("exclude");
-    if (exclude.join(",") !== DEFAULT_EXCLUDE.join(",")) config.exclude = exclude;
-    var excludeDescription = readList("exclude-description");
-    if (excludeDescription.join(",") !== DEFAULT_EXCLUDE_DESCRIPTION.join(",")) config.excludeDescription = excludeDescription;
-
-    if (!ytSearch.checked) config.search = false;
-    if (searchSort.value !== "relevance") config.searchSort = searchSort.value;
-    if (searchLength.value !== "any") config.searchLength = searchLength.value;
-    var safeSearch = document.getElementById("safe-search").value;
-    if (safeSearch !== "moderate") config.safeSearch = safeSearch;
-    if (CATALOGS.length) config.catalogs = CATALOGS.map(storedCatalog);
-    var minutes = refreshMinutes();
-    if (!(minutes > 0)) return "Refresh catalogs every: enter a number.";
-    if (minutes < 30) return "Refresh catalogs every: at least 30 minutes.";
-    var refresh = parseFloat(refreshValue.value.trim()) + refreshUnit.value;
-    if (refresh !== YT.defaultRefresh.value + YT.defaultRefresh.unit) config.catalogRefresh = refresh;
-
-    if (!document.getElementById("agree").checked && !forExport) {
-      return "To install YouStream, agree to the YouTube Terms of Service and YouStream's terms of use and privacy policy.";
-    }
-    return config;
-  }
-
-  function showResult(config, warning) {
-    // One path segment of encodeURIComponent(JSON.stringify(config)): the
-    // stremio-addon-sdk convention.
-    var segment = encodeURIComponent(JSON.stringify(config));
-    var base = BASE_URL;
-    while (base.length && base.charAt(base.length - 1) === "/") base = base.slice(0, -1);
-    var httpUrl = base + "/" + segment + "/manifest.json";
-    var schemeEnd = httpUrl.indexOf("://");
-    installLink.href = schemeEnd === -1 ? httpUrl : "stremio://" + httpUrl.slice(schemeEnd + 3);
-    manifestUrlInput.value = httpUrl;
-    warningEl.textContent = warning || "";
-    warningEl.style.display = warning ? "block" : "none";
-    resultEl.classList.add("show");
-    if (resultEl.scrollIntoView) resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  // A button at work: disabled, saying what it is doing; then as it was.
-  function busy(button, text) {
-    if (!button.getAttribute("data-label")) button.setAttribute("data-label", button.textContent);
-    button.disabled = true;
-    button.textContent = text;
-  }
-
-  function idle(button) {
-    button.disabled = false;
-    button.textContent = button.getAttribute("data-label") || button.textContent;
-  }
-
-  function finishChecking() {
-    idle(submitBtn);
-  }
-
-  // Asks the server to try the keys, so a bad one is caught here rather
-  // than discovered later as an empty stream list, then hands the config on
-  // with a warning, if any. If the check itself cannot run, it is handed on
-  // anyway: the keys may well be fine.
-  function checkKeys(config, then) {
-    if (typeof fetch !== "function") {
-      then(config, "");
-      return;
-    }
-    busy(submitBtn, "Checking your keys...");
-    fetch("/api/check-keys", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ youtubeKey: config.youtubeKey, tmdbKey: config.tmdbKey || "" })
-    })
-      .then(function (res) { return res.json(); })
-      .then(function (status) {
-        finishChecking();
-        if (KEY_PROBLEMS[status.youtube]) return showError(KEY_PROBLEMS[status.youtube]);
-        if (status.tmdb === "invalid") return showError(TMDB_INVALID);
-        then(config, status.youtube === "quota" ? QUOTA_WARNING : "");
-      })
-      .catch(function () {
-        finishChecking();
-        then(config, "");
-      });
-  }
-
-  // --- Profiles -------------------------------------------------------
-  // PROFILE.mode: "profile" (signed in, editing it), "signin" (opened from
-  // a profile's install link, not signed in to it) or "new".
-  var PROFILE = ${jsonForScript(clientProfile)};
-  var noProfile = !PROFILE.usable;
-  var leaving = false;
-  var dirty = false;
-  var saveStatus = document.getElementById("save-status");
-  var saveBar = document.getElementById("save-bar");
-
-  // A note under a control: good, bad, or gone when there is no text.
-  function say(el, text, kind) {
-    el.textContent = text || "";
-    el.className = "msg" + (kind ? " " + kind : "");
-    el.hidden = !text;
-  }
-
-  // Leaves the page without the unsaved-changes question.
-  function go(url) {
-    leaving = true;
-    window.location.href = url;
-  }
-
-  // Calls the profile API: the answer's data, or an Error with its message.
-  function api(method, path, body) {
-    return fetch(path, {
-      method: method,
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body || {})
-    }).then(function (res) {
-      if (res.status === 204) return {};
-      return res.json().then(null, function () { return {}; }).then(function (data) {
-        if (!res.ok) throw new Error(data.error || "YouStream answered with an error (" + res.status + "). Try again.");
-        return data;
-      });
-    }, function () {
-      throw new Error("YouStream could not be reached. Check your connection and try again.");
-    });
-  }
-
-  // Offers the profile ID and password to the browser's password manager,
-  // where it can take them (Chrome, Android); waits at most a few seconds.
-  function rememberLogin(id, password) {
-    var stored = null;
-    try {
-      if (window.PasswordCredential && navigator.credentials && navigator.credentials.store) {
-        stored = navigator.credentials.store(new window.PasswordCredential({ id: id, password: password, name: "YouStream profile" }));
-      }
-    } catch (e) {
-      stored = null;
-    }
-    return Promise.race([
-      Promise.resolve(stored).then(null, function () {}),
-      new Promise(function (done) { setTimeout(done, 2500); })
-    ]);
-  }
-
-  function isProfileId(text) {
-    if (text.length !== 36) return false;
-    for (var i = 0; i < 36; i++) {
-      var ch = text.charAt(i);
-      var dash = i === 8 || i === 13 || i === 18 || i === 23;
-      if (dash ? ch !== "-" : "0123456789abcdef".indexOf(ch) === -1) return false;
-    }
-    return true;
-  }
-
-  // The profile ID in what was typed or pasted: the ID, or a whole install link.
-  function profileIdFrom(text) {
-    var t = String(text || "").trim().toLowerCase();
-    for (var i = 0; i + 36 <= t.length; i++) {
-      if (isProfileId(t.slice(i, i + 36))) return t.slice(i, i + 36);
-    }
-    return "";
-  }
-
-  function markDirty() {
-    if (PROFILE.mode !== "profile" || dirty) return;
-    dirty = true;
-    saveBar.hidden = false;
-    document.body.className = "has-save-bar";
-    say(saveStatus, "");
-  }
-
-  function markClean() {
-    dirty = false;
-    if (saveBar) saveBar.hidden = true;
-    document.body.className = "";
-  }
-
-  // Any edit to the form: typing, choosing, and every button but the
-  // eye on a key and the preview's tabs.
-  form.addEventListener("input", markDirty);
-  form.addEventListener("change", markDirty);
-  form.addEventListener("click", function (e) {
-    var t = e.target;
-    while (t && t !== form && t.tagName !== "BUTTON") t = t.parentNode;
-    if (!t || t === form || t.type === "submit") return;
-    var cls = " " + t.className + " ";
-    if (cls.indexOf(" key-toggle ") !== -1 || cls.indexOf(" preview-tab ") !== -1) return;
-    markDirty();
-  });
-  window.addEventListener("beforeunload", function (e) {
-    if (!dirty || leaving) return;
-    e.preventDefault();
-    e.returnValue = "";
-  });
-  if (PROFILE.imported) {
-    markDirty();
-    // Reloading should not post the file again: the page reads as /configure.
-    if (window.history && window.history.replaceState) window.history.replaceState(null, "", "/configure");
-  }
-  if (saveBar) {
-    document.getElementById("save-bar-btn").addEventListener("click", function () { submitBtn.click(); });
-    // Back to the profile as saved.
-    document.getElementById("save-bar-discard").addEventListener("click", function () { go("/configure"); });
-  }
-
-  // Saves the signed-in profile's settings.
-  function saveProfile(config, warning) {
-    busy(submitBtn, "Saving...");
-    api("PUT", "/api/profile", { config: config }).then(function (data) {
-      idle(submitBtn);
-      markClean();
-      say(
-        saveStatus,
-        "Saved. " +
-          (data.manifestChanged
-            ? "What YouStream offers changed (its rows, or what it finds streams for): Stremio keeps the old list until you reinstall YouStream there; Nuvio picks it up the next time it starts, and AIOStreams within 6 hours."
-            : "No need to reinstall: your apps use the new settings from their next request.") +
-          (warning ? " " + warning : ""),
-        "good"
-      );
-    }, function (err) {
-      idle(submitBtn);
-      showError(err.message);
-    });
-  }
-
-  // What is wrong with the new profile's passwords, if anything.
-  function passwordProblem() {
-    var pw = document.getElementById("create-password").value;
-    if (pw.length < PROFILE.passwordMin) return "Choose a password of at least " + PROFILE.passwordMin + " characters for your profile.";
-    if (pw !== document.getElementById("create-password2").value) return "The two passwords are not the same.";
-    return "";
-  }
-
-  // Creates the profile, signs this browser in, and opens it.
-  function createProfile(config) {
-    var pw = document.getElementById("create-password").value;
-    busy(submitBtn, "Creating your profile...");
-    api("POST", "/api/profile", { config: config, password: pw, remember: document.getElementById("create-remember").checked })
-      .then(function (data) {
-        document.getElementById("create-id").value = data.id;
-        return rememberLogin(data.id, pw).then(function () { go("/configure?done=created"); });
-      }, function (err) {
-        idle(submitBtn);
-        showError(err.message);
-      });
-  }
-
-  var noProfileBtn = document.getElementById("no-profile-btn");
-  if (noProfileBtn) {
-    noProfileBtn.addEventListener("click", function () {
-      noProfile = !noProfile;
-      document.getElementById("create-card").hidden = noProfile;
-      submitBtn.textContent = noProfile ? "Generate install link" : "Create profile and get install link";
-      submitBtn.removeAttribute("data-label");
-      noProfileBtn.textContent = noProfile
-        ? "Create a profile instead: one link that never changes"
-        : "Or make an install link that carries your settings, without a profile";
-      hideError();
-    });
-  }
-
-  form.addEventListener("submit", function (e) {
-    e.preventDefault();
-    hideError();
-    say(saveStatus, "");
-    var config = readConfig();
-    if (typeof config === "string") {
-      showError(config);
-      return;
-    }
-    if (PROFILE.mode === "profile") return checkKeys(config, saveProfile);
-    if (!noProfile) {
-      var problem = passwordProblem();
-      if (problem) return showError(problem);
-      return checkKeys(config, createProfile);
-    }
-    checkKeys(config, showResult);
-  });
-
-  // Signing in.
-  var signinForm = document.getElementById("signin-form");
-  if (signinForm) {
-    signinForm.addEventListener("submit", function (e) {
-      e.preventDefault();
-      var msg = document.getElementById("signin-msg");
-      var btn = document.getElementById("signin-btn");
-      var id = profileIdFrom(document.getElementById("signin-id").value);
-      var password = document.getElementById("signin-password").value;
-      if (!id) return say(msg, "Enter your profile ID. It is in your install link, before the dot.", "bad");
-      if (!password) return say(msg, "Enter your password.", "bad");
-      say(msg, "");
-      busy(btn, "Signing in...");
-      api("POST", "/api/profile/session", { id: id, password: password, remember: document.getElementById("signin-remember").checked })
-        .then(function () {
-          return rememberLogin(id, password).then(function () { go("/configure"); });
-        }, function (err) {
-          idle(btn);
-          say(msg, err.message, "bad");
-        });
-    });
-  }
-
-  // Signing out: this device, or every one.
-  var signoutBtn = document.getElementById("signout-btn");
-  if (signoutBtn) {
-    var signoutPanel = document.getElementById("signout-panel");
-    signoutBtn.addEventListener("click", function () {
-      signoutPanel.hidden = !signoutPanel.hidden;
-      signoutBtn.setAttribute("aria-expanded", signoutPanel.hidden ? "false" : "true");
-    });
-    document.getElementById("signout-cancel").addEventListener("click", function () {
-      signoutPanel.hidden = true;
-      signoutBtn.setAttribute("aria-expanded", "false");
-    });
-    document.getElementById("signout-confirm").addEventListener("click", function () {
-      var everywhere = document.getElementById("signout-all").checked;
-      var btn = document.getElementById("signout-confirm");
-      busy(btn, "Signing out...");
-      api("DELETE", everywhere ? "/api/profile/sessions" : "/api/profile/session").then(function () {
-        go("/configure");
-      }, function (err) {
-        idle(btn);
-        say(document.getElementById("signout-msg"), err.message, "bad");
-      });
-    });
-  }
-
-  function copyText(input, button) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(input.value).then(function () {
-        button.textContent = "Copied!";
-        setTimeout(function () { button.textContent = "Copy"; }, 1500);
-      }).catch(function () { input.select(); });
-    } else {
-      input.select();
-    }
-  }
-
-  var profileCopy = document.getElementById("profile-copy");
-  if (profileCopy) {
-    profileCopy.addEventListener("click", function () { copyText(document.getElementById("profile-url"), profileCopy); });
-  }
-
-  // The profile's password, link and existence, each confirmed with the password.
-  function secured(buttonId, msgId, run) {
-    var btn = document.getElementById(buttonId);
-    if (!btn) return;
-    btn.addEventListener("click", function () {
-      var msg = document.getElementById(msgId);
-      var problem = run.check();
-      if (problem) return say(msg, problem, "bad");
-      say(msg, "");
-      busy(btn, run.busy);
-      run.call().then(function (data) {
-        idle(btn);
-        run.done(data, msg);
-      }, function (err) {
-        idle(btn);
-        say(msg, err.message, "bad");
-      });
-    });
-  }
-
-  function value(id) {
-    return document.getElementById(id).value;
-  }
-
-  secured("pw-btn", "pw-msg", {
-    busy: "Changing...",
-    check: function () {
-      if (!value("pw-current")) return "Enter your current password.";
-      if (value("pw-new").length < PROFILE.passwordMin) return "Choose a new password of at least " + PROFILE.passwordMin + " characters.";
-      if (value("pw-new") !== value("pw-new2")) return "The two new passwords are not the same.";
-      return "";
-    },
-    call: function () {
-      return api("POST", "/api/profile/password", { currentPassword: value("pw-current"), newPassword: value("pw-new") });
-    },
-    done: function (data, msg) {
-      rememberLogin(PROFILE.id, value("pw-new"));
-      ["pw-current", "pw-new", "pw-new2"].forEach(function (id) { document.getElementById(id).value = ""; });
-      say(msg, "Password changed. Every other device was signed out; this one stays signed in. Your install link is the same.", "good");
-    }
-  });
-
-  secured("link-btn", "link-msg", {
-    busy: "Replacing...",
-    check: function () {
-      return value("link-password") ? "" : "Enter your password.";
-    },
-    call: function () {
-      return api("POST", "/api/profile/link", { password: value("link-password") });
-    },
-    done: function (data, msg) {
-      document.getElementById("link-password").value = "";
-      var schemeEnd = data.installUrl.indexOf("://");
-      document.getElementById("profile-url").value = data.installUrl;
-      document.getElementById("profile-install").href = "stremio://" + data.installUrl.slice(schemeEnd + 3);
-      say(msg, "Replaced: the old link no longer works. Install YouStream again with the new link above, wherever you use it.", "good");
-    }
-  });
-
-  secured("delete-btn", "delete-msg", {
-    busy: "Deleting...",
-    check: function () {
-      if (!value("delete-password")) return "Enter your password.";
-      return document.getElementById("delete-sure").checked ? "" : "Tick the box to confirm.";
-    },
-    call: function () {
-      return api("DELETE", "/api/profile", { password: value("delete-password") });
-    },
-    done: function () {
-      go("/configure?done=deleted");
-    }
-  });
-
-  // Backups: the form to a file, and a file to the form.
-  var SETTINGS_KEYS = ["youtubeKey", "tmdbKey", "movieMargin", "partnerMovieMargin", "episodeMargin", "typicalMargin", "playback",
-    "playbackVersion", "types", "maxResults", "minViews", "region", "audioLanguage", "embeddableOnly", "officialOnly", "exclude",
-    "excludeDescription", "movieQuery", "episodeQuery", "format", "nameTemplate", "descriptionTemplate", "search", "searchSort",
-    "searchLength", "safeSearch", "catalogs", "catalogRefresh"];
-  var backupMsg = document.getElementById("backup-msg");
-
-  function pad(n) {
-    return (n < 10 ? "0" : "") + n;
-  }
-
-  function stamp(d) {
-    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "." + pad(d.getHours()) + "-" + pad(d.getMinutes()) + "-" + pad(d.getSeconds());
-  }
-
-  document.getElementById("export-btn").addEventListener("click", function () {
-    var config = readConfig(true);
-    if (typeof config === "string") return say(backupMsg, config, "bad");
-    var withoutKeys = document.getElementById("export-no-keys").checked;
-    if (withoutKeys) {
-      delete config.youtubeKey;
-      delete config.tmdbKey;
-    }
-    var file = { youstream: "settings", version: 1, exportedAt: new Date().toISOString(), keysIncluded: !withoutKeys, config: config };
-    var link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: "application/json" }));
-    link.download = "youstream-settings-" + stamp(new Date()) + ".json";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
-    say(backupMsg, withoutKeys ? "Exported, without your keys." : "Exported, with your keys in it: keep the file private.", "good");
-  });
-
-  // The settings a file holds: an export's, or a bare settings object.
-  function settingsIn(parsed) {
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    var exported = parsed.youstream === "settings";
-    var config = exported ? parsed.config : parsed;
-    if (!config || typeof config !== "object" || Array.isArray(config)) return null;
-    var known = SETTINGS_KEYS.some(function (key) { return Object.prototype.hasOwnProperty.call(config, key); });
-    return known || exported ? config : null;
-  }
-
-  // Sends the settings to be shown in the form, for the reader to look
-  // over and save: a form post, so the keys stay out of any URL.
-  function showImported(config, fileName) {
-    var post = document.createElement("form");
-    post.method = "post";
-    post.action = "/configure";
-    post.hidden = true;
-    [["config", JSON.stringify(config)], ["file", fileName]].forEach(function (field) {
-      var input = document.createElement("input");
-      input.type = "hidden";
-      input.name = field[0];
-      input.value = field[1];
-      post.appendChild(input);
-    });
-    document.body.appendChild(post);
-    leaving = true;
-    post.submit();
-  }
-
-  var importFile = document.getElementById("import-file");
-  document.getElementById("import-btn").addEventListener("click", function () { importFile.click(); });
-  importFile.addEventListener("change", function () {
-    var file = importFile.files[0];
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function () {
-      var config = null;
-      try {
-        config = settingsIn(JSON.parse(reader.result));
-      } catch (e) {
-        config = null;
-      }
-      importFile.value = "";
-      if (!config) return say(backupMsg, "That file holds no YouStream settings. Choose a file exported here.", "bad");
-      // Keys the file leaves out stay as they are.
-      var current = readConfig(true);
-      var merged = {};
-      Object.keys(config).forEach(function (key) { merged[key] = config[key]; });
-      if (typeof current === "object") {
-        if (!merged.youtubeKey && current.youtubeKey) merged.youtubeKey = current.youtubeKey;
-        if (!merged.tmdbKey && current.tmdbKey) merged.tmdbKey = current.tmdbKey;
-      }
-      showImported(merged, file.name);
-    };
-    reader.readAsText(file);
-  });
-
-  // The page as an app: offline note and icons (sw.js), and an install
-  // button where the browser offers to install it.
-  if (navigator.serviceWorker && navigator.serviceWorker.register) {
-    navigator.serviceWorker.register("/sw.js").then(null, function () {});
-  }
-  var installApp = document.getElementById("install-app");
-  var installPrompt = null;
-  window.addEventListener("beforeinstallprompt", function (e) {
-    e.preventDefault();
-    installPrompt = e;
-    installApp.hidden = false;
-  });
-  installApp.addEventListener("click", function () {
-    if (!installPrompt) return;
-    var prompt = installPrompt;
-    installPrompt = null;
-    installApp.hidden = true;
-    prompt.prompt();
-  });
-  window.addEventListener("appinstalled", function () {
-    installApp.hidden = true;
-  });
-
-  copyBtn.addEventListener("click", function () {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(manifestUrlInput.value).then(function () {
-        copyBtn.textContent = "Copied!";
-        setTimeout(function () { copyBtn.textContent = "Copy"; }, 1500);
-      }).catch(function () { manifestUrlInput.select(); });
-    } else {
-      manifestUrlInput.select();
-    }
-  });
-</script>
+<script src="/configure.js?v=${configureScript().version}" defer></script>
 </body>
 </html>`;
 }
 
-module.exports = { renderConfigurePage, escapeHtml, jsonForScript, browserSource, REPO_URL, FORMATTER_DOCS_URL };
+module.exports = { renderConfigurePage, escapeHtml, jsonForScript, REPO_URL, FORMATTER_DOCS_URL };

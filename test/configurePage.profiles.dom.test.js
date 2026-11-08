@@ -5,6 +5,9 @@
  */
 const { JSDOM, VirtualConsole } = require("jsdom");
 const { renderConfigurePage } = require("../src/configurePage");
+const startPage = require("../src/web/configure");
+const { createFormatter } = require("../src/formatter");
+const { templateWarnings } = require("../src/templateCheck");
 
 const BASE = "https://youstream.example";
 const ID = "3b84d0e4-1e9d-4508-b9c4-46c8125f335f";
@@ -36,7 +39,6 @@ function loadPage({ profile = { enabled: true }, existing = null, fetch = api(),
   const submitted = [];
   const downloads = [];
   const dom = new JSDOM(renderConfigurePage({ baseUrl: BASE, existing, profile }), {
-    runScripts: "dangerously",
     url: BASE + path,
     virtualConsole,
     beforeParse(window) {
@@ -59,9 +61,11 @@ function loadPage({ profile = { enabled: true }, existing = null, fetch = api(),
   const { window } = dom;
   const { document } = window;
   const $ = (sel) => document.querySelector(sel);
-  // Navigation is the page's go(); jsdom cannot follow it, so it is recorded.
+  // Leaving the page: jsdom cannot follow, so where it went is recorded.
   const went = [];
-  window.go = (url) => went.push(url);
+  window.createFormatter = createFormatter;
+  window.templateWarnings = templateWarnings;
+  startPage(window, { navigate: (url) => went.push(url) });
   const fire = (el, type, Kind = window.Event) => (typeof el === "string" ? $(el) : el).dispatchEvent(new Kind(type, { bubbles: true, cancelable: true }));
   return {
     window,

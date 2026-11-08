@@ -256,7 +256,7 @@ describe("the installable app", () => {
     const res = await request(app).get("/sw.js");
     expect(res.headers["content-type"]).toBe("text/javascript; charset=utf-8");
     expect(res.headers["cache-control"]).toBe("no-cache");
-    expect(res.text).toContain(`const CACHE = "youstream-${ADDON_VERSION}";`);
+    expect(res.text).toContain(`"cache":"youstream-${ADDON_VERSION}"`);
   });
 
   test("the page links them", async () => {

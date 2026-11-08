@@ -256,7 +256,7 @@ watching and the channel, so next-episode autoplay stays on the same choice.
 What each row says comes from two templates in AIOStreams' [custom formatter
 syntax](https://docs.aiostreams.viren070.me/reference/custom-formatter), the
 language PenguPlay uses too, so a template made for either works here. Pick a
-preset on the configure page (Advanced → Stream name and description) or
+preset on the configure page (Streams → Stream name and description) or
 write your own; the page previews it live, for a film and an episode, one row
 per way of watching you turned on.
 
@@ -603,6 +603,19 @@ quota extension form.
 
 ## Settings
 
+The configure page is an app, in five tabs: **Summary** (your keys, your
+setup at a glance, and your install link), **Search** (what to look for, the
+results, runtime matching, YouTube search in your app, fine-tuning),
+**Catalogs**, **Streams** (the ways to watch, and how a stream reads), and
+**Account** (signing in, backups, your profile's password and link; **More**
+on a server without profiles). On a phone they are a bar along the bottom; on
+a wider screen, a column down the side. The address says which is open
+(`/configure#catalogs`), so the back button and a bookmark work. Every setting
+is in one form whichever tab shows it, and a problem opens the tab, and the
+field, to fix. A new setup is finished on the Summary, which a bar on every
+other tab leads back to; a profile saves from a bar that appears with
+changes, on any tab.
+
 Without a profile, everything you choose is encoded into your personal addon
 URL, and nothing is stored on the server; with one, the same settings are kept
 in your profile instead (see [Profiles](#profiles)). Either way, only settings
@@ -730,7 +743,9 @@ a device cannot lock you out. And as there, attempts are limited: 10 wrong
 passwords from one client, or 20 for one profile, then a 15-minute wait; 10
 new profiles an hour from one client; 120 requests a minute. Requests from
 another site are refused, the sign-in cookie is `HttpOnly` and `SameSite=Lax`,
-and the configure page is never cached or framed. At most two passwords are
+and the configure page is never cached or framed, and runs no script but its
+own: its Content-Security-Policy allows only this server's, so markup that
+ever slipped into it could run nothing. At most two passwords are
 checked at once, so a flood of attempts cannot take the server's memory.
 
 The configure page talks to it through `/api/profile`:
@@ -779,6 +794,7 @@ https://<host>/<your config>/explain/series/<imdb id>:<season>:<episode>.json
 | `POST /api/check-keys` | Key check for the configure page |
 | `POST /api/youtube-source` | Looks up a pasted playlist or channel, as the `kind` chosen, for the configure page (1 unit) |
 | `/api/profile…` | Profiles (see [Profiles](#how-a-profile-is-kept)) |
+| `GET /configure.js?v=…` | The configure page's script, at an address that carries its version, so browsers keep it a year |
 | `GET /app.webmanifest`, `GET /sw.js` | The configure page as an installable app |
 | `GET /terms` | Terms of use and privacy policy |
 | `GET /health` | Health check used by Railway; also names the cache store, and whether profiles are `off`, `starting`, `ready` or `unavailable` |
@@ -816,9 +832,14 @@ npm test                  # about 1,700 tests
 npm run test:coverage     # pinned at 100% statements, branches, functions, lines
 ```
 
-Tests mock every upstream (no keys or network needed) and run the configure
-page's script in a real DOM (jsdom). With `REDIS_TEST_URL` set (CI starts a
-Redis for it), the cache is also tested against a real Redis:
+Tests mock every upstream (no keys or network needed). The configure page's
+script (`src/web/configure.js`) runs in a real DOM (jsdom) and the service
+worker (`src/web/sw.js`) in a stand-in for a worker's scope; both are loaded
+through Jest, so coverage measures them like the server, and the browser gets
+the very same files, each wrapped to start at once. Starting the server is
+measured too: `start.js` only calls `start()` in `server.js`, which the tests
+run in-process. Nothing is left out of the 100%. With `REDIS_TEST_URL` set (CI
+starts a Redis for it), the cache is also tested against a real Redis:
 
 ```bash
 redis-server --port 6390 --daemonize yes

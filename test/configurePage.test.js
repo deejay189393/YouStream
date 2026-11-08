@@ -113,22 +113,37 @@ test("says when the server has its own TMDB key", () => {
   expect(page(null, { serverTmdb: true })).toContain("This server already has a TMDB key");
 });
 
-describe("browserSource", () => {
-  const fs = require("fs");
-  const os = require("os");
-  const path = require("path");
-  const { browserSource } = require("../src/configurePage");
-  const write = (text) => {
-    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "youstream-")), "module.js");
-    fs.writeFileSync(file, text);
-    return file;
-  };
+describe("the page as an app", () => {
+  const html = page();
 
-  test("is the module as written, without its exports line", () => {
-    expect(browserSource(write("function a() {}\nmodule.exports = { a };\n"))).toBe("function a() {}\n");
+  test("five tabs, and a panel for each, the summary first", () => {
+    expect([...html.matchAll(/<a class="tab" href="#(\w+)" data-tab="\1">/g)].map((m) => m[1])).toEqual([
+      "summary",
+      "search",
+      "catalogs",
+      "streams",
+      "account"
+    ]);
+    expect([...html.matchAll(/<section class="panel" data-tab="(\w+)"/g)].map((m) => m[1])).toEqual([
+      "summary",
+      "search",
+      "catalogs",
+      "streams",
+      "account"
+    ]);
+    // Without profiles, the last tab holds only backups and the terms.
+    expect(html).toContain("<span>More</span>");
+    expect(page(null, { profile: { enabled: true } })).toContain("<span>Account</span>");
   });
 
-  test("refuses a module that would end the page's script early", () => {
-    expect(() => browserSource(write('const x = "</script>";\nmodule.exports = { x };\n'))).toThrow("cannot be inlined in a page");
+  test("runs one script, its own, at the address of its version; everything else is data", () => {
+    const { version } = require("../src/webApp").configureScript();
+    const scripts = [...html.matchAll(/<script([^>]*)>/g)].map((m) => m[1]);
+    expect(scripts).toEqual([
+      ' type="application/json" id="page-data"',
+      ' type="application/json" id="youtube-data"',
+      ' type="application/json" id="format-data"',
+      ` src="/configure.js?v=${version}" defer`
+    ]);
   });
 });

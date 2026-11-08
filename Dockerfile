@@ -12,4 +12,5 @@ ENV NODE_ENV=production
 EXPOSE 3000
 
 # Railway injects PORT; server.js reads it and falls back to 3000 locally.
-CMD ["node", "server.js"]
+# start.js starts the server (server.js exports it, for the tests).
+CMD ["node", "start.js"]

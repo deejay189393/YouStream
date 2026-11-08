@@ -1,15 +1,15 @@
 {
   "name": "youstream",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Stremio / Nuvio stream addon: full movies and episodes that are on YouTube, matched by runtime so trailers never show up.",
-  "main": "server.js",
+  "main": "start.js",
   "type": "commonjs",
   "engines": {
     "node": ">=18.0.0"
   },
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
+    "start": "node start.js",
+    "dev": "node start.js",
     "test": "jest",
     "test:coverage": "jest --coverage"
   },
@@ -49,7 +49,8 @@
     "testEnvironment": "node",
     "collectCoverageFrom": [
       "src/**/*.js",
-      "server.js"
+      "server.js",
+      "start.js"
     ],
     "coverageThreshold": {
       "global": {

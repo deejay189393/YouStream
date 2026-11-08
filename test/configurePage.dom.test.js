@@ -1,15 +1,16 @@
 /**
- * Behavioural tests for the configure page's inline script.
+ * Behavioural tests for the configure page's script (src/web/configure.js).
  *
  * Asserting on the rendered HTML cannot tell whether the script actually
- * runs: a script with a syntax error still contains all the right
- * substrings. Newsio learned this the hard way -- a regex's escapes were
- * eaten by the template literal, the script died at parse time, and the
- * submit button fell through to a native form GET. So the page is executed
- * in a real DOM here and its controls are driven.
+ * runs, so the page is rendered into a real DOM, the script is started on
+ * its window, and the controls are driven. The script is loaded through
+ * Jest, so coverage measures it like any other module.
  */
 const { JSDOM, VirtualConsole } = require("jsdom");
 const { renderConfigurePage } = require("../src/configurePage");
+const startPage = require("../src/web/configure");
+const { createFormatter } = require("../src/formatter");
+const { templateWarnings } = require("../src/templateCheck");
 const { decodeConfig, normalizeConfig, DEFAULT_EXCLUDE, DEFAULT_EXCLUDE_DESCRIPTION } = require("../src/config");
 
 const BASE = "https://youstream.up.railway.app";
@@ -23,14 +24,13 @@ afterEach(() => {
  * The page, loaded and run. The terms box is ticked, as a reader who goes
  * on to install has ticked it, unless `agreed` says otherwise.
  */
-function loadPage({ existing = null, language = "en-US", fetch, clipboard, agreed = true } = {}) {
+function loadPage({ existing = null, language = "en-US", fetch, clipboard, agreed = true, path = "/configure", hooks = { navigate() {} } } = {}) {
   const errors = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", (err) => errors.push(err));
 
   const dom = new JSDOM(renderConfigurePage({ baseUrl: BASE + "/", existing }), {
-    runScripts: "dangerously",
-    url: BASE + "/configure",
+    url: BASE + path,
     virtualConsole,
     beforeParse(window) {
       Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
@@ -39,6 +39,9 @@ function loadPage({ existing = null, language = "en-US", fetch, clipboard, agree
     }
   });
   openWindows.push(dom.window);
+  dom.window.createFormatter = createFormatter;
+  dom.window.templateWarnings = templateWarnings;
+  startPage(dom.window, hooks);
   const { document } = dom.window;
   const $ = (sel) => document.querySelector(sel);
   if (agreed) $("#agree").checked = true;
@@ -75,14 +78,6 @@ function loadPage({ existing = null, language = "en-US", fetch, clipboard, agree
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
-
-test("the page script contains no backslash, so the template literal cannot mangle it", () => {
-  const html = renderConfigurePage({ baseUrl: BASE, existing: null });
-  const script = html.slice(html.lastIndexOf("<script>"), html.lastIndexOf("</script>"));
-  // jsonForScript's own escapes are the only backslashes allowed, and the
-  // values it embeds here contain none.
-  expect(script).not.toContain("\\");
-});
 
 test("the script runs without errors", () => {
   const p = loadPage();
@@ -377,11 +372,10 @@ describe("small controls", () => {
 });
 
 test("a base URL with no scheme still yields a link", () => {
-  const dom = new JSDOM(renderConfigurePage({ baseUrl: "youstream.local", existing: null }), {
-    runScripts: "dangerously",
-    url: BASE + "/configure"
-  });
+  const dom = new JSDOM(renderConfigurePage({ baseUrl: "youstream.local", existing: null }), { url: BASE + "/configure" });
   openWindows.push(dom.window);
+  Object.assign(dom.window, { createFormatter, templateWarnings });
+  startPage(dom.window);
   const { document } = dom.window;
   document.getElementById("youtube-key").value = "k";
   document.getElementById("agree").checked = true;

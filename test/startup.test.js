@@ -17,7 +17,7 @@ describe("server startup", () => {
   });
 
   test("listens on the PORT given in the environment and serves /health", async () => {
-    child = spawn(process.execPath, [path.join(__dirname, "..", "server.js")], {
+    child = spawn(process.execPath, [path.join(__dirname, "..", "start.js")], {
       // The cache settings this machine happens to have are left out, and one
       // is mistyped on purpose.
       env: { ...process.env, PORT: String(PORT), REDIS_URL: "", CACHE_STORE: "", CACHE_SEARCH_TTL: "a day", IMDB_DATASETS: "off" },

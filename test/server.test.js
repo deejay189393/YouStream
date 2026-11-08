@@ -93,6 +93,30 @@ describe("basic routes", () => {
   });
 });
 
+describe("the configure page's own script", () => {
+  const { configureScript } = require("../src/webApp");
+
+  test("at its version's address it is kept a year; at any other, asked for again", async () => {
+    const { version, body } = configureScript();
+    const res = await request(app).get(`/configure.js?v=${version}`);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("text/javascript; charset=utf-8");
+    expect(res.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+    expect(res.text).toBe(body);
+    expect((await request(app).get("/configure.js?v=an-old-one")).headers["cache-control"]).toBe("no-cache");
+    expect((await request(app).get("/configure.js")).headers["cache-control"]).toBe("no-cache");
+  });
+
+  test("the page runs no script but that one, and sends what it reads nowhere else", async () => {
+    const res = await request(app).get("/configure");
+    expect(res.headers["content-security-policy"]).toBe(
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; " +
+        "worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    );
+    expect(res.text).toContain(`<script src="/configure.js?v=${configureScript().version}" defer></script>`);
+  });
+});
+
 describe("manifests", () => {
   test("the bare manifest requires configuration, and uses the forwarded protocol", async () => {
     const res = await request(app).get("/manifest.json").set("x-forwarded-proto", "https, http").set("host", "yt.example");
