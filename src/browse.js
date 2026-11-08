@@ -1,5 +1,6 @@
 const { withKey, keyId, videosById, searchPage, playlistPage, chartPage, findChannel, findPlaylist } = require("./youtube");
-const { toItem, toPreview } = require("./items");
+const { toItem, toPreview, PREVIEW_DESCRIPTION } = require("./items");
+const { fold, hasPhrase } = require("./text");
 const { browseCache, videoCache } = require("./cache");
 const { isBlocked } = require("./finder");
 const { regionBlocked } = require("./matching");
@@ -203,6 +204,40 @@ function loadPage(ctx, index, pageToken) {
 const offsetOf = (skip) => Math.max(0, Math.floor(Number(skip) || 0));
 
 /**
+ * What a catalog's keyword filter looks in: the video's title, its channel's
+ * name and its whole description -- the page keeps only the start of a
+ * description, so a longer one is read from the video's own cache entry,
+ * where it is whole. Folded (text.js).
+ */
+async function filterText(item) {
+  let { description } = item;
+  if (description.length >= PREVIEW_DESCRIPTION) {
+    const whole = await videoCache.get(item.id);
+    if (whole) description = whole.value.description;
+  }
+  return fold(`${item.title}\n${item.channelTitle}\n${description}`);
+}
+
+/**
+ * Whether a folded text mentions a filter word: as whole words, with an s
+ * after them -- a plural, or a possessive, which folding writes the same
+ * ("Kapoor's" is "kapoors") -- or run together, as a hashtag or a handle
+ * writes a name (#GauravKapoor).
+ */
+function mentions(text, word) {
+  const w = fold(word);
+  return [w, `${w}s`, w.replace(/ /g, "")].some((form) => hasPhrase(text, form));
+}
+
+/** Whether a catalog's filter keeps the video: null keeps all. */
+async function passes(item, filter) {
+  if (!filter) return true;
+  const text = await filterText(item);
+  const mentioned = filter.words.some((word) => mentions(text, word));
+  return filter.mode === "include" ? mentioned : !mentioned;
+}
+
+/**
  * The videos from `skip` on, within one upstream page: so an answer costs
  * at most one call to YouTube, which matters most for a search catalog,
  * whose page is a hundredth of the key's day.
@@ -212,20 +247,22 @@ const offsetOf = (skip) => Math.max(0, Math.floor(Number(skip) || 0));
  * declares (catalogs.SKIP_OPTIONS); counting the videos actually offered,
  * rather than YouTube's positions, gives both the same unbroken sequence.
  */
-async function assemble(ctx, skip, settings) {
+async function assemble(ctx, skip, settings, filter = null) {
   const offset = offsetOf(skip);
   const seen = new Set();
   let before = 0;
   let token;
   // A deep page is reached by walking the pages before it, each from the
-  // cache while it is current.
+  // cache while it is current. The filter is applied here, on the kept
+  // pages, so changing it costs no call to YouTube.
   for (let index = 0; index < MAX_PAGES; index++) {
     const page = await loadPage(ctx, index, token);
-    const items = page.items.filter((item) => {
-      if (seen.has(item.id) || !playable(item, settings)) return false;
+    const items = [];
+    for (const item of page.items) {
+      if (seen.has(item.id) || !playable(item, settings) || !(await passes(item, filter))) continue;
       seen.add(item.id);
-      return true;
-    });
+      items.push(item);
+    }
     if (offset < before + items.length) return items.slice(offset - before, offset - before + PAGE_SIZE);
     before += items.length;
     if (!page.next) return [];
@@ -234,10 +271,10 @@ async function assemble(ctx, skip, settings) {
   return [];
 }
 
-/** A page of one of the reader's catalogs. */
+/** A page of one of the reader's catalogs, its keyword filter applied. */
 function catalogItems({ entry, settings, skip }) {
   const freshMs = Math.min(refreshMs(settings.catalogRefresh), MAX_YOUTUBE_DATA_MS);
-  return assemble(context(settings, sourceOf(entry, settings), freshMs), skip, settings);
+  return assemble(context(settings, sourceOf(entry, settings), freshMs), skip, settings, entry.filter);
 }
 
 /**
@@ -383,6 +420,8 @@ async function resolveSource(apiKey, input, kind) {
 }
 
 module.exports = {
+  passes,
+  mentions,
   catalogItems,
   searchItems,
   getItem,

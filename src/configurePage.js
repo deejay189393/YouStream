@@ -421,6 +421,9 @@ function youtubeData(entries) {
     periods: pick(catalogs.PERIODS),
     shows: pick(catalogs.CHANNEL_SHOWS),
     channelSorts: pick(catalogs.CHANNEL_SORTS),
+    filterModes: catalogs.FILTER_MODES,
+    maxFilterWords: catalogs.MAX_FILTER_WORDS,
+    maxFilterWord: catalogs.MAX_FILTER_WORD_LENGTH,
     trending: catalogs.TRENDING.map(({ id, label, chip }) => ({ id, label, chip })),
     sources: CATALOG_SOURCES,
     maxCatalogs: catalogs.MAX_CATALOGS,
@@ -651,6 +654,9 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
   .cat-empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
   .cat-lead { margin: 0 0 10px; }
   .cat-fixed { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+  .cat-filter { margin-top: 7px; display: flex; flex-direction: column; gap: 6px; }
+  .cat-filter select { width: auto; max-width: 100%; padding: 5px 8px; font-size: 12.5px; border-radius: 7px; align-self: flex-start; }
+  .cat-filter .cat-words { padding: 7px 9px; font-size: 13px; border-radius: 7px; }
   .btns { flex: 0 0 auto; display: flex; gap: 4px; }
   .btns button {
     width: 28px; height: 28px; padding: 0; font-size: 11px; background: var(--field); border: 1px solid var(--border);
@@ -1350,8 +1356,14 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     if (a.kind === "playlist") return a.playlist === b.playlist;
     return a.trending === b.trending;
   }
-  // The compact form the install link carries, defaults left out.
+  // The compact form the install link carries, defaults left out, and the
+  // keyword filter when it has words.
   function storedCatalog(entry) {
+    var stored = storedSource(entry);
+    if (entry.filter && entry.filter.words.length) stored[entry.filter.mode] = entry.filter.words;
+    return stored;
+  }
+  function storedSource(entry) {
     if (entry.kind === "search") {
       var search = { q: entry.q };
       if (entry.sort !== "relevance") search.sort = entry.sort;
@@ -1416,6 +1428,49 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
     note("");
     renderQuota();
   }
+  // A filter's words as the server keeps them: comma separated, trimmed,
+  // without blanks or repeats in any case.
+  function filterWords(text) {
+    var seen = {};
+    var words = [];
+    text.split(",").forEach(function (part) {
+      var word = part.split(" ").filter(function (bit) { return bit; }).join(" ").slice(0, YT.maxFilterWord).trim();
+      var key = word.toLowerCase();
+      if (!word || seen[key] || words.length >= YT.maxFilterWords) return;
+      seen[key] = true;
+      words.push(word);
+    });
+    return words;
+  }
+  // Under a catalog: keep only, or leave out, the videos that mention words
+  // in their title, channel name or description.
+  // Changing a catalog's other options replaces its object in CATALOGS, so
+  // the filter is always read and written there, by the row's index.
+  function filterControls(index, title) {
+    var entry = CATALOGS[index];
+    var box = node("div", "cat-filter");
+    var modes = [{ id: "", label: "No keyword filter" }].concat(YT.filterModes);
+    var words = node("input", "cat-words");
+    words.type = "text";
+    words.setAttribute("aria-label", "Words to filter " + title + " by, comma separated");
+    words.placeholder = "Words or names, comma separated";
+    words.value = entry.filter ? entry.filter.words.join(", ") : "";
+    var hint = node("div", "cat-fixed", "Matched in the title, the channel's name and the description, whole words, in any case.");
+    var select = optionSelect(modes, entry.filter ? entry.filter.mode : "", "Keyword filter for " + title, function () { update(); });
+    function update() {
+      var mode = select.value;
+      words.hidden = !mode;
+      hint.hidden = !mode;
+      CATALOGS[index].filter = mode ? { mode: mode, words: filterWords(words.value) } : null;
+    }
+    words.addEventListener("input", update);
+    box.appendChild(select);
+    box.appendChild(words);
+    box.appendChild(hint);
+    words.hidden = !entry.filter;
+    hint.hidden = !entry.filter;
+    return box;
+  }
   function renderCatalogs() {
     catalogList.textContent = "";
     if (!CATALOGS.length) {
@@ -1448,6 +1503,7 @@ function renderConfigurePage({ baseUrl, existing, serverTmdb = false, credits = 
       // The rest have one order, which YouTube keeps.
       if (entry.kind === "playlist") main.appendChild(node("div", "cat-fixed", "In the playlist's own order"));
       if (entry.kind === "trending") main.appendChild(node("div", "cat-fixed", "Ranked by YouTube, for your country"));
+      main.appendChild(filterControls(index, title));
       row.appendChild(main);
       var btns = node("div", "btns");
       var up = smallButton("▲", "cat-up", "Move " + title + " up", function () { moveCatalog(index, index - 1); });

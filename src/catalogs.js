@@ -23,6 +23,12 @@ const crypto = require("crypto");
  *   { channel: "UC...", name: "Marques Brownlee", show: "shorts", sort: "viewCount" }
  *   { playlist: "PL...", name: "Lectures" }
  *   { trending: "music" }
+ *
+ * Any of them can also keep only, or leave out, the videos that mention some
+ * words in their title, channel name or description:
+ *
+ *   { q: "indian stand up comedy", sort: "date", exclude: ["gaurav kapoor"] }
+ *   { trending: "all", include: ["cricket", "ipl"] }
  */
 
 /** YouTube search's own orders. Relevance is YouTube's ranking, its default. */
@@ -105,6 +111,18 @@ const SKIP_OPTIONS = Array.from({ length: MAX_PAGES }, (_, i) => String(i * PAGE
 const MAX_CATALOGS = 20;
 const MAX_QUERY_LENGTH = 100;
 const MAX_NAME_LENGTH = 80;
+
+/**
+ * A catalog's keyword filter: keep only the videos that mention one of its
+ * words, or leave them out. Words are matched whole, in any case, with or
+ * without accents (text.js).
+ */
+const FILTER_MODES = [
+  { id: "include", label: "Only videos mentioning" },
+  { id: "exclude", label: "Leave out videos mentioning" }
+];
+const MAX_FILTER_WORDS = 20;
+const MAX_FILTER_WORD_LENGTH = 60;
 
 const CHANNEL_ID = /^UC[A-Za-z0-9_-]{22}$/;
 const PLAYLIST_ID = /^[A-Za-z0-9_-]{10,64}$/;
@@ -196,14 +214,50 @@ function trendingEntry(raw) {
   return chart ? { kind: "trending", id: `trending.${chart.id}`, name: chart.label, trending: chart.id } : null;
 }
 
+/**
+ * A filter's words: a list or a comma-separated line, each one tidied,
+ * without blanks or repeats (in any case), at most MAX_FILTER_WORDS.
+ */
+function filterWords(raw) {
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : [];
+  const seen = new Set();
+  const words = [];
+  for (const item of list) {
+    const word = tidy(item, MAX_FILTER_WORD_LENGTH, { ellipsis: false });
+    const key = word.toLowerCase();
+    if (!word || seen.has(key)) continue;
+    seen.add(key);
+    words.push(word);
+    if (words.length === MAX_FILTER_WORDS) break;
+  }
+  return words;
+}
+
+/**
+ * A stored catalog's filter, { mode, words }, or null. Leaving out wins if
+ * a catalog somehow has both, as only a hand-edited one could. Also reads an
+ * entry already normalized, whose filter is under `filter`.
+ */
+function filterOf(raw) {
+  const stored = raw.filter && typeof raw.filter === "object" ? { [raw.filter.mode]: raw.filter.words } : raw;
+  for (const { id } of [...FILTER_MODES].reverse()) {
+    const words = filterWords(stored[id]);
+    if (words.length) return { mode: id, words };
+  }
+  return null;
+}
+
 /** One stored catalog as the rest of the addon reads it, or null when it is not one. */
 function normalizeEntry(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  if (raw.q !== undefined) return searchEntry(raw);
-  if (raw.channel !== undefined) return channelEntry(raw);
-  if (raw.playlist !== undefined) return playlistEntry(raw);
-  if (raw.trending !== undefined) return trendingEntry(raw);
-  return null;
+  let entry = null;
+  if (raw.q !== undefined) entry = searchEntry(raw);
+  else if (raw.channel !== undefined) entry = channelEntry(raw);
+  else if (raw.playlist !== undefined) entry = playlistEntry(raw);
+  else if (raw.trending !== undefined) entry = trendingEntry(raw);
+  // The filter changes which of the videos are listed, not what is fetched,
+  // so it is no part of the id: editing it never makes the row a new one.
+  return entry && { ...entry, filter: filterOf(raw) };
 }
 
 /** The reader's catalogs, in their order, without repeats, at most MAX_CATALOGS. */
@@ -223,6 +277,11 @@ function normalizeCatalogs(raw) {
 
 /** The compact form the install URL carries. */
 function toStoredEntry(entry) {
+  const source = toStoredSource(entry);
+  return entry.filter ? { ...source, [entry.filter.mode]: entry.filter.words } : source;
+}
+
+function toStoredSource(entry) {
   if (entry.kind === "search") {
     return {
       q: entry.q,
@@ -360,6 +419,10 @@ module.exports = {
   MAX_CATALOGS,
   MAX_QUERY_LENGTH,
   MAX_NAME_LENGTH,
+  FILTER_MODES,
+  MAX_FILTER_WORDS,
+  MAX_FILTER_WORD_LENGTH,
+  filterWords,
   normalizeEntry,
   normalizeCatalogs,
   toStoredEntry,

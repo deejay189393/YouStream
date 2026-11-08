@@ -127,6 +127,82 @@ describe("a search catalog", () => {
   });
 });
 
+describe("a catalog's keyword filter", () => {
+  // Long enough that the page keeps only the start of it.
+  const LONG = `${"A very long description of a comedy special. ".repeat(10)} Credits: #GauravKapoor and friends.`;
+  const comedy = (url) => ({
+    items: new URL(url).searchParams
+      .get("id")
+      .split(",")
+      .map((id) =>
+        apiVideo(id, {
+          snippet: {
+            gk1: { title: "GAURAV KAPOOR | Stand-Up Special" },
+            gk2: { title: "Office Life | Stand Up", channelTitle: "Gaurav Kapoor" },
+            gk3: { title: "Crowd Work Special", description: LONG },
+            gk4: { title: "Gaurav-Kapoor's Roast Show" },
+            clean: { title: "Zakir Khan | Haq Se Single", channelTitle: "Zakir Khan", description: "A comedian, not Gaurav Kapur." },
+            hindi: { title: "गौरव कपूर स्टैंड अप", channelTitle: "Comedy Hindi" },
+            kapoors: { title: "The Kapoorthala Comedy Night" }
+          }[id]
+        })
+      )
+  });
+  const ALL = ["gk1", "gk2", "gk3", "gk4", "clean", "hindi", "kapoors"];
+  const entryWith = (filter) => normalizeEntry({ q: "latest indian stand up comedy", sort: "date", ...filter });
+
+  test("leaving out a name: in the title, the channel's name, or anywhere in the description", async () => {
+    routeFetch([["/search?", searchBody(ALL)], ["/videos?", comedy]]);
+    const items = await browse.catalogItems({ entry: entryWith({ exclude: ["Gaurav Kapoor"] }), settings: settingsFor() });
+    expect(items.map((i) => i.id)).toEqual(["clean", "hindi", "kapoors"]);
+  });
+
+  test("keeping only the videos that mention a word, in any script", async () => {
+    routeFetch([["/search?", searchBody(ALL)], ["/videos?", comedy]]);
+    const items = await browse.catalogItems({ entry: entryWith({ include: ["Zakir", "गौरव कपूर"] }), settings: settingsFor() });
+    expect(items.map((i) => i.id)).toEqual(["clean", "hindi"]);
+  });
+
+  test("words are whole: a name is not found inside another word", async () => {
+    routeFetch([["/search?", searchBody(ALL)], ["/videos?", comedy]]);
+    const items = await browse.catalogItems({ entry: entryWith({ include: ["kapoor"] }), settings: settingsFor() });
+    expect(items.map((i) => i.id)).toEqual(["gk1", "gk2", "gk4"]);
+  });
+
+  test("changing the filter reads the kept page again: no new call to YouTube", async () => {
+    const fetch = routeFetch([["/search?", searchBody(ALL)], ["/videos?", comedy]]);
+    await browse.catalogItems({ entry: entryWith({}), settings: settingsFor() });
+    const calls = fetch.mock.calls.length;
+    const items = await browse.catalogItems({ entry: entryWith({ exclude: ["gaurav kapoor", "zakir"] }), settings: settingsFor() });
+    expect(items.map((i) => i.id)).toEqual(["hindi", "kapoors"]);
+    expect(fetch.mock.calls.length).toBe(calls);
+  });
+
+  test("a long description no longer kept whole is judged on its start", async () => {
+    routeFetch([["/search?", searchBody(["gk3"])], ["/videos?", comedy]]);
+    await browse.catalogItems({ entry: entryWith({}), settings: settingsFor() });
+    await videoCache.clear();
+    const items = await browse.catalogItems({ entry: entryWith({ exclude: ["gaurav kapoor"] }), settings: settingsFor() });
+    expect(items.map((i) => i.id)).toEqual(["gk3"]);
+  });
+
+  test("a page the filter empties is passed over for the next one", async () => {
+    routeFetch([
+      ["/search?", (url) => (new URL(url).searchParams.get("pageToken") ? searchBody(["clean"]) : searchBody(["gk1", "gk2"], "P2"))],
+      ["/videos?", comedy]
+    ]);
+    const items = await browse.catalogItems({ entry: entryWith({ exclude: ["gaurav kapoor"] }), settings: settingsFor() });
+    expect(items.map((i) => i.id)).toEqual(["clean"]);
+  });
+
+  test("mentions: whole words, or run together as a hashtag or handle writes them", () => {
+    expect(browse.mentions("watch gaurav kapoor live", "Gaurav Kapoor")).toBe(true);
+    expect(browse.mentions("follow gauravkapoor now", "Gaurav Kapoor")).toBe(true);
+    expect(browse.mentions("gaurav kapoors roast", "Gaurav Kapoor")).toBe(true);
+    expect(browse.mentions("gauravkapoorofficial", "Gaurav Kapoor")).toBe(false);
+  });
+});
+
 describe("channel, playlist and Trending catalogs", () => {
   test("a channel's videos without Shorts, or its Shorts, newest or most viewed first, from the playlists YouTube keeps", async () => {
     const fetch = routeFetch([

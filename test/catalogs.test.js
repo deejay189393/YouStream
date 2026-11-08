@@ -16,7 +16,12 @@ const {
   SKIP_OPTIONS,
   MAX_CATALOGS,
   MAX_QUERY_LENGTH,
-  MAX_NAME_LENGTH
+  MAX_NAME_LENGTH,
+  FILTER_MODES,
+  MAX_FILTER_WORDS,
+  MAX_FILTER_WORD_LENGTH,
+  filterWords,
+  toStoredEntry
 } = require("../src/catalogs");
 
 const CHANNEL = "UCBJycsmduvYEL83R_U4JriQ";
@@ -31,7 +36,8 @@ describe("a search catalog", () => {
       q: "lofi hip hop",
       sort: "relevance",
       length: "any",
-      within: "any"
+      within: "any",
+      filter: null
     });
   });
 
@@ -85,7 +91,8 @@ describe("a channel catalog", () => {
       title: "Marques Brownlee",
       channel: CHANNEL,
       show: "videos",
-      sort: "date"
+      sort: "date",
+      filter: null
     });
   });
 
@@ -122,7 +129,8 @@ describe("a playlist catalog", () => {
       id: `playlist.${PLAYLIST}`,
       name: "Google Search Stories",
       title: "Google Search Stories",
-      playlist: PLAYLIST
+      playlist: PLAYLIST,
+      filter: null
     });
     expect(normalizeEntry({ playlist: PLAYLIST }).name).toBe("YouTube playlist");
   });
@@ -132,9 +140,53 @@ describe("a playlist catalog", () => {
   });
 });
 
+describe("a catalog's keyword filter", () => {
+  test("keeps only, or leaves out, the videos mentioning its words; stored under its mode", () => {
+    const left = normalizeEntry({ q: "indian stand up comedy", sort: "date", exclude: ["Gaurav Kapoor"] });
+    expect(left.filter).toEqual({ mode: "exclude", words: ["Gaurav Kapoor"] });
+    expect(toStoredEntry(left)).toEqual({ q: "indian stand up comedy", sort: "date", exclude: ["Gaurav Kapoor"] });
+    const kept = normalizeEntry({ trending: "all", include: ["cricket", "IPL"] });
+    expect(kept.filter).toEqual({ mode: "include", words: ["cricket", "IPL"] });
+    expect(toStoredEntry(kept)).toEqual({ trending: "all", include: ["cricket", "IPL"] });
+  });
+
+  test("is no part of the catalog's id or name, so editing it never makes a new row", () => {
+    const plain = normalizeEntry({ q: "stand up", sort: "date" });
+    const filtered = normalizeEntry({ q: "stand up", sort: "date", exclude: ["someone"] });
+    expect([filtered.id, filtered.name]).toEqual([plain.id, plain.name]);
+    expect(normalizeCatalogs([{ q: "stand up" }, { q: "stand up", exclude: ["x"] }])).toHaveLength(1);
+  });
+
+  test("its words: a list or a comma-separated line, tidied, without blanks or repeats in any case", () => {
+    expect(normalizeEntry({ trending: "all", exclude: " Gaurav  Kapoor ,gaurav kapoor,, Zakir\nKhan " }).filter.words).toEqual([
+      "Gaurav Kapoor",
+      "Zakir Khan"
+    ]);
+    expect(filterWords([7, "  ", "x".repeat(MAX_FILTER_WORD_LENGTH + 5)])).toEqual(["x".repeat(MAX_FILTER_WORD_LENGTH)]);
+    const many = Array.from({ length: MAX_FILTER_WORDS + 5 }, (_, i) => `w${i}`);
+    expect(filterWords(many)).toHaveLength(MAX_FILTER_WORDS);
+    expect(filterWords(null)).toEqual([]);
+  });
+
+  test("none without words; leaving out wins over keeping, as only a hand-edited catalog has both", () => {
+    expect(normalizeEntry({ trending: "all", exclude: [] }).filter).toBeNull();
+    expect(normalizeEntry({ trending: "all", include: ", ," }).filter).toBeNull();
+    expect(normalizeEntry({ trending: "all", include: ["a"], exclude: ["b"] }).filter).toEqual({ mode: "exclude", words: ["b"] });
+  });
+
+  test("an entry already normalized normalizes to itself, filter and all", () => {
+    for (const raw of [{ q: "x", exclude: ["a"] }, { channel: CHANNEL, name: "N", include: ["b"] }, { playlist: PLAYLIST }]) {
+      const once = normalizeEntry(raw);
+      expect(normalizeEntry(once)).toEqual(once);
+    }
+    expect(normalizeEntry({ trending: "all", filter: { mode: "bogus", words: ["x"] } }).filter).toBeNull();
+    expect(FILTER_MODES.map((m) => m.id)).toEqual(["include", "exclude"]);
+  });
+});
+
 describe("a Trending catalog", () => {
   test("all of it, or one category", () => {
-    expect(normalizeEntry({ trending: "all" })).toEqual({ kind: "trending", id: "trending.all", name: "Trending", trending: "all" });
+    expect(normalizeEntry({ trending: "all" })).toEqual({ kind: "trending", id: "trending.all", name: "Trending", trending: "all", filter: null });
     expect(normalizeEntry({ trending: "music" }).name).toBe("Trending Music");
     expect(normalizeEntry({ trending: "podcasts" })).toBeNull();
   });

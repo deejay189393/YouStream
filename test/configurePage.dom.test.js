@@ -763,11 +763,52 @@ describe("the YouTube card", () => {
     expect(p.$(".cat-empty")).not.toBeNull();
   });
 
+  test("a row's keyword filter: chosen, typed, kept through other changes, and saved compactly", () => {
+    const p = loadPage();
+    add(p, "latest indian stand up comedy");
+    const row = () => p.document.querySelector("#catalog-list .cat-row");
+    const filter = () => row().querySelector(".cat-filter select");
+    const words = () => row().querySelector(".cat-words");
+    expect([...filter().options].map((o) => o.textContent)).toEqual(["No keyword filter", "Only videos mentioning", "Leave out videos mentioning"]);
+    expect(words().hidden).toBe(true);
+    pick(p, filter(), "exclude");
+    expect(words().hidden).toBe(false);
+    words().value = " Gaurav  Kapoor, gaurav kapoor ,, Someone Else";
+    words().dispatchEvent(new p.dom.window.Event("input", { bubbles: true }));
+    // Another option of the row changed: the filter stays.
+    pick(p, row().querySelector(".cat-opts select"), "date");
+    p.set("youtube-key", "k");
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([{ q: "latest indian stand up comedy", sort: "date", exclude: ["Gaurav Kapoor", "Someone Else"] }]);
+    pick(p, filter(), "include");
+    p.submit();
+    expect(p.rawGenerated().catalogs[0].include).toEqual(["Gaurav Kapoor", "Someone Else"]);
+    pick(p, filter(), "");
+    expect(words().hidden).toBe(true);
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([{ q: "latest indian stand up comedy", sort: "date" }]);
+  });
+
+  test("a row's filter with no words saves no filter; a saved one is shown as saved", () => {
+    const p = loadPage();
+    add(p, "comedy");
+    pick(p, p.document.querySelector("#catalog-list .cat-filter select"), "exclude");
+    p.set("youtube-key", "k");
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([{ q: "comedy" }]);
+    const existing = normalizeConfig({ youtubeKey: "k", catalogs: [{ trending: "all", include: ["cricket", "IPL"] }] });
+    const again = loadPage({ existing });
+    expect(again.$("#catalog-list .cat-filter select").value).toBe("include");
+    expect(again.$("#catalog-list .cat-words").value).toBe("cricket, IPL");
+    again.submit();
+    expect(again.rawGenerated().catalogs).toEqual([{ trending: "all", include: ["cricket", "IPL"] }]);
+  });
+
   test("a search row's order, length and date, and a channel row's videos and order, are saved compactly", () => {
     const existing = normalizeConfig({ youtubeKey: "k", catalogs: [{ channel: CHANNEL, name: "MKBHD" }, { playlist: "PLBCF2DAC6FFB574DE", name: "Stories" }] });
     const p = loadPage({ existing });
     add(p, "news");
-    const selects = (i) => p.document.querySelectorAll("#catalog-list .cat-row")[i].querySelectorAll("select");
+    const selects = (i) => p.document.querySelectorAll("#catalog-list .cat-row")[i].querySelectorAll(".cat-opts select");
     const labels = (i) => [...selects(i)].map((select) => [...select.options].map((o) => o.textContent));
     expect(labels(0)).toEqual([["Videos", "Shorts", "Live streams", "Everything"], ["Newest", "Most viewed"]]);
     expect(labels(2)[0]).toEqual(["Most relevant", "Newest", "Most viewed", "Top rated"]);
@@ -791,7 +832,7 @@ describe("the YouTube card", () => {
   test("an option that would make a row repeat another is put back", () => {
     const existing = normalizeConfig({ youtubeKey: "k", catalogs: [{ channel: CHANNEL, name: "MKBHD" }, { channel: CHANNEL, name: "MKBHD", sort: "viewCount" }] });
     const p = loadPage({ existing });
-    const select = (row, i) => p.document.querySelectorAll("#catalog-list .cat-row")[row].querySelectorAll("select")[i];
+    const select = (row, i) => p.document.querySelectorAll("#catalog-list .cat-row")[row].querySelectorAll(".cat-opts select")[i];
     add(p, "news");
     add(p, "NEWS");
     expect(note(p)).toBe("You already have that catalog.");
@@ -957,7 +998,7 @@ describe("editing an installed addon", () => {
     add(first, "https://www.youtube.com/playlist?list=PLBCF2DAC6FFB574DE");
     await flush();
     first.click([...first.document.querySelectorAll("#trending-chips button")].find((b) => b.textContent === "+ Music"));
-    const selects = (p, row) => p.document.querySelectorAll("#catalog-list .cat-row")[row].querySelectorAll("select");
+    const selects = (p, row) => p.document.querySelectorAll("#catalog-list .cat-row")[row].querySelectorAll(".cat-opts select");
     pick(first, selects(first, 0)[0], "date");
     pick(first, selects(first, 0)[2], "week");
     pick(first, selects(first, 1)[0], "shorts");

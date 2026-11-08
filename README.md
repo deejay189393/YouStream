@@ -493,6 +493,24 @@ stays within one page of YouTube's, so it costs at most one call.
 this server was asked to block (`BLOCKED_VIDEOS`, `BLOCKED_CHANNELS`), and
 non-embeddable videos when you asked for embeddable only.
 
+**Keyword filter.** Any row can keep only the videos that mention some
+words, or leave them out: under the row, choose "Only videos mentioning" or
+"Leave out videos mentioning" and type the words, separated by commas. A
+word or a name is looked for in the video's title, its channel's name and
+its whole description; whole words, in any case, with or without accents,
+in any script. A plural or a possessive counts ("Kapoor's"), and so does a
+name written as one word, the way a hashtag or a handle writes it
+(`#GauravKapoor`). Up to 20 words, of up to 60 characters each, stored with
+the row: `{ q: "indian stand up comedy", exclude: ["Gaurav Kapoor"] }`.
+
+The filter works on the pages already kept, so changing it costs nothing
+and applies at once, and the row keeps its id and name. Measured on a real
+search, "indian stand up comedy" by relevance, 100 videos: leaving out
+"Gaurav Kapoor" left out 16, 13 of them his own (named in the title or the
+channel) and 3 that thank or tag him in their description, and kept none
+that name him. A row whose filter leaves out every video on a page moves on
+to the next page, which for a search costs another 101 units.
+
 ### Metadata and streams
 
 A video's page has its title, the upload date, the length, its category and
@@ -877,8 +895,15 @@ project, `youstream`, with a service per release channel.
 | Service | Branch | Domain | Region | Variables |
 |---|---|---|---|---|
 | `youstream` | `main` | [youstream.up.railway.app](https://youstream.up.railway.app/configure) | Singapore | `PORT=3000`, `TVDB_API_KEY`, optionally `TMDB_API_KEY`, `REDIS_URL` |
-| `youstream-beta` | `beta` | [youstream-beta.up.railway.app](https://youstream-beta.up.railway.app/configure) | Singapore | the same, plus `RELEASE_CHANNEL=beta`, and for profiles `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `SECRET_KEY` |
-| `Postgres` | | private network only | Singapore | Railway's PostgreSQL, beta's profiles |
+| `youstream-beta` | `beta` | [youstream-beta.up.railway.app](https://youstream-beta.up.railway.app/configure) | Singapore | the same, plus `RELEASE_CHANNEL=beta`, and for profiles `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `SECRET_KEY=${{shared.SECRET_KEY}}` |
+| `Postgres` | | private network only | Singapore | Railway's PostgreSQL template: the profiles |
+
+`SECRET_KEY` is a shared variable of the project's environment, generated
+by Railway (`${{ secret(64, "abcdef0123456789") }}`), so its value is in no
+file and no log. Prod can take the same two references to share beta's
+profiles: one database, one key, and a profile's install link then works on
+either address. Migrations only ever add, so prod's older code keeps
+working on a database beta has moved ahead.
 
 Work happens on `beta`, which beta deploys on every push; `main` moves only
 when a release goes to prod. CI runs on both: the tests, on Node 24 like the
