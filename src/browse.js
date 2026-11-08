@@ -8,6 +8,7 @@ const { refreshMs } = require("./config");
 const { requestSignal } = require("./requestContext");
 const { MAX_YOUTUBE_DATA_MS } = require("./hostConfig");
 const {
+  VIDEO_TYPES,
   CHANNEL_SHOWS,
   TRENDING,
   PERIODS,
@@ -16,6 +17,8 @@ const {
   MAX_QUERY_LENGTH,
   normalizeEntry,
   parseSourceLink,
+  onlyShorts,
+  everyType,
   tidy
 } = require("./catalogs");
 
@@ -98,12 +101,14 @@ function publishedAfter(within, now = Date.now()) {
   return new Date(Math.floor((now - period.ms) / HOUR_MS) * HOUR_MS).toISOString();
 }
 
-function searchSource(q, { sort, length, within }, settings) {
+function searchSource(q, { sort, length, within, types }, settings) {
   return {
     kind: "search",
     q,
     order: sort,
-    videoDuration: length === "any" ? null : length,
+    // Every Short is under four minutes, so a row of Shorts alone asks for
+    // those, and fills with far more of them.
+    videoDuration: types && onlyShorts(types) ? "short" : length === "any" ? null : length,
     within,
     safeSearch: settings.safeSearch,
     regionCode: settings.region || null,
@@ -113,11 +118,17 @@ function searchSource(q, { sort, length, within }, settings) {
   };
 }
 
+/**
+ * The list YouTube keeps of a channel's uploads of the row's kind, when it
+ * keeps to one; else of all of them, of which the row then keeps its kinds.
+ */
+const channelShow = (types) => CHANNEL_SHOWS.find((show) => show.id === (types.length === 1 ? types[0] : "all"));
+
 /** What YouTube is asked for to fill a catalog. */
 function sourceOf(entry, settings) {
   if (entry.kind === "search") return searchSource(entry.q, entry, settings);
   if (entry.kind === "channel") {
-    const show = CHANNEL_SHOWS.find((s) => s.id === entry.show);
+    const show = channelShow(entry.types);
     return { kind: "playlist", playlistId: `${entry.sort === "viewCount" ? show.popular : show.playlist}${entry.channel.slice(2)}` };
   }
   if (entry.kind === "playlist") return { kind: "playlist", playlistId: entry.playlist };
@@ -170,11 +181,20 @@ const isMissing = (err) => err.kind === "error" && [400, 403, 404].includes(err.
 /**
  * What a page is fetched and kept with. `staleMs` is how much longer than
  * `freshMs` it is kept, when that is shorter than the cache's usual.
+ * `types` are the kinds of video the row keeps to, when it must tell them
+ * apart itself (typesToTell).
  */
-function context(settings, source, freshMs, staleMs) {
+function context(settings, source, freshMs, staleMs, types = null) {
   const user = keyId(settings.youtubeKey);
-  return { apiKey: settings.youtubeKey, user, source, freshMs, staleMs, key: JSON.stringify({ user, source }) };
+  return { apiKey: settings.youtubeKey, user, source, freshMs, staleMs, types, key: JSON.stringify({ user, source }) };
 }
+
+/**
+ * Whether a kept page says each video's kind. Pages kept before kinds were
+ * told say none, and a row that keeps to some kinds fetches such a page
+ * anew, once, rather than let every video through as one.
+ */
+const toldKinds = (page) => page.items.every((item) => item.format);
 
 /**
  * One upstream page of a catalog or search, from this reader's cache while
@@ -184,7 +204,7 @@ function loadPage(ctx, index, pageToken) {
   const key = `${ctx.key}#${index}`;
   return joined(key, async () => {
     const hit = await browseCache.get(key);
-    if (hit && hit.fresh) return hit.value;
+    if (hit && hit.fresh && (!ctx.types || toldKinds(hit.value))) return hit.value;
     try {
       const page = await withKey(ctx.apiKey, () => fetchUpstream(ctx.source, ctx.apiKey, pageToken));
       await browseCache.set(key, page, ctx.freshMs, ctx.staleMs);
@@ -231,6 +251,24 @@ function mentions(text, word) {
   return [w, `${w}s`, w.replace(/ /g, "")].some((form) => hasPhrase(text, form));
 }
 
+/** Whether a video is of a kind a row keeps to: null keeps all. */
+function ofKind(item, types) {
+  if (!types) return true;
+  const type = VIDEO_TYPES.find((option) => option.format === (item.format || "video"));
+  return types.includes(type.id);
+}
+
+/**
+ * The kinds of video a row must tell apart itself, or null: none when it
+ * keeps to every kind, nor when YouTube's own list of a channel's uploads
+ * of one kind is read, which is exact where telling is not.
+ */
+function typesToTell(entry) {
+  if (everyType(entry.types)) return null;
+  if (entry.kind === "channel" && entry.types.length === 1) return null;
+  return entry.types;
+}
+
 /** Whether a catalog's filter keeps the video: null keeps all. */
 async function passes(item, filter) {
   if (!filter) return true;
@@ -250,6 +288,7 @@ async function passes(item, filter) {
  * rather than YouTube's positions, gives both the same unbroken sequence.
  */
 async function assemble(ctx, skip, settings, filter = null) {
+  const types = ctx.types;
   const offset = offsetOf(skip);
   const seen = new Set();
   let before = 0;
@@ -261,7 +300,7 @@ async function assemble(ctx, skip, settings, filter = null) {
     const page = await loadPage(ctx, index, token);
     const items = [];
     for (const item of page.items) {
-      if (seen.has(item.id) || !playable(item, settings) || !(await passes(item, filter))) continue;
+      if (seen.has(item.id) || !playable(item, settings) || !ofKind(item, types) || !(await passes(item, filter))) continue;
       seen.add(item.id);
       items.push(item);
     }
@@ -273,10 +312,10 @@ async function assemble(ctx, skip, settings, filter = null) {
   return [];
 }
 
-/** A page of one of the reader's catalogs, its keyword filter applied. */
+/** A page of one of the reader's catalogs, its kinds of video and keyword filter applied. */
 function catalogItems({ entry, settings, skip }) {
   const freshMs = Math.min(refreshMs(settings.catalogRefresh), MAX_YOUTUBE_DATA_MS);
-  return assemble(context(settings, sourceOf(entry, settings), freshMs), skip, settings, entry.filter);
+  return assemble(context(settings, sourceOf(entry, settings), freshMs, undefined, typesToTell(entry)), skip, settings, entry.filter);
 }
 
 /**
@@ -424,6 +463,8 @@ async function resolveSource(apiKey, input, kind) {
 module.exports = {
   passes,
   mentions,
+  ofKind,
+  typesToTell,
   catalogItems,
   searchItems,
   getItem,

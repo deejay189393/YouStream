@@ -7,8 +7,8 @@ const crypto = require("crypto");
  *   search    a YouTube search, ranked the way YouTube ranks it, or newest,
  *             most viewed or top rated first, optionally kept to a length
  *             or to recent uploads
- *   channel   a channel's uploads, newest or most viewed first: its videos
- *             without Shorts, its Shorts, its live streams, or everything
+ *   channel   a channel's uploads, newest or most viewed first: its videos,
+ *             its Shorts, its live streams, any two of them, or everything
  *   playlist  a public playlist, in its own order
  *   trending  YouTube's most popular videos in the reader's country, all of
  *             them or one category
@@ -20,9 +20,14 @@ const crypto = require("crypto");
  * Stored in the install URL compactly, a default left out:
  *
  *   { q: "lofi hip hop", sort: "date", length: "long", within: "week" }
- *   { channel: "UC...", name: "Marques Brownlee", show: "shorts", sort: "viewCount" }
+ *   { channel: "UC...", name: "Marques Brownlee", types: ["shorts"], sort: "viewCount" }
  *   { playlist: "PL...", name: "Lectures" }
  *   { trending: "music" }
+ *
+ * Any of them can keep to some kinds of video, of videos, Shorts and live
+ * streams -- every kind by default, and a channel's videos alone:
+ *
+ *   { q: "cricket highlights", sort: "date", types: ["videos", "live"] }
  *
  * Any of them can also keep only, or leave out, the videos that mention some
  * words in their title, channel name or description:
@@ -59,18 +64,36 @@ const PERIODS = [
 ];
 
 /**
- * What a channel row lists. Each is a playlist YouTube keeps for every
+ * The kinds of video a row can keep to, any of them. YouTube's API has no
+ * field for them, so each video's is told from its details (youtube.js
+ * formatOf, its `format` here). A premiere counts as a video, as YouTube
+ * counts it. `inner` is the name after the first in a row's name.
+ */
+const VIDEO_TYPES = [
+  { id: "videos", label: "Videos", short: "Videos", inner: "videos", format: "video" },
+  { id: "shorts", label: "Shorts", short: "Shorts", inner: "Shorts", format: "short" },
+  { id: "live", label: "Live streams", short: "Live", inner: "live", format: "stream" }
+];
+const ALL_TYPES = VIDEO_TYPES.map((type) => type.id);
+
+/**
+ * What a channel row reads. Each is a playlist YouTube keeps for every
  * channel, named by a prefix in place of the channel id's UC: UULF is the
  * long-form uploads alone, which is how Shorts are left out exactly rather
- * than guessed at by length. Beside each is the same list most viewed
- * first (`popular`, its top 200), so either order costs a unit a page.
+ * than guessed at. Beside each is the same list most viewed first
+ * (`popular`, its top 200), so either order costs a unit a page. A row of
+ * one kind reads that kind's list; of two, every upload, with the third
+ * kind told and left out as on any other row.
  */
 const CHANNEL_SHOWS = [
-  { id: "videos", label: "Videos", playlist: "UULF", popular: "UULP" },
-  { id: "shorts", label: "Shorts", short: "Shorts", playlist: "UUSH", popular: "UUPS" },
-  { id: "live", label: "Live streams", short: "Live", playlist: "UULV", popular: "UUPV" },
-  { id: "all", label: "Everything", short: "Everything", playlist: "UU", popular: "PU" }
+  { id: "videos", playlist: "UULF", popular: "UULP" },
+  { id: "shorts", playlist: "UUSH", popular: "UUPS" },
+  { id: "live", playlist: "UULV", popular: "UUPV" },
+  { id: "all", playlist: "UU", popular: "PU" }
 ];
+
+/** What a channel row keeps to unless told otherwise: its videos, as it always has. */
+const CHANNEL_TYPES = ["videos"];
 
 /** A channel row's order: as uploaded, the way the channel lists it, or by views. */
 const CHANNEL_SORTS = [
@@ -163,6 +186,38 @@ const shortHash = (text) => crypto.createHash("sha256").update(text).digest("hex
 const withOptions = (name, options) => [name, ...options.map((o) => o.short).filter(Boolean)].join(" · ");
 
 /**
+ * A row's kinds of video: those of VIDEO_TYPES it names, in a list or a
+ * comma-separated line, in VIDEO_TYPES' order; `usual` when it names none.
+ */
+function typesOf(raw, usual) {
+  const list = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",").map((part) => part.trim()) : [];
+  const types = ALL_TYPES.filter((id) => list.includes(id));
+  return types.length ? types : usual;
+}
+
+const sameTypes = (a, b) => a.length === b.length && a.every((id, i) => id === b[i]);
+const everyType = (types) => types.length === ALL_TYPES.length;
+const onlyShorts = (types) => types.length === 1 && types[0] === "shorts";
+
+/**
+ * The kinds of video as an option of a row's name, said only when they are
+ * not the row's usual: "Shorts", "Videos & live", and "Everything" for a
+ * channel's every kind.
+ */
+function typesOption(types, usual) {
+  if (sameTypes(types, usual)) return { short: "" };
+  if (everyType(types)) return { short: "Everything" };
+  const named = VIDEO_TYPES.filter((type) => types.includes(type.id));
+  return { short: named.map((type, i) => (i ? type.inner : type.short)).join(" & ") };
+}
+
+/** The kinds of video in a row's id: "shorts", "videos-live", "all". */
+const typesKey = (types) => (everyType(types) ? "all" : types.join("-"));
+
+/** The end of a row's id for its kinds, when they are not every kind: rows from before kinds keep their ids. */
+const typesSuffix = (types) => (everyType(types) ? "" : `.${typesKey(types)}`);
+
+/**
  * A search catalog. Its id is derived from what it searches, so re-saving
  * an unchanged config never orphans a row the app already shows, and two
  * rows searching the same thing are one.
@@ -171,18 +226,24 @@ function searchEntry(raw) {
   const q = tidy(raw.q, MAX_QUERY_LENGTH, { ellipsis: false });
   if (!q) return null;
   const sort = optionOf(SORTS, raw.sort);
-  const length = optionOf(LENGTHS, raw.length);
+  const types = typesOf(raw.types, ALL_TYPES);
+  // A row of Shorts alone asks YouTube for videos under four minutes, which
+  // every Short is (browse.js), so a length it was given has no say.
+  const length = onlyShorts(types) ? LENGTHS[0] : optionOf(LENGTHS, raw.length);
   const within = optionOf(PERIODS, raw.within);
   const words = slug(q);
-  const id = `search.${words ? `${words}.` : ""}${shortHash(JSON.stringify([q.toLowerCase(), sort.id, length.id, within.id]))}`;
+  // A row of every kind keeps the id it had before kinds could be chosen.
+  const parts = [q.toLowerCase(), sort.id, length.id, within.id, ...(everyType(types) ? [] : [typesKey(types)])];
+  const id = `search.${words ? `${words}.` : ""}${shortHash(JSON.stringify(parts))}`;
   return {
     kind: "search",
     id,
-    name: tidy(withOptions(q, [sort, length, within]), MAX_NAME_LENGTH),
+    name: tidy(withOptions(q, [sort, length, within, typesOption(types, ALL_TYPES)]), MAX_NAME_LENGTH),
     q,
     sort: sort.id,
     length: length.id,
-    within: within.id
+    within: within.id,
+    types
   };
 }
 
@@ -193,18 +254,29 @@ function searchEntry(raw) {
  */
 const ownTitle = (raw) => (raw.title !== undefined ? raw.title : raw.name);
 
+/**
+ * A channel row's kinds of video: as stored, or as a row stored before they
+ * could be mixed says, by the one list it read (`show`), which its id kept.
+ */
+function channelTypes(raw) {
+  if (raw.types !== undefined) return typesOf(raw.types, CHANNEL_TYPES);
+  const show = CHANNEL_SHOWS.find((option) => option.id === raw.show);
+  if (!show) return CHANNEL_TYPES;
+  return show.id === "all" ? ALL_TYPES : [show.id];
+}
+
 function channelEntry(raw) {
   if (typeof raw.channel !== "string" || !CHANNEL_ID.test(raw.channel)) return null;
-  const show = optionOf(CHANNEL_SHOWS, raw.show);
+  const types = channelTypes(raw);
   const sort = optionOf(CHANNEL_SORTS, raw.sort);
   const title = tidy(ownTitle(raw), MAX_NAME_LENGTH) || "YouTube channel";
   return {
     kind: "channel",
-    id: `channel.${raw.channel}.${show.id}${sort === CHANNEL_SORTS[0] ? "" : `.${sort.id}`}`,
-    name: tidy(withOptions(title, [show, sort]), MAX_NAME_LENGTH),
+    id: `channel.${raw.channel}.${typesKey(types)}${sort === CHANNEL_SORTS[0] ? "" : `.${sort.id}`}`,
+    name: tidy(withOptions(title, [typesOption(types, CHANNEL_TYPES), sort]), MAX_NAME_LENGTH),
     title,
     channel: raw.channel,
-    show: show.id,
+    types,
     sort: sort.id
   };
 }
@@ -212,12 +284,28 @@ function channelEntry(raw) {
 function playlistEntry(raw) {
   if (typeof raw.playlist !== "string" || !PLAYLIST_ID.test(raw.playlist)) return null;
   const title = tidy(ownTitle(raw), MAX_NAME_LENGTH) || "YouTube playlist";
-  return { kind: "playlist", id: `playlist.${raw.playlist}`, name: title, title, playlist: raw.playlist };
+  const types = typesOf(raw.types, ALL_TYPES);
+  return {
+    kind: "playlist",
+    id: `playlist.${raw.playlist}${typesSuffix(types)}`,
+    name: tidy(withOptions(title, [typesOption(types, ALL_TYPES)]), MAX_NAME_LENGTH),
+    title,
+    playlist: raw.playlist,
+    types
+  };
 }
 
 function trendingEntry(raw) {
   const chart = TRENDING.find((t) => t.id === raw.trending);
-  return chart ? { kind: "trending", id: `trending.${chart.id}`, name: chart.label, trending: chart.id } : null;
+  if (!chart) return null;
+  const types = typesOf(raw.types, ALL_TYPES);
+  return {
+    kind: "trending",
+    id: `trending.${chart.id}${typesSuffix(types)}`,
+    name: withOptions(chart.label, [typesOption(types, ALL_TYPES)]),
+    trending: chart.id,
+    types
+  };
 }
 
 /**
@@ -292,25 +380,29 @@ function toStoredEntry(entry) {
   return { ...source, [mode]: words, ...(scope === "title" ? { filterIn: "title" } : {}) };
 }
 
+/** A row's kinds of video, stored only when they are not its usual. */
+const storedTypes = (types, usual) => (sameTypes(types, usual) ? {} : { types });
+
 function toStoredSource(entry) {
   if (entry.kind === "search") {
     return {
       q: entry.q,
       ...(entry.sort !== "relevance" ? { sort: entry.sort } : {}),
       ...(entry.length !== "any" ? { length: entry.length } : {}),
-      ...(entry.within !== "any" ? { within: entry.within } : {})
+      ...(entry.within !== "any" ? { within: entry.within } : {}),
+      ...storedTypes(entry.types, ALL_TYPES)
     };
   }
   if (entry.kind === "channel") {
     return {
       channel: entry.channel,
       name: entry.title,
-      ...(entry.show !== "videos" ? { show: entry.show } : {}),
+      ...storedTypes(entry.types, CHANNEL_TYPES),
       ...(entry.sort !== "date" ? { sort: entry.sort } : {})
     };
   }
-  if (entry.kind === "playlist") return { playlist: entry.playlist, name: entry.title };
-  return { trending: entry.trending };
+  if (entry.kind === "playlist") return { playlist: entry.playlist, name: entry.title, ...storedTypes(entry.types, ALL_TYPES) };
+  return { trending: entry.trending, ...storedTypes(entry.types, ALL_TYPES) };
 }
 
 const toStoredCatalogs = (entries) => entries.map(toStoredEntry);
@@ -421,6 +513,9 @@ module.exports = {
   SORTS,
   LENGTHS,
   PERIODS,
+  VIDEO_TYPES,
+  ALL_TYPES,
+  CHANNEL_TYPES,
   CHANNEL_SHOWS,
   CHANNEL_SORTS,
   TRENDING,
@@ -435,6 +530,9 @@ module.exports = {
   MAX_FILTER_WORDS,
   MAX_FILTER_WORD_LENGTH,
   filterWords,
+  typesOf,
+  onlyShorts,
+  everyType,
   normalizeEntry,
   normalizeCatalogs,
   toStoredEntry,

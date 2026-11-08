@@ -110,11 +110,11 @@ describe("tabs", () => {
     const p = open();
     expect([...p.document.querySelectorAll("#summary-list .summary-row")].map((row) => row.getAttribute("href"))).toEqual([
       "#streams",
-      "#catalogs",
-      "#catalogs",
+      "#streams",
       "#playback",
       "#playback",
-      "#streams"
+      "#catalogs",
+      "#catalogs"
     ]);
   });
 });
@@ -239,14 +239,24 @@ describe("a problem opens the tab, and the field, to fix", () => {
 
 describe("the summary", () => {
   test("the setup at a glance", () => {
-    expect(open().summary()).toEqual({
+    const summary = open().summary();
+    expect(summary).toEqual({
       "Looks for": "Movies and series",
-      "YouTube search in your app": "On · Most relevant · Any length",
-      Catalogs: "None yet",
+      "Country and language": "United States · Any language",
       "When you press play": "Play in app, then Open in the YouTube app",
-      "Stream text": "YouStream",
-      "Country and language": "United States · Any language"
+      "Stream format": "YouStream",
+      "YouTube search in your app": "On · Most relevant · Any length",
+      Catalogs: "None yet"
     });
+    // In the order of the tabs.
+    expect(Object.keys(summary)).toEqual([
+      "Looks for",
+      "Country and language",
+      "When you press play",
+      "Stream format",
+      "YouTube search in your app",
+      "Catalogs"
+    ]);
   });
 
   test("follows every change, made anywhere", async () => {
@@ -279,7 +289,7 @@ describe("the summary", () => {
     change("pb-on-smarttube", true);
     expect(p.summary()["When you press play"]).toBe("Open in SmartTube");
     change("format-preset", "compact");
-    expect(p.summary()["Stream text"]).toBe("Compact");
+    expect(p.summary()["Stream format"]).toBe("Compact");
     change("region", "IN");
     change("audio-language", "hi");
     expect(p.summary()["Country and language"]).toBe("India · Hindi");
@@ -448,8 +458,8 @@ describe("the rest of the script", () => {
   });
 
   test("the same playlist twice is refused, and a channel's usual options are left out of the link", async () => {
-    const playlist = { kind: "playlist", id: "playlist.PL1", playlist: "PLBCF2DAC6FFB574DE", title: "Stories" };
-    const channel = { kind: "channel", id: "channel.UC1", channel: "UCBJycsmduvYEL83R_U4JriQ", title: "MKBHD", show: "videos", sort: "date" };
+    const playlist = { kind: "playlist", id: "playlist.PL1", playlist: "PLBCF2DAC6FFB574DE", title: "Stories", types: ["videos", "shorts", "live"] };
+    const channel = { kind: "channel", id: "channel.UC1", channel: "UCBJycsmduvYEL83R_U4JriQ", title: "MKBHD", types: ["videos"], sort: "date" };
     let answer = playlist;
     const fetch = jest.fn(async (url) => ({
       ok: true,

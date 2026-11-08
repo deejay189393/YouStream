@@ -86,7 +86,8 @@ function apiVideo(id, overrides = {}) {
     contentDetails: { duration: "PT2H22M", definition: "hd", ...(overrides.contentDetails || {}) },
     statistics: { viewCount: "12345", ...(overrides.statistics || {}) },
     status: { embeddable: true, ...(overrides.status || {}) },
-    ...(overrides.liveStreamingDetails ? { liveStreamingDetails: overrides.liveStreamingDetails } : {})
+    ...(overrides.liveStreamingDetails ? { liveStreamingDetails: overrides.liveStreamingDetails } : {}),
+    ...(overrides.player ? { player: overrides.player } : {})
   };
 }
 

@@ -47,7 +47,8 @@ describe("searchVideos", () => {
     });
     const videosCall = new URL(fetch.mock.calls[1][0]);
     expect(videosCall.searchParams.get("id")).toBe("b,a,gone");
-    expect(videosCall.searchParams.get("part")).toBe("snippet,contentDetails,statistics,status,liveStreamingDetails");
+    expect(videosCall.searchParams.get("part")).toBe("snippet,contentDetails,statistics,status,liveStreamingDetails,player");
+    expect(videosCall.searchParams.get("maxHeight")).toBe("1000");
   });
 
   test("leaves out the optional filters it was not given", async () => {
@@ -256,6 +257,74 @@ describe("classify", () => {
   });
 });
 
+describe("formatOf: what YouTube would call a video, which its API does not say", () => {
+  const upright = { embedWidth: "563", embedHeight: "1000" };
+  const wide = { embedWidth: "1778", embedHeight: "1000" };
+  const square = { embedWidth: "1000", embedHeight: "1000" };
+  const video = ({ player, published = "2026-11-06T10:00:00Z", live, details } = {}) => ({
+    snippet: { publishedAt: published, ...(live ? { liveBroadcastContent: live } : {}) },
+    ...(player ? { player } : {}),
+    ...(details ? { liveStreamingDetails: details } : {})
+  });
+  const showing = (start, seconds, scheduled = true) => ({
+    actualStartTime: start,
+    actualEndTime: new Date(Date.parse(start) + seconds * 1000).toISOString(),
+    ...(scheduled ? { scheduledStartTime: start } : {})
+  });
+
+  test("a Short is upright and three minutes at most", () => {
+    expect(youtube.formatOf(video({ player: upright }), 48)).toBe("short");
+    expect(youtube.formatOf(video({ player: upright }), 180)).toBe("short");
+    expect(youtube.formatOf(video({ player: upright }), 181)).toBe("video");
+    expect(youtube.formatOf(video({ player: wide }), 48)).toBe("video");
+  });
+
+  test("or a minute, before Shorts could run three, from 15 October 2024", () => {
+    expect(youtube.SHORTS_THREE_MINUTES).toBe(Date.parse("2024-10-15T00:00:00Z"));
+    expect(youtube.formatOf(video({ player: upright, published: "2023-05-30T00:00:00Z" }), 60)).toBe("short");
+    expect(youtube.formatOf(video({ player: upright, published: "2023-05-30T00:00:00Z" }), 98)).toBe("video");
+    expect(youtube.formatOf(video({ player: upright, published: "2024-10-15T00:00:00Z" }), 98)).toBe("short");
+    expect(youtube.formatOf(video({ player: upright, published: null }), 98)).toBe("video");
+  });
+
+  test("a square one is left a video, as square uploads are as often songs", () => {
+    expect(youtube.formatOf(video({ player: square }), 145)).toBe("video");
+  });
+
+  test("without a shape or a length, a video", () => {
+    expect(youtube.formatOf(video(), 30)).toBe("video");
+    expect(youtube.formatOf(video({ player: { embedWidth: "x", embedHeight: "1000" } }), 30)).toBe("video");
+    expect(youtube.formatOf(video({ player: upright }), null)).toBe("video");
+    expect(youtube.formatOf({}, null)).toBe("video");
+  });
+
+  test("live now, a stream", () => {
+    expect(youtube.formatOf(video({ live: "live", player: upright }), 0)).toBe("stream");
+  });
+
+  test("a past stream's recording runs as long as it did, give or take seconds, or far shorter", () => {
+    expect(youtube.formatOf(video({ details: showing("2026-11-01T10:00:00Z", 3509) }), 3519)).toBe("stream");
+    expect(youtube.formatOf(video({ details: showing("2026-11-01T10:00:00Z", 4095, false) }), 4104)).toBe("stream");
+    expect(youtube.formatOf(video({ details: showing("2026-11-01T10:00:00Z", 50402) }), 42900)).toBe("stream");
+    // Ended, and its recording not ready yet.
+    expect(youtube.formatOf(video({ details: { actualStartTime: "2026-11-01T10:00:00Z" } }), null)).toBe("stream");
+  });
+
+  test("a premiere outlasts its video by the countdown, and is a video, as YouTube files it", () => {
+    expect(youtube.formatOf(video({ details: showing("2026-11-01T10:00:00Z", 202) }), 144)).toBe("video");
+    expect(youtube.formatOf(video({ details: showing("2026-11-01T10:00:00Z", 2129) }), 2006)).toBe("video");
+    expect(youtube.formatOf(video({ details: showing("2026-11-01T10:00:00Z", 435) }), 195)).toBe("video");
+    // A premiere is always scheduled: unscheduled, the same timing is a stream's.
+    expect(youtube.formatOf(video({ details: showing("2026-11-01T10:00:00Z", 202, false) }), 144)).toBe("stream");
+    // Past the countdown's longest, a stream.
+    expect(youtube.formatOf(video({ details: showing("2026-11-01T10:00:00Z", 600) }), 300)).toBe("stream");
+  });
+
+  test("the player's shape is asked for with every video's details, at no extra cost", () => {
+    expect(youtube.PLAYER_HEIGHT).toBe(1000);
+  });
+});
+
 describe("toVideo", () => {
   test("keeps what matching and the stream list use", () => {
     const v = youtube.toVideo(
@@ -280,6 +349,7 @@ describe("toVideo", () => {
       channelId: "UC1",
       publishedAt: "2021-05-01T00:00:00Z",
       durationSeconds: 2211,
+      format: "video",
       definition: "sd",
       views: 1500,
       likes: 120,
@@ -303,6 +373,7 @@ describe("toVideo", () => {
       channelId: "",
       publishedAt: null,
       durationSeconds: null,
+      format: "video",
       definition: "sd",
       views: null,
       likes: null,
@@ -465,7 +536,8 @@ describe("browsing calls", () => {
     expect(page.next).toBe("N");
     expect(params(fetch)).toEqual({
       key: "KEY",
-      part: "snippet,contentDetails,statistics,status,liveStreamingDetails",
+      part: "snippet,contentDetails,statistics,status,liveStreamingDetails,player",
+      maxHeight: "1000",
       chart: "mostPopular",
       regionCode: "IN",
       videoCategoryId: "10",

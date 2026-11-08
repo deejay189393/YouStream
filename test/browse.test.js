@@ -212,6 +212,117 @@ describe("a catalog's keyword filter", () => {
   });
 });
 
+describe("a catalog's kinds of video", () => {
+  const UPRIGHT = { embedWidth: "563", embedHeight: "1000" };
+  const SQUARE = { embedWidth: "1000", embedHeight: "1000" };
+  const ran = (seconds, scheduled) => ({
+    actualStartTime: "2026-10-01T10:00:00Z",
+    actualEndTime: new Date(Date.parse("2026-10-01T10:00:00Z") + seconds * 1000).toISOString(),
+    ...(scheduled ? { scheduledStartTime: "2026-10-01T09:58:00Z" } : {})
+  });
+  // A video, a Short, a square Short (taken for a video), a stream live now,
+  // a past stream, and a trailer that premiered (a video, as YouTube says).
+  const KINDS = {
+    vid: {},
+    short: { player: UPRIGHT, contentDetails: { duration: "PT45S" }, snippet: { publishedAt: "2026-10-01T00:00:00Z" } },
+    square: { player: SQUARE, contentDetails: { duration: "PT36S" }, snippet: { publishedAt: "2026-10-01T00:00:00Z" } },
+    now: { snippet: { liveBroadcastContent: "live" }, contentDetails: { duration: "P0D" }, liveStreamingDetails: { actualStartTime: "2026-10-19T12:00:00Z" } },
+    past: { contentDetails: { duration: "PT58M39S" }, liveStreamingDetails: ran(3509, true) },
+    premiere: { contentDetails: { duration: "PT2M24S" }, liveStreamingDetails: ran(202, true) }
+  };
+  const kinds = (url) => ({ items: new URL(url).searchParams.get("id").split(",").map((id) => apiVideo(id, KINDS[id])) });
+  const ALL = Object.keys(KINDS);
+  const listed = async (raw) => (await browse.catalogItems({ entry: normalizeEntry(raw), settings: settingsFor() })).map((i) => i.id);
+
+  test("a row of every kind lists every video, as rows always have", async () => {
+    routeFetch([["/search?", searchBody(ALL)], ["/videos?", kinds]]);
+    expect(await listed({ q: "cricket" })).toEqual(ALL);
+  });
+
+  test("without Shorts: the upright ones up to three minutes are left out; streams and premieres stay", async () => {
+    const fetch = routeFetch([["/search?", searchBody(ALL)], ["/videos?", kinds]]);
+    expect(await listed({ q: "cricket", types: ["videos", "live"] })).toEqual(["vid", "square", "now", "past", "premiere"]);
+    expect(params(fetch, 0).videoDuration).toBeUndefined();
+  });
+
+  test("videos alone: no Shorts and no streams, live or past; a premiere is a video", async () => {
+    routeFetch([["/search?", searchBody(ALL)], ["/videos?", kinds]]);
+    expect(await listed({ q: "cricket", types: ["videos"] })).toEqual(["vid", "square", "premiere"]);
+  });
+
+  test("live streams alone: live now and past", async () => {
+    routeFetch([["/search?", searchBody(ALL)], ["/videos?", kinds]]);
+    expect(await listed({ q: "cricket", types: ["live"] })).toEqual(["now", "past"]);
+  });
+
+  test("Shorts alone: YouTube is asked for videos under four minutes, every Short being one", async () => {
+    const fetch = routeFetch([["/search?", searchBody(ALL)], ["/videos?", kinds]]);
+    expect(await listed({ q: "cricket", length: "long", types: ["shorts"] })).toEqual(["short"]);
+    expect(params(fetch, 0).videoDuration).toBe("short");
+  });
+
+  test("a playlist's or Trending's videos are told the same way", async () => {
+    routeFetch([
+      ["/playlistItems?", { items: ALL.map((videoId) => ({ contentDetails: { videoId } })) }],
+      ["/videos?", (url) => (new URL(url).searchParams.get("chart") ? { items: ALL.map((id) => apiVideo(id, KINDS[id])) } : kinds(url))]
+    ]);
+    expect(await listed({ playlist: "PLBCF2DAC6FFB574DE", types: ["shorts", "live"] })).toEqual(["short", "now", "past"]);
+    expect(await listed({ trending: "all", types: ["videos", "shorts"] })).toEqual(["vid", "short", "square", "premiere"]);
+  });
+
+  test("a channel's one kind is YouTube's own list of it, exact: nothing is told, and a square Short stays", async () => {
+    const fetch = routeFetch([
+      ["/playlistItems?", { items: ["short", "square"].map((videoId) => ({ contentDetails: { videoId } })) }],
+      ["/videos?", kinds]
+    ]);
+    expect(await listed({ channel: "UCBJycsmduvYEL83R_U4JriQ", types: ["shorts"] })).toEqual(["short", "square"]);
+    expect(params(fetch, 0).playlistId).toBe("UUSHBJycsmduvYEL83R_U4JriQ");
+  });
+
+  test("a channel's two kinds: every upload, newest or most viewed, the third kind told and left out", async () => {
+    const fetch = routeFetch([
+      ["/playlistItems?", { items: ALL.map((videoId) => ({ contentDetails: { videoId } })) }],
+      ["/videos?", kinds]
+    ]);
+    expect(await listed({ channel: "UCBJycsmduvYEL83R_U4JriQ", types: ["videos", "live"] })).toEqual(["vid", "square", "now", "past", "premiere"]);
+    expect(await listed({ channel: "UCBJycsmduvYEL83R_U4JriQ", types: ["videos", "shorts"], sort: "viewCount" })).toEqual([
+      "vid",
+      "short",
+      "square",
+      "premiere"
+    ]);
+    const lists = fetch.mock.calls.map((_, i) => params(fetch, i).playlistId).filter(Boolean);
+    expect(lists).toEqual(["UUBJycsmduvYEL83R_U4JriQ", "PUBJycsmduvYEL83R_U4JriQ"]);
+  });
+
+  test("a page kept before kinds were told is asked for again, once, by a row that keeps to some kinds", async () => {
+    const fetch = routeFetch([["/search?", searchBody(ALL)], ["/videos?", kinds]]);
+    const settings = settingsFor();
+    const every = normalizeEntry({ q: "cricket" });
+    await browse.catalogItems({ entry: every, settings });
+    // As a page kept by the version before: no video says its kind.
+    const ctx = browse.context(settings, browse.sourceOf(every, settings), 0);
+    const kept = await browseCache.get(`${ctx.key}#0`);
+    await browseCache.set(`${ctx.key}#0`, { ...kept.value, items: kept.value.items.map(({ format, ...item }) => item) }, 60 * 60 * 1000);
+    expect(await listed({ q: "cricket" })).toEqual(ALL);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(await listed({ q: "cricket", types: ["videos", "live"] })).toEqual(["vid", "square", "now", "past", "premiere"]);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(await listed({ q: "cricket", types: ["videos", "live"] })).toEqual(["vid", "square", "now", "past", "premiere"]);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  test("which kinds a row tells itself, and a video that says no kind is a video", () => {
+    expect(browse.typesToTell(normalizeEntry({ q: "a" }))).toBeNull();
+    expect(browse.typesToTell(normalizeEntry({ q: "a", types: ["shorts"] }))).toEqual(["shorts"]);
+    expect(browse.typesToTell(normalizeEntry({ channel: "UCBJycsmduvYEL83R_U4JriQ", types: ["live"] }))).toBeNull();
+    expect(browse.typesToTell(normalizeEntry({ channel: "UCBJycsmduvYEL83R_U4JriQ", types: ["videos", "live"] }))).toEqual(["videos", "live"]);
+    expect(browse.ofKind({ id: "x" }, ["videos"])).toBe(true);
+    expect(browse.ofKind({ id: "x" }, ["shorts"])).toBe(false);
+    expect(browse.ofKind({ id: "x", format: "short" }, null)).toBe(true);
+  });
+});
+
 describe("channel, playlist and Trending catalogs", () => {
   test("a channel's videos without Shorts, or its Shorts, newest or most viewed first, from the playlists YouTube keeps", async () => {
     const fetch = routeFetch([
@@ -421,7 +532,7 @@ describe("getItem", () => {
   test("one videos.list when the video is not known, then kept for everyone", async () => {
     const fetch = routeFetch([["/videos?", videosBody]]);
     expect((await browse.getItem("abcdefghijk", KEY)).id).toBe("abcdefghijk");
-    expect(params(fetch, 0)).toMatchObject({ id: "abcdefghijk", part: "snippet,contentDetails,statistics,status,liveStreamingDetails" });
+    expect(params(fetch, 0)).toMatchObject({ id: "abcdefghijk", part: "snippet,contentDetails,statistics,status,liveStreamingDetails,player", maxHeight: "1000" });
     expect((await browse.getItem("abcdefghijk", "AIzaSomeoneElse")).id).toBe("abcdefghijk");
     expect(fetch).toHaveBeenCalledTimes(1);
   });

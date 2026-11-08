@@ -443,7 +443,7 @@ videos come from, then type or paste what that source needs:
 |---|---|---|---|
 | YouTube search | what to search for | YouTube's results, by relevance or newest, most viewed or top rated; length and upload date optional | 101 units |
 | YouTube playlist | its link (a watch link with `list=` too, and YouTube Music's), or its ID | the playlist, in its order | 2 units |
-| YouTube channel | its link, its `@handle` (the @ is optional) or its `UC…` ID | its videos without Shorts, or its Shorts, its live streams, or everything; newest or most viewed first | 2 units |
+| YouTube channel | its link, its `@handle` (the @ is optional) or its `UC…` ID | its videos, its Shorts, its live streams, any two, or everything; newest or most viewed first | 2 units |
 | Trending | a chip | YouTube's most popular in your country, all or one category (Music, Gaming, Film & Animation, Sports, News…) | 1 unit |
 
 A new setup starts with **no rows**. Add a search, a playlist, a channel or
@@ -452,14 +452,61 @@ the arrows. A search orders by relevance, newest, most viewed or top rated,
 and a channel by newest or most viewed. A playlist keeps its own order and
 Trending is YouTube's ranking, so those two have no choice to make.
 
-A channel row leaves Shorts out exactly, not by guessing from length.
-YouTube keeps every channel's long-form uploads, Shorts and live streams as
-playlists of their own (`UULF`, `UUSH` and `UULV` in place of the channel
-id's `UC`). Beside each it keeps the same list most viewed first, its top
-200 (`UULP`, `UUPS`, `UUPV`, and `PU` for everything). YouStream reads
-those, so either order costs the same. They are not in YouTube's
-documentation; should YouTube stop keeping one, its row comes back empty
-rather than failing.
+**Videos, Shorts and live streams.** Every row can keep to some kinds of
+video: under the row, tick any of Videos, Shorts and Live streams. A row
+lists every kind until told otherwise, except a channel's, which lists its
+videos, as it always has. The row's name says what it keeps to ("cricket ·
+Videos & live"), and the kinds are stored with it:
+`{ q: "cricket highlights", types: ["videos", "live"] }`.
+
+YouTube's API has no field for a video's kind and no search filter for
+Shorts: search's own `videoType` means YouTube's movies and episodes. So
+YouStream tells the kinds from what it fetches anyway, at no extra cost.
+The details call costs 1 unit whatever it returns, and asking it for the
+player's size gives each video's shape.
+
+- A **Short** is upright, its player taller than wide, and up to 3 minutes
+  long, or 1 minute if it was uploaded before 15 October 2024, when Shorts
+  could first run 3. A square video is left a video, because square uploads
+  are as often songs as Shorts.
+- A **live stream** is one live now, or the recording of a past one. A
+  premiere, a video first shown at a set time, carries the same live
+  details, but it is a video, as YouTube files it. Its showing outlasts the
+  video by the countdown before it, a minute or two, while a stream's
+  recording runs as long as the stream did, give or take seconds.
+
+Measured against YouTube's own answer for 576 videos from 9 searches and 3
+Trending charts: 214 of the 217 Shorts were told, the other 3 being square,
+and no video was taken for a Short. Counting square videos too would have
+caught all 217 but hidden 6 songs. Going by length alone would have hidden
+84 videos at 3 minutes, and 115 at YouTube's own "under 4 minutes". Of 53
+videos with live details, 52 were told right as a stream or a premiere. How
+many Shorts a row carries varies widely: 44 of 50 in a search for cricket
+highlights, newest first; 47 of 50 for easy recipes, most viewed; 5 of 47
+for stand-up comedy; 1 of 50 for official trailers; none of 129 in
+Trending.
+
+A search row of Shorts alone asks YouTube for videos under 4 minutes,
+which every Short is, so its pages fill with far more of them, and it has
+no length of its own to choose. A channel row of one kind reads YouTube's
+own list of that kind, which is exact. YouTube keeps every channel's
+videos, Shorts and live streams as playlists of their own (`UULF`, `UUSH`
+and `UULV` in place of the channel id's `UC`), and beside each the same
+list most viewed first, its top 200 (`UULP`, `UUPS`, `UUPV`, and `PU` for
+everything), so either order costs the same. A channel row of two kinds
+reads all of the channel's uploads (`UU`, or `PU` most viewed) and leaves
+the third kind out the way any other row does. These lists are not in
+YouTube's documentation; should YouTube stop keeping one, its row comes
+back empty rather than failing.
+
+The kinds are told on the pages already kept, so changing them costs no
+call to YouTube. A row that keeps to some kinds is a row of its own,
+though: its id says them, so one search can be a row of videos and another
+of Shorts, and a row of every kind keeps the id it always had. A page kept
+before kinds were told is fetched again, once, for a row that keeps to
+some. Leaving a kind out thins a row: without Shorts, a page of the search
+for cricket highlights keeps 6 of its 50 videos. A page that keeps none
+moves on to the next, which for a search costs another 101 units.
 
 A pasted playlist or channel is looked up once, at 1 unit, on the configure
 page (`POST /api/youtube-source`), as the source you chose. Something else
@@ -610,7 +657,7 @@ The configure page is an app, in five tabs:
 | **Summary** | A new setup's three steps: your YouTube key (checked the moment it is pasted, for 1 unit of quota), your setup at a glance, then your profile or an install link. Signed in: your install link, a warning only when your key needs you, and your setup at a glance |
 | **Streams** | How a film or an episode is found: what to look for, the results kept, runtime matching, and fine-tuning |
 | **Playback** | How each video found is offered in your app, and how its stream reads |
-| **Catalogs** | YouTube in your app: the search row (on or off, its order and length, SafeSearch), your rows, and how often they refresh |
+| **Catalogs** | YouTube in your app: the search row (on or off, its order and length, SafeSearch), your rows (each with its order, its kinds of video and a keyword filter), and how often they refresh |
 | **Account** | Signed in: your profile, with its whole ID to sign in with elsewhere, your keys, backups, and your password and link. Otherwise signing in and backups; **More** on a server without profiles |
 
 On a phone the tabs are a bar along the bottom; on a wider screen, a column
@@ -1072,9 +1119,11 @@ The configure page and the terms page show the credits these terms ask for.
   YouTube's ranking for anyone, not personalised. It has no subscriptions,
   history or recommendations, which need you to sign in with Google.
   Channel catalogs are the way to follow channels.
-- **Shorts can be left out of a channel exactly, not of a search.** The API
-  has no Shorts filter. A search row's length filter (4 minutes and over)
-  keeps nearly all of them out.
+- **Outside a channel row, Shorts and streams are told, not looked up.**
+  The API has no field for them, so a search, playlist or Trending row
+  tells a Short by its shape and length, and a past stream from a premiere
+  by its timing (see [Catalogs](#catalogs)). About 1 Short in 70 slips
+  through, the square ones. A channel row of one kind is exact.
 
 ## Maybe later
 

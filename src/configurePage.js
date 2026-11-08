@@ -411,7 +411,8 @@ function youtubeData(entries) {
     sorts: pick(catalogs.SORTS),
     lengths: pick(catalogs.LENGTHS),
     periods: pick(catalogs.PERIODS),
-    shows: pick(catalogs.CHANNEL_SHOWS),
+    types: catalogs.VIDEO_TYPES.map(({ id, label, short, inner }) => ({ id, label, short, inner })),
+    channelTypes: catalogs.CHANNEL_TYPES,
     channelSorts: pick(catalogs.CHANNEL_SORTS),
     filterModes: catalogs.FILTER_MODES,
     filterScopes: catalogs.FILTER_SCOPES,
@@ -755,13 +756,23 @@ const STYLE = `
   .cat-label { font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; padding-top: 3px; }
   .cat-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
   .cat-opts select { width: auto; max-width: 100%; padding: 6px 8px; font-size: 13px; border-radius: 7px; }
+  /* The kinds of video and the keyword filter each take a line of their own
+     under the row, as wide as the row past its number, so a phone shows the
+     three kinds side by side and the filter's choices whole. */
+  .cat-types { flex: 0 0 calc(100% - 32px); margin: 8px 0 0 32px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .type-toggle {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px 5px 9px; border-radius: 999px;
+    background: var(--field); border: 1px solid var(--border); font-size: 13px; cursor: pointer; user-select: none;
+  }
+  .type-toggle input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
+  .type-toggle:has(input:checked) { border-color: var(--accent-2); background: rgba(122,26,43,.3); }
+  .type-toggle:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 1px; }
   .cat-empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
   .cat-fixed { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
-  /* A line of its own under the row, as wide as the row past its number, so a
-     phone shows the filter's choices whole. */
   .cat-filter { flex: 0 0 calc(100% - 32px); margin: 7px 0 0 32px; display: flex; flex-direction: column; gap: 6px; }
   .cat-filter select { width: 100%; padding: 6px 8px; font-size: 13px; border-radius: 7px; }
   .cat-filter .cat-words { padding: 8px 9px; font-size: 14px; border-radius: 7px; }
+  @media (max-width: 480px) { .cat-types, .cat-filter { flex-basis: 100%; margin-left: 0; } }
   .btns { flex: 0 0 auto; display: flex; gap: 4px; }
   .btns button { font-size: 11px; }
   .btns button.remove { color: #ff6b6b; }

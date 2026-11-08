@@ -12,6 +12,7 @@ const startPage = require("../src/web/configure");
 const { createFormatter } = require("../src/formatter");
 const { templateWarnings } = require("../src/templateCheck");
 const { decodeConfig, normalizeConfig, DEFAULT_EXCLUDE, DEFAULT_EXCLUDE_DESCRIPTION } = require("../src/config");
+const { normalizeEntry } = require("../src/catalogs");
 
 const BASE = "https://youstream.up.railway.app";
 
@@ -569,6 +570,14 @@ const pick = (p, select, value) => {
   select.dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
 };
 const source = (p, kind) => pick(p, p.$("#catalog-source"), kind);
+/** A row's kinds of video, as its toggles show them, and a toggle clicked. */
+const typeBoxes = (p, row) => [...p.document.querySelectorAll("#catalog-list .cat-row")[row].querySelectorAll(".cat-types input")];
+const ticked = (p, row) => typeBoxes(p, row).filter((box) => box.checked).map((box) => box.value);
+const toggle = (p, row, type) => {
+  const box = typeBoxes(p, row).find((b) => b.value === type);
+  box.checked = !box.checked;
+  box.dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
+};
 const lookups = (answer) =>
   jest.fn(async (url, init) => {
     if (url === "/api/check-keys") return { json: async () => ({ youtube: "ok", tmdb: "absent" }) };
@@ -635,8 +644,8 @@ describe("the YouTube card", () => {
   test("a playlist or a channel is looked up with the reader's key, as the source chosen", async () => {
     const fetch = lookups((body) =>
       body.kind === "channel"
-        ? { entry: { kind: "channel", id: `channel.${CHANNEL}.videos`, name: "Marques Brownlee", title: "Marques Brownlee", channel: CHANNEL, show: "videos", sort: "date" } }
-        : { entry: { kind: "playlist", id: "playlist.PLBCF2DAC6FFB574DE", name: "Stories", title: "Stories", playlist: "PLBCF2DAC6FFB574DE" } }
+        ? { entry: normalizeEntry({ channel: CHANNEL, name: "Marques Brownlee" }) }
+        : { entry: normalizeEntry({ playlist: "PLBCF2DAC6FFB574DE", name: "Stories" }) }
     );
     const p = loadPage({ fetch });
     p.set("youtube-key", " AIzaKey ");
@@ -817,19 +826,20 @@ describe("the YouTube card", () => {
     add(p, "news");
     const selects = (i) => p.document.querySelectorAll("#catalog-list .cat-row")[i].querySelectorAll(".cat-opts select");
     const labels = (i) => [...selects(i)].map((select) => [...select.options].map((o) => o.textContent));
-    expect(labels(0)).toEqual([["Videos", "Shorts", "Live streams", "Everything"], ["Newest", "Most viewed"]]);
+    expect(labels(0)).toEqual([["Newest", "Most viewed"]]);
     expect(labels(2)[0]).toEqual(["Most relevant", "Newest", "Most viewed", "Top rated"]);
     pick(p, selects(2)[0], "date");
     pick(p, selects(2)[1], "medium");
     pick(p, selects(2)[2], "day");
-    pick(p, selects(0)[0], "live");
-    pick(p, selects(0)[1], "viewCount");
+    toggle(p, 0, "live");
+    toggle(p, 0, "videos");
+    pick(p, selects(0)[0], "viewCount");
     expect(names(p)).toEqual(["MKBHD · Live · Most viewed", "Stories", "news · Newest · 4–20 min · Today"]);
     expect(selects(1)).toHaveLength(0);
     expect(p.document.querySelectorAll("#catalog-list .cat-row")[1].querySelector(".cat-fixed").textContent).toBe("In the playlist's own order");
     p.submit();
     expect(p.rawGenerated().catalogs).toEqual([
-      { channel: CHANNEL, name: "MKBHD", show: "live", sort: "viewCount" },
+      { channel: CHANNEL, name: "MKBHD", types: ["live"], sort: "viewCount" },
       { playlist: "PLBCF2DAC6FFB574DE", name: "Stories" },
       { q: "news", sort: "date", length: "medium", within: "day" }
     ]);
@@ -855,9 +865,88 @@ describe("the YouTube card", () => {
     expect(note(p)).toBe("");
     expect(names(p)[4]).toBe("news · Top rated");
     // A channel's order, too.
-    pick(p, select(1, 1), "date");
-    expect(select(1, 1).value).toBe("viewCount");
+    pick(p, select(1, 0), "date");
+    expect(select(1, 0).value).toBe("viewCount");
     expect(note(p)).toBe("You already have that catalog.");
+  });
+
+  test("every row keeps to kinds of video: every kind at first, and a channel's videos alone", () => {
+    const existing = normalizeConfig({
+      youtubeKey: "k",
+      catalogs: [{ channel: CHANNEL, name: "MKBHD" }, { playlist: "PLBCF2DAC6FFB574DE", name: "Stories" }, { trending: "news", types: ["live"] }]
+    });
+    const p = loadPage({ existing });
+    add(p, "cricket");
+    expect(typeBoxes(p, 0).map((box) => box.parentNode.textContent)).toEqual(["Videos", "Shorts", "Live"]);
+    expect(typeBoxes(p, 0).map((box) => box.getAttribute("aria-label"))).toEqual(["Videos", "Shorts", "Live streams"]);
+    expect([0, 1, 2, 3].map((row) => ticked(p, row))).toEqual([["videos"], ["videos", "shorts", "live"], ["live"], ["videos", "shorts", "live"]]);
+    expect(p.document.querySelectorAll("#catalog-list .cat-types")[3].getAttribute("aria-label")).toBe("Kinds of video in cricket");
+    expect(names(p)).toEqual(["MKBHD", "Stories", "Trending News · Live", "cricket"]);
+  });
+
+  test("without Shorts, with live streams too, or everything: the name and the link say so", () => {
+    const existing = normalizeConfig({ youtubeKey: "k", catalogs: [{ channel: CHANNEL, name: "MKBHD" }] });
+    const p = loadPage({ existing });
+    add(p, "cricket");
+    toggle(p, 1, "shorts");
+    toggle(p, 0, "live");
+    expect(names(p)).toEqual(["MKBHD · Videos & live", "cricket · Videos & live"]);
+    toggle(p, 0, "shorts");
+    expect(names(p)[0]).toBe("MKBHD · Everything");
+    const summary = [...p.document.querySelectorAll("#summary-list .summary-row")].find((row) => row.querySelector(".s-name").textContent === "Catalogs");
+    expect(summary.querySelector(".s-value").textContent).toBe("2 rows: MKBHD · Everything, cricket · Videos & live");
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([
+      { channel: CHANNEL, name: "MKBHD", types: ["videos", "shorts", "live"] },
+      { q: "cricket", types: ["videos", "live"] }
+    ]);
+    expect(p.generated().catalogs.map((c) => c.name)).toEqual(names(p));
+  });
+
+  test("a search of Shorts alone has no length to choose: it asks for under four minutes", () => {
+    const p = loadPage({ existing: normalizeConfig({ youtubeKey: "k" }) });
+    add(p, "cricket");
+    const length = () => p.document.querySelectorAll("#catalog-list .cat-opts select")[1];
+    pick(p, length(), "long");
+    expect(names(p)).toEqual(["cricket · Over 20 min"]);
+    toggle(p, 0, "videos");
+    toggle(p, 0, "live");
+    expect(ticked(p, 0)).toEqual(["shorts"]);
+    expect(length().hidden).toBe(true);
+    expect(length().value).toBe("any");
+    expect(names(p)).toEqual(["cricket · Shorts"]);
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([{ q: "cricket", types: ["shorts"] }]);
+    toggle(p, 0, "videos");
+    expect(length().hidden).toBe(false);
+    expect(names(p)).toEqual(["cricket · Videos & Shorts"]);
+    // Opened again, a row of Shorts alone shows no length.
+    const again = loadPage({ existing: normalizeConfig({ youtubeKey: "k", catalogs: [{ q: "cricket", types: ["shorts"] }] }) });
+    expect(again.document.querySelectorAll("#catalog-list .cat-opts select")[1].hidden).toBe(true);
+  });
+
+  test("the last kind stays ticked, and kinds that would repeat another row are put back", () => {
+    const p = loadPage();
+    add(p, "news");
+    toggle(p, 0, "videos");
+    toggle(p, 0, "shorts");
+    expect(ticked(p, 0)).toEqual(["live"]);
+    toggle(p, 0, "live");
+    expect(ticked(p, 0)).toEqual(["live"]);
+    expect(note(p)).toBe("A row lists at least one kind of video.");
+    add(p, "news");
+    expect(names(p)).toEqual(["news · Live", "news"]);
+    toggle(p, 1, "videos");
+    toggle(p, 1, "shorts");
+    expect(ticked(p, 1)).toEqual(["shorts", "live"]);
+    expect(note(p)).toBe("You already have that catalog.");
+    toggle(p, 1, "shorts");
+    expect(ticked(p, 1)).toEqual(["shorts", "live"]);
+    expect(note(p)).toBe("You already have that catalog.");
+    toggle(p, 1, "live");
+    expect(ticked(p, 1)).toEqual(["shorts"]);
+    expect(note(p)).toBe("");
+    expect(names(p)).toEqual(["news · Live", "news · Shorts"]);
   });
 
   test("at most twenty catalogs", () => {
@@ -969,8 +1058,8 @@ describe("editing an installed addon", () => {
   test("every setting changed, YouTube's too, is shown as saved and comes back as the very same link", async () => {
     const fetch = lookups((body) =>
       body.kind === "channel"
-        ? { entry: { kind: "channel", id: `channel.${CHANNEL}.videos`, name: "Marques Brownlee", title: "Marques Brownlee", channel: CHANNEL, show: "videos", sort: "date" } }
-        : { entry: { kind: "playlist", id: "playlist.PLBCF2DAC6FFB574DE", name: "Stories", title: "Stories", playlist: "PLBCF2DAC6FFB574DE" } }
+        ? { entry: normalizeEntry({ channel: CHANNEL, name: "Marques Brownlee" }) }
+        : { entry: normalizeEntry({ playlist: "PLBCF2DAC6FFB574DE", name: "Stories" }) }
     );
     const first = loadPage({ fetch });
     first.set("youtube-key", "AIzaReaderKey_4");
@@ -1008,8 +1097,9 @@ describe("editing an installed addon", () => {
     const selects = (p, row) => p.document.querySelectorAll("#catalog-list .cat-row")[row].querySelectorAll(".cat-opts select");
     pick(first, selects(first, 0)[0], "date");
     pick(first, selects(first, 0)[2], "week");
-    pick(first, selects(first, 1)[0], "shorts");
-    pick(first, selects(first, 1)[1], "viewCount");
+    toggle(first, 1, "shorts");
+    toggle(first, 1, "videos");
+    pick(first, selects(first, 1)[0], "viewCount");
     first.click(first.document.querySelectorAll("#catalog-list .cat-up")[3]);
     first.submit();
     await flush();
@@ -1022,7 +1112,7 @@ describe("editing an installed addon", () => {
       safeSearch: "strict",
       catalogs: [
         { q: "lofi hip hop", sort: "date", within: "week" },
-        { channel: CHANNEL, name: "Marques Brownlee", show: "shorts", sort: "viewCount" },
+        { channel: CHANNEL, name: "Marques Brownlee", types: ["shorts"], sort: "viewCount" },
         { trending: "music" },
         { playlist: "PLBCF2DAC6FFB574DE", name: "Stories" }
       ],
@@ -1044,7 +1134,8 @@ describe("editing an installed addon", () => {
     expect(again.$("#safe-search").value).toBe("strict");
     expect([again.$("#refresh-value").value, again.$("#refresh-unit").value]).toEqual(["1.5", "d"]);
     expect(names(again)).toEqual(names(first));
-    expect([...selects(again, 1)].map((select) => select.value)).toEqual(["shorts", "viewCount"]);
+    expect([...selects(again, 1)].map((select) => select.value)).toEqual(["viewCount"]);
+    expect(ticked(again, 1)).toEqual(["shorts"]);
     again.submit();
     await flush();
     expect(again.error()).toBeNull();

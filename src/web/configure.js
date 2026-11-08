@@ -331,47 +331,67 @@ module.exports = function start(window, hooks = {}) {
   // The server hands over every catalog normalized, so its choices are always in their lists.
   const choice = (list, id) => list.find((item) => item.id === id);
 
+  // The kinds of video a row can keep to: every kind, unless it is a
+  // channel's row, whose usual is its videos.
+  const ALL_TYPES = YT.types.map((type) => type.id);
+  const usualTypes = (entry) => (entry.kind === "channel" ? YT.channelTypes : ALL_TYPES);
+  const sameTypes = (a, b) => a.length === b.length && a.every((id, i) => id === b[i]);
+  const onlyShorts = (types) => types.length === 1 && types[0] === "shorts";
+
+  // The kinds in a row's name, as the server says them: nothing when they
+  // are the row's usual, "Everything" for a channel's every kind.
+  function typesName(entry) {
+    if (sameTypes(entry.types, usualTypes(entry))) return "";
+    if (entry.types.length === ALL_TYPES.length) return "Everything";
+    return YT.types
+      .filter((type) => entry.types.indexOf(type.id) !== -1)
+      .map((type, i) => (i ? type.inner : type.short))
+      .join(" & ");
+  }
+
   // What a row is called: the names the server gives catalogs.
   function catalogName(entry) {
+    let parts;
     if (entry.kind === "search") {
-      return [entry.q, choice(YT.sorts, entry.sort).short, choice(YT.lengths, entry.length).short, choice(YT.periods, entry.within).short]
-        .filter(Boolean)
-        .join(" · ");
+      parts = [entry.q, choice(YT.sorts, entry.sort).short, choice(YT.lengths, entry.length).short, choice(YT.periods, entry.within).short, typesName(entry)];
+    } else if (entry.kind === "channel") {
+      parts = [entry.title, typesName(entry), choice(YT.channelSorts, entry.sort).short];
+    } else if (entry.kind === "playlist") {
+      parts = [entry.title, typesName(entry)];
+    } else {
+      parts = [choice(YT.trending, entry.trending).label, typesName(entry)];
     }
-    if (entry.kind === "channel") {
-      return [entry.title, choice(YT.shows, entry.show).short, choice(YT.channelSorts, entry.sort).short].filter(Boolean).join(" · ");
-    }
-    if (entry.kind === "playlist") return entry.title;
-    return choice(YT.trending, entry.trending).label;
+    return parts.filter(Boolean).join(" · ");
   }
 
   // Two rows that would list the same videos.
   function sameCatalog(a, b) {
-    if (a.kind !== b.kind) return false;
+    if (a.kind !== b.kind || !sameTypes(a.types, b.types)) return false;
     if (a.kind === "search") {
       return a.q.toLowerCase() === b.q.toLowerCase() && a.sort === b.sort && a.length === b.length && a.within === b.within;
     }
-    if (a.kind === "channel") return a.channel === b.channel && a.show === b.show && a.sort === b.sort;
+    if (a.kind === "channel") return a.channel === b.channel && a.sort === b.sort;
     if (a.kind === "playlist") return a.playlist === b.playlist;
     return a.trending === b.trending;
   }
 
   function storedSource(entry) {
+    let stored;
     if (entry.kind === "search") {
-      const search = { q: entry.q };
-      if (entry.sort !== "relevance") search.sort = entry.sort;
-      if (entry.length !== "any") search.length = entry.length;
-      if (entry.within !== "any") search.within = entry.within;
-      return search;
+      stored = { q: entry.q };
+      if (entry.sort !== "relevance") stored.sort = entry.sort;
+      if (entry.length !== "any") stored.length = entry.length;
+      if (entry.within !== "any") stored.within = entry.within;
+    } else if (entry.kind === "channel") {
+      stored = { channel: entry.channel, name: entry.title };
+    } else if (entry.kind === "playlist") {
+      stored = { playlist: entry.playlist, name: entry.title };
+    } else {
+      stored = { trending: entry.trending };
     }
-    if (entry.kind === "channel") {
-      const channel = { channel: entry.channel, name: entry.title };
-      if (entry.show !== "videos") channel.show = entry.show;
-      if (entry.sort !== "date") channel.sort = entry.sort;
-      return channel;
-    }
-    if (entry.kind === "playlist") return { playlist: entry.playlist, name: entry.title };
-    return { trending: entry.trending };
+    if (!sameTypes(entry.types, usualTypes(entry))) stored.types = entry.types;
+    if (entry.kind === "channel" && entry.sort !== "date") stored.sort = entry.sort;
+    return stored;
   }
 
   // The compact form the install link carries, defaults left out, and the
@@ -448,6 +468,53 @@ module.exports = function start(window, hooks = {}) {
     return words;
   }
 
+  // The kinds of video a row lists, any of them but at least one. Shorts
+  // alone are searched for as videos under four minutes, so a search row of
+  // them has no length to choose. The row is read and written in CATALOGS
+  // by its index, as its other options replace its object there.
+  function typeControls(index, title, nameEl, lengthSelect) {
+    const box = node("div", "cat-types");
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", "Kinds of video in " + title);
+    function sync(entry) {
+      if (lengthSelect) lengthSelect.hidden = onlyShorts(entry.types);
+    }
+    YT.types.forEach((type) => {
+      const toggle = node("label", "type-toggle");
+      const check = node("input");
+      check.type = "checkbox";
+      check.value = type.id;
+      check.checked = CATALOGS[index].types.indexOf(type.id) !== -1;
+      check.addEventListener("change", () => {
+        const entry = CATALOGS[index];
+        const types = ALL_TYPES.filter((id) => (id === type.id ? check.checked : entry.types.indexOf(id) !== -1));
+        if (!types.length) {
+          check.checked = true;
+          return note("A row lists at least one kind of video.", true);
+        }
+        const changed = { ...entry, types };
+        if (changed.kind === "search" && onlyShorts(types)) changed.length = "any";
+        if (CATALOGS.some((other, i) => i !== index && sameCatalog(other, changed))) {
+          check.checked = !check.checked;
+          return note("You already have that catalog.", true);
+        }
+        CATALOGS[index] = changed;
+        if (lengthSelect) lengthSelect.value = changed.length;
+        nameEl.textContent = catalogName(changed);
+        sync(changed);
+        note("");
+        renderQuota();
+      });
+      // Named as YouTube's own tabs name them: Videos, Shorts, Live.
+      check.setAttribute("aria-label", type.label);
+      toggle.appendChild(check);
+      toggle.appendChild(node("span", "", type.short));
+      box.appendChild(toggle);
+    });
+    sync(CATALOGS[index]);
+    return box;
+  }
+
   // Under a catalog: keep only, or leave out, the videos that mention words
   // in their title and channel name, and in their description unless asked
   // not to look there. Changing a catalog's other options replaces its
@@ -499,14 +566,16 @@ module.exports = function start(window, hooks = {}) {
       main.appendChild(label);
       const opts = node("div", "cat-opts");
       const addOption = (list, field, what) => {
-        opts.appendChild(optionSelect(list, entry[field], what, (select) => changeCatalog(index, field, select, name)));
+        const select = optionSelect(list, entry[field], what, (changed) => changeCatalog(index, field, changed, name));
+        opts.appendChild(select);
+        return select;
       };
+      let lengthSelect = null;
       if (entry.kind === "search") {
         addOption(YT.sorts, "sort", "Order of " + title);
-        addOption(YT.lengths, "length", "Length of videos in " + title);
+        lengthSelect = addOption(YT.lengths, "length", "Length of videos in " + title);
         addOption(YT.periods, "within", "Upload date of videos in " + title);
       } else if (entry.kind === "channel") {
-        addOption(YT.shows, "show", "What to list from " + title);
         addOption(YT.channelSorts, "sort", "Order of " + title);
       }
       if (opts.childNodes.length) main.appendChild(opts);
@@ -528,6 +597,7 @@ module.exports = function start(window, hooks = {}) {
         })
       );
       row.appendChild(btns);
+      row.appendChild(typeControls(index, title, name, lengthSelect));
       row.appendChild(filterControls(index, title));
       catalogList.appendChild(row);
     });
@@ -541,7 +611,7 @@ module.exports = function start(window, hooks = {}) {
     trendingChips.textContent = "";
     YT.trending.forEach((chart) => {
       if (CATALOGS.some((entry) => entry.kind === "trending" && entry.trending === chart.id)) return;
-      trendingChips.appendChild(smallButton("+ " + chart.chip, "", "Add " + chart.label, () => addCatalog({ kind: "trending", trending: chart.id })));
+      trendingChips.appendChild(smallButton("+ " + chart.chip, "", "Add " + chart.label, () => addCatalog({ kind: "trending", trending: chart.id, types: ALL_TYPES })));
     });
     if (!trendingChips.childNodes.length) trendingChips.appendChild(node("div", "cat-empty", "Every Trending row is added."));
   }
@@ -557,7 +627,7 @@ module.exports = function start(window, hooks = {}) {
 
   function addSearch(q) {
     if (q.length > YT.maxQuery) return note("A search can be at most " + YT.maxQuery + " characters long.", true);
-    addCatalog({ kind: "search", q, sort: "relevance", length: "any", within: "any" });
+    addCatalog({ kind: "search", q, sort: "relevance", length: "any", within: "any", types: ALL_TYPES });
   }
 
   // The add row asks for what the chosen source needs.
@@ -657,17 +727,18 @@ module.exports = function start(window, hooks = {}) {
 
   function renderSummary() {
     const playing = pbOn().map((row) => row.querySelector("strong").textContent);
+    // In the order of the tabs: Streams, Playback, Catalogs.
     const rows = [
       ["Looks for", lookingFor(), "streams"],
+      ["Country and language", shown(regionSelect) + " · " + shown($("audio-language")), "streams"],
+      ["When you press play", playing.length ? playing.join(", then ") : "Nothing chosen yet", "playback"],
+      ["Stream format", shown(presetSelect), "playback"],
       ["YouTube search in your app", ytSearch.checked ? ["On", shown(searchSort), shown(searchLength)].join(" · ") : "Off", "catalogs"],
       [
         "Catalogs",
         CATALOGS.length ? CATALOGS.length + (CATALOGS.length === 1 ? " row: " : " rows: ") + CATALOGS.map(catalogName).join(", ") : "None yet",
         "catalogs"
-      ],
-      ["When you press play", playing.length ? playing.join(", then ") : "Nothing chosen yet", "playback"],
-      ["Stream text", shown(presetSelect), "playback"],
-      ["Country and language", shown(regionSelect) + " · " + shown($("audio-language")), "streams"]
+      ]
     ];
     summaryList.textContent = "";
     rows.forEach(([name, value, tab]) => {

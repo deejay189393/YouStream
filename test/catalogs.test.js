@@ -22,7 +22,13 @@ const {
   MAX_FILTER_WORDS,
   MAX_FILTER_WORD_LENGTH,
   filterWords,
-  toStoredEntry
+  toStoredEntry,
+  VIDEO_TYPES,
+  ALL_TYPES,
+  CHANNEL_TYPES,
+  typesOf,
+  onlyShorts,
+  everyType
 } = require("../src/catalogs");
 
 const CHANNEL = "UCBJycsmduvYEL83R_U4JriQ";
@@ -38,6 +44,7 @@ describe("a search catalog", () => {
       sort: "relevance",
       length: "any",
       within: "any",
+      types: ["videos", "shorts", "live"],
       filter: null
     });
   });
@@ -91,7 +98,7 @@ describe("a channel catalog", () => {
       name: "Marques Brownlee",
       title: "Marques Brownlee",
       channel: CHANNEL,
-      show: "videos",
+      types: ["videos"],
       sort: "date",
       filter: null
     });
@@ -111,7 +118,7 @@ describe("a channel catalog", () => {
     expect(normalizeEntry({ channel: CHANNEL, name: "MKBHD", show: "shorts" })).toMatchObject({ id: `channel.${CHANNEL}.shorts`, name: "MKBHD · Shorts" });
     expect(normalizeEntry({ channel: CHANNEL, name: "MKBHD", show: "live" }).name).toBe("MKBHD · Live");
     expect(normalizeEntry({ channel: CHANNEL, name: "MKBHD", show: "all" }).name).toBe("MKBHD · Everything");
-    expect(normalizeEntry({ channel: CHANNEL, name: "MKBHD", show: "podcasts" }).show).toBe("videos");
+    expect(normalizeEntry({ channel: CHANNEL, name: "MKBHD", show: "podcasts" }).types).toEqual(["videos"]);
   });
 
   test("without a name it is still a row", () => {
@@ -131,6 +138,7 @@ describe("a playlist catalog", () => {
       name: "Google Search Stories",
       title: "Google Search Stories",
       playlist: PLAYLIST,
+      types: ["videos", "shorts", "live"],
       filter: null
     });
     expect(normalizeEntry({ playlist: PLAYLIST }).name).toBe("YouTube playlist");
@@ -202,7 +210,14 @@ describe("a catalog's keyword filter", () => {
 
 describe("a Trending catalog", () => {
   test("all of it, or one category", () => {
-    expect(normalizeEntry({ trending: "all" })).toEqual({ kind: "trending", id: "trending.all", name: "Trending", trending: "all", filter: null });
+    expect(normalizeEntry({ trending: "all" })).toEqual({
+      kind: "trending",
+      id: "trending.all",
+      name: "Trending",
+      trending: "all",
+      types: ["videos", "shorts", "live"],
+      filter: null
+    });
     expect(normalizeEntry({ trending: "music" }).name).toBe("Trending Music");
     expect(normalizeEntry({ trending: "podcasts" })).toBeNull();
   });
@@ -262,13 +277,110 @@ test("the stored form leaves every default out", () => {
     { q: "lofi" },
     { q: "news", sort: "date", length: "long", within: "day" },
     { channel: CHANNEL, name: "MKBHD" },
-    { channel: CHANNEL, name: "MKBHD", show: "live" },
+    { channel: CHANNEL, name: "MKBHD", types: ["live"] },
     { channel: CHANNEL, name: "MKBHD", sort: "viewCount" },
-    { channel: CHANNEL, name: "MKBHD", show: "all" },
+    { channel: CHANNEL, name: "MKBHD", types: ["videos", "shorts", "live"] },
     { playlist: PLAYLIST, name: "Stories" },
     { trending: "gaming" }
   ]);
   expect(normalizeCatalogs(toStoredCatalogs(entries))).toEqual(entries);
+});
+
+describe("a catalog's kinds of video", () => {
+  test("videos, Shorts and live streams, each told by a format of youtube.js", () => {
+    expect(VIDEO_TYPES.map((t) => [t.id, t.label, t.format])).toEqual([
+      ["videos", "Videos", "video"],
+      ["shorts", "Shorts", "short"],
+      ["live", "Live streams", "stream"]
+    ]);
+    expect(ALL_TYPES).toEqual(["videos", "shorts", "live"]);
+    expect(CHANNEL_TYPES).toEqual(["videos"]);
+  });
+
+  test("every kind unless chosen, and a channel's videos alone, as rows have always been", () => {
+    for (const raw of [{ q: "lofi" }, { playlist: PLAYLIST }, { trending: "all" }]) expect(normalizeEntry(raw).types).toEqual(ALL_TYPES);
+    expect(normalizeEntry({ channel: CHANNEL }).types).toEqual(["videos"]);
+  });
+
+  test("named in a list or a comma-separated line, in their own order, the unknown left out", () => {
+    expect(typesOf(["live", "videos"], ALL_TYPES)).toEqual(["videos", "live"]);
+    expect(typesOf(" shorts , live ", ALL_TYPES)).toEqual(["shorts", "live"]);
+    expect(typesOf(["podcasts"], ALL_TYPES)).toBe(ALL_TYPES);
+    expect(typesOf(5, CHANNEL_TYPES)).toBe(CHANNEL_TYPES);
+    expect(typesOf([], CHANNEL_TYPES)).toBe(CHANNEL_TYPES);
+    expect(onlyShorts(["shorts"])).toBe(true);
+    expect(onlyShorts(["videos", "shorts"])).toBe(false);
+    expect(everyType(ALL_TYPES)).toBe(true);
+    expect(everyType(["videos", "live"])).toBe(false);
+  });
+
+  test("said in a row's name when they are not its usual", () => {
+    expect(normalizeEntry({ q: "cricket", types: ["videos", "live"] }).name).toBe("cricket · Videos & live");
+    expect(normalizeEntry({ q: "cricket", sort: "date", types: ["videos"] }).name).toBe("cricket · Newest · Videos");
+    expect(normalizeEntry({ playlist: PLAYLIST, name: "Stories", types: ["videos", "shorts"] }).name).toBe("Stories · Videos & Shorts");
+    expect(normalizeEntry({ trending: "music", types: ["shorts", "live"] }).name).toBe("Trending Music · Shorts & live");
+    expect(normalizeEntry({ trending: "music", types: ["live"] }).name).toBe("Trending Music · Live");
+    expect(normalizeEntry({ channel: CHANNEL, name: "MKBHD", types: ["videos", "live"], sort: "viewCount" }).name).toBe(
+      "MKBHD · Videos & live · Most viewed"
+    );
+    expect(normalizeEntry({ channel: CHANNEL, name: "MKBHD", types: ALL_TYPES }).name).toBe("MKBHD · Everything");
+    expect(normalizeEntry({ q: "cricket", types: ALL_TYPES }).name).toBe("cricket");
+  });
+
+  test("a row of every kind keeps the id it had before kinds; another kind is another row", () => {
+    const every = normalizeEntry({ q: "cricket highlights", sort: "date" });
+    expect(normalizeEntry({ q: "cricket highlights", sort: "date", types: ALL_TYPES }).id).toBe(every.id);
+    expect(every.id).toBe("search.cricket-highlights.d572f4de");
+    const some = normalizeEntry({ q: "cricket highlights", sort: "date", types: ["videos", "live"] }).id;
+    expect(some).toMatch(/^search\.cricket-highlights\.[0-9a-f]{8}$/);
+    expect(some).not.toBe(every.id);
+    expect(normalizeEntry({ playlist: PLAYLIST, types: ["shorts"] }).id).toBe(`playlist.${PLAYLIST}.shorts`);
+    expect(normalizeEntry({ trending: "all", types: ["videos", "live"] }).id).toBe("trending.all.videos-live");
+    expect(normalizeEntry({ channel: CHANNEL, types: ["videos", "live"] }).id).toBe(`channel.${CHANNEL}.videos-live`);
+  });
+
+  test("a channel row stored as the one list it read is the same row, kept as its kinds", () => {
+    for (const [show, types] of [
+      ["videos", ["videos"]],
+      ["shorts", ["shorts"]],
+      ["live", ["live"]],
+      ["all", ALL_TYPES]
+    ]) {
+      const old = normalizeEntry({ channel: CHANNEL, name: "N", show });
+      const now = normalizeEntry({ channel: CHANNEL, name: "N", types });
+      expect(old).toEqual(now);
+      expect(old.id).toBe(`channel.${CHANNEL}.${show}`);
+    }
+    // Kinds stored win over the list it read.
+    expect(normalizeEntry({ channel: CHANNEL, show: "shorts", types: ["live"] }).types).toEqual(["live"]);
+  });
+
+  test("a search of Shorts alone has no length of its own: it asks for under four minutes", () => {
+    const entry = normalizeEntry({ q: "cricket", length: "long", types: ["shorts"] });
+    expect(entry).toMatchObject({ length: "any", types: ["shorts"], name: "cricket · Shorts" });
+    expect(normalizeEntry({ q: "cricket", types: ["shorts"] }).id).toBe(entry.id);
+    expect(toStoredEntry(entry)).toEqual({ q: "cricket", types: ["shorts"] });
+    expect(normalizeEntry({ q: "cricket", length: "long", types: ["videos", "shorts"] }).length).toBe("long");
+  });
+
+  test("stored only when they are not the row's usual", () => {
+    const entries = normalizeCatalogs([
+      { q: "a", types: ["videos", "live"] },
+      { channel: CHANNEL, name: "N", types: ["shorts", "live"], sort: "viewCount" },
+      { playlist: PLAYLIST, name: "P", types: ["videos"] },
+      { trending: "news", types: ["live"] },
+      { q: "b", types: ALL_TYPES }
+    ]);
+    expect(toStoredCatalogs(entries)).toEqual([
+      { q: "a", types: ["videos", "live"] },
+      { channel: CHANNEL, name: "N", types: ["shorts", "live"], sort: "viewCount" },
+      { playlist: PLAYLIST, name: "P", types: ["videos"] },
+      { trending: "news", types: ["live"] },
+      { q: "b" }
+    ]);
+    expect(normalizeCatalogs(toStoredCatalogs(entries))).toEqual(entries);
+    expect(normalizeCatalogs(entries)).toEqual(entries);
+  });
 });
 
 describe("parseSourceLink", () => {
@@ -350,11 +462,11 @@ test("the choices offered are YouTube's own", () => {
   expect(SORTS.map((s) => s.id)).toEqual(["relevance", "date", "viewCount", "rating"]);
   expect(LENGTHS.map((l) => l.id)).toEqual(["any", "short", "medium", "long"]);
   expect(PERIODS.map((p) => p.id)).toEqual(["any", "day", "week", "month", "year"]);
-  expect(CHANNEL_SHOWS.map((c) => [c.id, c.playlist])).toEqual([
-    ["videos", "UULF"],
-    ["shorts", "UUSH"],
-    ["live", "UULV"],
-    ["all", "UU"]
+  expect(CHANNEL_SHOWS.map((c) => [c.id, c.playlist, c.popular])).toEqual([
+    ["videos", "UULF", "UULP"],
+    ["shorts", "UUSH", "UUPS"],
+    ["live", "UULV", "UUPV"],
+    ["all", "UU", "PU"]
   ]);
 });
 

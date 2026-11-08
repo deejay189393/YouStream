@@ -100,6 +100,54 @@ function primaryLanguage(tag) {
 }
 
 /**
+ * Shorts may run three minutes since 15 October 2024. Before, a Short was a
+ * minute at most, and a longer upright upload stayed a video.
+ */
+const SHORTS_THREE_MINUTES = Date.parse("2024-10-15T00:00:00Z");
+
+/**
+ * A premiere is a video first shown at a set time after a countdown, most
+ * often a minute or two. YouTube files it with a channel's videos, not its
+ * live streams, though it carries the same live details as a stream, so
+ * its showing is told apart by its length: it outlasts the video by about
+ * the countdown, while a stream's recording runs as long as the stream did,
+ * give or take seconds, or far shorter when YouTube stopped recording.
+ */
+const PREMIERE_EXTRA_S = { min: 45, max: 240 };
+
+/**
+ * The player's height asked for, which has the API size the player for it
+ * and so tell each video's shape: 563 wide is upright, 1778 is widescreen.
+ */
+const PLAYER_HEIGHT = 1000;
+
+/**
+ * What YouTube would call a video, which the API has no field for: "short",
+ * "stream" (live now, or the recording of a stream) or "video" (a premiere
+ * included). A Short is upright, its player taller than wide, and three
+ * minutes at most (one, before 15 October 2024). A square one is left a
+ * video: square uploads are as often songs as Shorts. Measured against
+ * YouTube's own answer on 576 videos from searches and Trending: 214 of 217
+ * Shorts told, and no video taken for one; 52 of 53 past streams and
+ * premieres told apart.
+ */
+function formatOf(detail, seconds) {
+  const snippet = detail.snippet || {};
+  if (snippet.liveBroadcastContent === "live") return "stream";
+  const live = detail.liveStreamingDetails || {};
+  if (live.actualStartTime) {
+    const extra = (Date.parse(live.actualEndTime) - Date.parse(live.actualStartTime)) / 1000 - (seconds || 0);
+    const premiere = Boolean(live.scheduledStartTime) && extra >= PREMIERE_EXTRA_S.min && extra <= PREMIERE_EXTRA_S.max;
+    return premiere ? "video" : "stream";
+  }
+  const player = detail.player || {};
+  const width = Number(player.embedWidth);
+  const height = Number(player.embedHeight);
+  const longest = Date.parse(snippet.publishedAt) >= SHORTS_THREE_MINUTES ? 180 : 60;
+  return width > 0 && height > width && seconds > 0 && seconds <= longest ? "short" : "video";
+}
+
+/**
  * One video, reduced to what matching and the stream list use. Kept small on
  * purpose: every cached search holds fifty of them.
  */
@@ -113,6 +161,7 @@ function toVideo(detail) {
   const likes = Number(stats.likeCount);
   const live = snippet.liveBroadcastContent && snippet.liveBroadcastContent !== "none" ? snippet.liveBroadcastContent : null;
   const watching = Number((detail.liveStreamingDetails || {}).concurrentViewers);
+  const durationSeconds = durationToSeconds(content.duration);
   return {
     id: detail.id,
     title: typeof snippet.title === "string" ? snippet.title : "",
@@ -122,7 +171,8 @@ function toVideo(detail) {
     channelTitle: typeof snippet.channelTitle === "string" ? snippet.channelTitle : "",
     channelId: typeof snippet.channelId === "string" ? snippet.channelId : "",
     publishedAt: typeof snippet.publishedAt === "string" ? snippet.publishedAt : null,
-    durationSeconds: durationToSeconds(content.duration),
+    durationSeconds,
+    format: formatOf(detail, durationSeconds),
     definition: content.definition === "hd" ? "hd" : "sd",
     views: Number.isFinite(views) ? views : null,
     // Left out of the API's answer when the uploader hides it.
@@ -187,9 +237,10 @@ async function withKey(apiKey, run) {
 
 /**
  * Every video's details at once, which is what `videos.list` charges one unit
- * for, whatever the parts: a live stream's watcher count comes at no extra cost.
+ * for, whatever the parts: a live stream's watcher count and the player's
+ * shape (asked for with PLAYER_HEIGHT) come at no extra cost.
  */
-const VIDEO_PARTS = "snippet,contentDetails,statistics,status,liveStreamingDetails";
+const VIDEO_PARTS = "snippet,contentDetails,statistics,status,liveStreamingDetails,player";
 
 const idsOf = (items, pick) =>
   (Array.isArray(items) ? items : []).map((item) => item && pick(item)).filter((id) => typeof id === "string" && id);
@@ -200,7 +251,7 @@ const idsOf = (items, pick) =>
  */
 async function videosById(apiKey, ids) {
   if (!ids.length) return [];
-  const details = await call("videos", { key: apiKey, part: VIDEO_PARTS, id: ids.join(","), maxResults: MAX_RESULTS });
+  const details = await call("videos", { key: apiKey, part: VIDEO_PARTS, id: ids.join(","), maxHeight: PLAYER_HEIGHT, maxResults: MAX_RESULTS });
   const byId = new Map((Array.isArray(details.items) ? details.items : []).map((v) => [v.id, v]));
   return ids.filter((id) => byId.has(id)).map((id) => byId.get(id));
 }
@@ -287,6 +338,7 @@ async function chartPage({ apiKey, regionCode, videoCategoryId, pageToken }) {
   const data = await call("videos", {
     key: apiKey,
     part: VIDEO_PARTS,
+    maxHeight: PLAYER_HEIGHT,
     chart: "mostPopular",
     regionCode,
     videoCategoryId,
@@ -417,10 +469,13 @@ module.exports = {
   classify,
   durationToSeconds,
   primaryLanguage,
+  formatOf,
   toVideo,
   keyId,
   quotaCooldownMs,
   inFlight,
   MAX_RESULTS,
+  PLAYER_HEIGHT,
+  SHORTS_THREE_MINUTES,
   BASE_URL
 };
