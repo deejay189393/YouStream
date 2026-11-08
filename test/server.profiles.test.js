@@ -189,7 +189,7 @@ describe("importing a file", () => {
 
 describe("an install link, in the apps", () => {
   test("its manifest is the profile's, with no settings in its address", async () => {
-    const { segment } = await withProfile({ youtubeKey: "AIzaSyPROFILEKEY", types: ["movie"] });
+    const { segment } = await withProfile({ youtubeKey: "AIzaSyPROFILEKEY", types: ["movie"], anime: false });
     const res = await request(app).get(`/${segment}/manifest.json`).set("Origin", "https://aiostreams.example");
     expect(res.status).toBe(200);
     expect(res.headers["access-control-allow-origin"]).toBe("*");
@@ -212,9 +212,9 @@ describe("an install link, in the apps", () => {
   });
 
   test("a save reaches the apps at once: no reinstall", async () => {
-    const { b, segment } = await withProfile({ youtubeKey: "AIzaSyPROFILEKEY", types: ["movie"] });
+    const { b, segment } = await withProfile({ youtubeKey: "AIzaSyPROFILEKEY", types: ["movie"], anime: false });
     expect((await request(app).get(`/${segment}/manifest.json`)).body.types).not.toContain("series");
-    const saved = await b.put("/api/profile").send({ config: { youtubeKey: "AIzaSyPROFILEKEY", types: ["series"] } });
+    const saved = await b.put("/api/profile").send({ config: { youtubeKey: "AIzaSyPROFILEKEY", types: ["series"], anime: false } });
     expect(saved.body).toEqual({ saved: true, manifestChanged: true });
     const now = (await request(app).get(`/${segment}/manifest.json`)).body.types;
     expect(now).toContain("series");

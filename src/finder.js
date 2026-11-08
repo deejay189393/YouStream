@@ -67,11 +67,12 @@ function isBlocked(video, legal = hostConfig.legal) {
 async function findVideos(rawId, settings) {
   const parsed = parseStreamId(rawId);
   if (!parsed) return { status: "unsupported id" };
-  if (!settings.types.includes(contentKind(parsed))) return { status: "type switched off", parsed };
+  const kind = contentKind(parsed);
+  if (kind === "anime" ? !settings.anime : !settings.types.includes(kind)) return { status: "type switched off", parsed };
 
   let title;
   try {
-    title = await resolveTitle(parsed, { tmdbKey: effectiveTmdbKey(settings), region: settings.region });
+    title = await resolveTitle(parsed, { tmdbKey: effectiveTmdbKey(settings), region: settings.region, animeSource: settings.animeSource });
   } catch (err) {
     return { status: "title lookup failed", parsed, error: { kind: err.kind, message: err.message } };
   }

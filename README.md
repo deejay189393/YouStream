@@ -32,7 +32,7 @@ downloaded, proxied or re-hosted.
 
 ```
 tt…:1:3                                         the id the app asks about
-  -> the show, S1 E3, the episode's name,      metadata: Cinemeta, IMDb, TheTVDB, TMDB, Kitsu
+  -> the show, S1 E3, the episode's name,      metadata: Cinemeta, IMDb, TheTVDB, TMDB; Kitsu, AniList and the anime offline database
      runs ~43 min, cast, IMDb id
   -> "<show> season 1 episode 3"               one YouTube search, long videos only
   -> 50 results, each judged                   length, name, episode, exclusions
@@ -40,7 +40,9 @@ tt…:1:3                                         the id the app asks about
 ```
 
 1. **Read the id.** `tt…` (IMDb), `tmdb:…` (Nuvio uses these for some titles)
-   and `kitsu:…` (anime), for films and for `:season:episode` episodes.
+   and, for anime, `kitsu:…`, `mal:…` (MyAnimeList), `anilist:…` and
+   `anidb:…`, for films and for `:season:episode` episodes (an anime's
+   `:episode`, numbered within its season). See [Anime](#anime).
 2. **Learn what it is**: the name, the year, the runtime, the cast and
    director, the IMDb id and, for an episode, its name, its air date and its
    number across the whole show.
@@ -171,6 +173,61 @@ What the sample taught, in order of how much it mattered:
   upload Japanese. So
   a language the title declares is trusted over the field, and a language
   named before "Sub" is read as subtitles, not audio.
+
+## Anime
+
+Anime is looked for when **Anime** is on, in Streams, under Look for. It is
+on for every setup that looks for films or series, as anime always came with
+them, and has had a switch of its own since 0.14.0.
+
+**Ids.** Apps and addons name an anime by its id on one of the anime
+databases: `kitsu:`, `mal:` (MyAnimeList), `anilist:` or `anidb:`. Each is an
+entry for one season, with `:3` for its third episode. All four are read,
+and claimed in the manifest only while Anime is on.
+
+**Names.** Official uploads name an anime in English, and an English name
+one site lists another often lacks. With **Anime names from: Automatic**,
+the default, YouStream asks every source, none of which needs a key:
+
+- **the anime offline database**, a free database of some 38,000 anime with
+  each one's id on every site and every name those sites know it by. A
+  fork keeps it current every week, and it is loaded weekly, kept in
+  memory (about 29 MB). `ANIME_DATASET=off` leaves it out;
+- **Kitsu**, for its names, and for an episode's own title and length;
+- **AniList**, for an English name when Kitsu has none, by AniList or
+  MyAnimeList id. It is asked only then, as it answers a limited number of
+  requests a minute, and the database already holds its other names.
+
+The database maps any of the four ids to the others, so each source can be
+asked. The name searched for is the English one, in the short form uploads
+write: the part before a colon, when that is a name of its own, as light
+novels' adaptations carry their whole subtitle in their English titles.
+Without an English name anywhere, it is the database's own title. All the
+names count when an upload is matched, except names under four letters from
+AniList and the database: abbreviations that any title may happen to
+contain. **Kitsu alone** asks Kitsu only, as anime were looked up before,
+and needs the database to read any id but Kitsu's.
+
+Measured on the latest 600 uploads of two official anime channels, of which
+253 were episodes matched to their anime by the database's names and
+numbered the way the matcher reads them:
+
+| Anime names from | Named and numbered |
+|---|---|
+| Kitsu alone | 107 (42%) |
+| Automatic: every source | 233 (92%) |
+
+The uploads were matched to their anime with the database's names, so 92% is
+the most every source could reach here; Kitsu alone missing 126 of them is
+what the other sources add. Most of the rest write a name in a form no
+source lists, such as a Roman numeral as one character (Ⅱ).
+
+End to end, one episode asked for by its MyAnimeList id from a country the
+official channel streams it to: every source searched its English name and
+found the official upload; Kitsu alone, with no English name, searched its
+romanised Japanese one and found nothing. From a country the upload is not
+available in, neither finds it, rightly: YouTube's search leaves out what a
+country cannot play.
 
 ## Runtime margins
 
@@ -655,7 +712,7 @@ The configure page is an app, in five tabs:
 | Tab | What it holds |
 |---|---|
 | **Summary** | A new setup's three steps: your YouTube key (checked the moment it is pasted, for 1 unit of quota), your setup at a glance, then your profile or an install link. Signed in: your install link, a warning only when your key needs you, and your setup at a glance |
-| **Streams** | How a film or an episode is found: what to look for, the results kept, runtime matching, and fine-tuning |
+| **Streams** | How a film, an episode or an anime is found: what to look for (movies, series, anime, and where anime names come from), the results kept, runtime matching, and fine-tuning |
 | **Playback** | How each video found is offered in your app, and how its stream reads |
 | **Catalogs** | YouTube in your app: the search row (on or off, its order and length, SafeSearch), your rows (each with its order, its kinds of video and a keyword filter), and how often they refresh |
 | **Account** | Signed in: your profile, with its whole ID to sign in with elsewhere, your keys, backups, and your password and link. Otherwise signing in and backups; **More** on a server without profiles |
@@ -682,6 +739,8 @@ encodeURIComponent(JSON.stringify({
   typicalMargin: "30%",
   playback: ["app", "youtube"], playbackVersion: 1,
   types: ["movie", "series"],
+  anime: true,                          // anime; unless saved, on when films or series are
+  animeSource: "auto",                  // anime's names from every source, or "kitsu" alone
   maxResults: 5,                        // videos listed per title, 1–20
   minViews: 1000,                       // fewer views and a video is not offered; 0 = off
   region: "IN",                         // hides videos blocked there, ranks for it
@@ -855,8 +914,11 @@ https://<host>/<your config>/explain/series/<imdb id>:<season>:<episode>.json
 Catalogs, metadata and streams go through the official `stremio-addon-sdk`
 router. The manifest claims, per resource:
 
-- streams for `movie`, `series` and `anime`, with the id prefixes `tt`,
-  `kitsu:` and, only when a TMDB key is available to read them, `tmdb:`;
+- streams for `movie` and `series` with the id prefixes `tt` and, only when
+  a TMDB key is available to read them, `tmdb:`, and with anime on, for
+  `anime` too (anime addons file anime under all three) with `kitsu:`,
+  `mal:`, `anilist:` and `anidb:`. Each switch the reader turns off takes
+  its ids out;
 - metadata and streams for `youtube`, with `yt_id:` (and, for videos saved before 0.8.0, `YouTube` with `youstream:`);
 - streams for `channel`, with `yt_id:`, the videos of Stremio's own YouTube add-on.
 
@@ -1046,6 +1108,7 @@ saying so, and YouStream tries again every few seconds, then minutes.
 | `TVDB_API_KEY` | **Recommended.** A TheTVDB v4 key: episodes' own runtimes and air dates. Free for projects earning under $50k a year, with a credit to TheTVDB, which the configure page shows. Get one from the API keys page of a thetvdb.com account |
 | `TVDB_PIN` | Only for a subscriber-supported TheTVDB key |
 | `IMDB_DATASETS` | `off` matches films on Cinemeta's runtimes alone instead of loading IMDb's own data (about 230 MB downloaded daily, 13 MB kept in memory) |
+| `ANIME_DATASET` | `off` looks anime up on Kitsu and AniList alone instead of loading the anime offline database (about 60 MB downloaded weekly, 29 MB kept in memory), which maps MyAnimeList, AniList and AniDB ids to Kitsu's and holds the names uploads use |
 | `TMDB_API_KEY` | Optional. A TMDB key (v3 API key or v4 read access token) used for every reader without one of their own: `tmdb:` ids, fuller credits and other names |
 | `RELEASE_CHANNEL` | `beta` gives the manifest its own id (`org.deejay189393.youstream.beta`) and name ("YouStream Beta"), so prod and beta can be installed side by side |
 | `STREMIO_ADDONS_CONFIG_SIGNATURE` | The stremio-addons.net listing claim, once issued for this addon's manifest URL. Left out of the manifest until set |
@@ -1089,7 +1152,9 @@ shared by every reader would run out within hours.
 | [TheTVDB](https://thetvdb.com) | episodes' runtimes and air dates | free under $50k a year in revenue, credited with a link |
 | [TVmaze](https://www.tvmaze.com) | episodes' runtimes without a TheTVDB or TMDB key | free, no key; data under CC BY-SA 4.0, credited |
 | [TMDB](https://www.themoviedb.org) | `tmdb:` ids, cast, other names | free API key; credited with its logo and "This product uses the TMDB API but is not endorsed or certified by TMDB." |
-| [Kitsu](https://kitsu.io) | anime | free, no key |
+| [Kitsu](https://kitsu.io) | anime's names, episode titles and lengths | free, no key |
+| [AniList](https://anilist.co) | an anime's English name when Kitsu has none, by AniList or MyAnimeList id | free for non-commercial use, no key |
+| [anime offline database](https://github.com/manami-project/anime-offline-database) | every anime's ids on each site, and the names each site knows it by; a weekly copy kept current by [a fork](https://github.com/cedya77/anime-offline-database) | Open Database License (ODbL 1.0), credited |
 | [Return YouTube Dislike](https://returnyoutubedislike.com) | a YouTube video's dislike estimate, on its page | free, no key; at most 100 requests a minute and 10,000 a day; credited with a link |
 
 The configure page and the terms page show the credits these terms ask for.
@@ -1109,7 +1174,6 @@ The configure page and the terms page show the credits these terms ask for.
   may appear as matches the app cannot play.
 - **Films split into parts** ("Part 1/2") are not stitched together. Each
   part is too short to match.
-- **MAL ids** (`mal:`) are not read yet. Kitsu ids are.
 - **Resolution is an estimate.** YouTube's API says only HD or SD, so an HD
   video's resolution comes from its title, whether it is live, when it came
   out and its channel's size (see

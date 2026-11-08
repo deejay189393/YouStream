@@ -25,7 +25,8 @@ const {
   SAFE_SEARCH,
   REFRESH_UNITS,
   DEFAULT_CATALOG_REFRESH,
-  MIN_CATALOG_REFRESH
+  MIN_CATALOG_REFRESH,
+  ANIME_SOURCES
 } = require("./config");
 const catalogs = require("./catalogs");
 const { PASSWORD_MIN } = require("./profiles/api");
@@ -671,6 +672,9 @@ const STYLE = `
     border: 1px solid var(--border); border-radius: 9px; padding: 10px 11px; margin-bottom: 6px;
   }
   .margin-row { flex-wrap: wrap; }
+  .row-box:has(.anime-source) { flex-wrap: wrap; }
+  .anime-source { flex: 1 1 100%; margin: 4px 0 0 28px; }
+  .anime-source select { padding: 8px 10px; font-size: 14px; }
   .margin-label { flex: 1 1 200px; min-width: 0; }
   .margin-label strong { display: block; font-size: 14px; }
   .margin-label em { display: block; font-size: 12px; color: var(--muted); font-style: normal; margin-top: 2px; }
@@ -988,9 +992,18 @@ ${
         </div>
         <div class="row-box">
           <label class="check"><input type="checkbox" id="type-series"${s.types.includes("series") ? " checked" : ""} />
-            <span><strong>Series</strong><em>Episodes, including web series that only exist on YouTube, and anime from channels like Muse Asia and Ani-One.</em></span></label>
+            <span><strong>Series</strong><em>Episodes, including web series that only exist on YouTube.</em></span></label>
         </div>
-        <div class="hint">Each type you switch off saves your daily searches for the rest. Switch both off to use ${ADDON_NAME} for YouTube alone.</div>
+        <div class="row-box">
+          <label class="check"><input type="checkbox" id="type-anime"${s.anime ? " checked" : ""} />
+            <span><strong>Anime</strong><em>Episodes and films from channels like Muse Asia and Ani-One, by their Kitsu, MyAnimeList, AniList or AniDB ID.</em></span></label>
+          <label class="field anime-source" id="anime-source-field"${s.anime ? "" : " hidden"}>
+            <span class="label-text">Anime names from</span>
+            <select id="anime-source">${choiceOptions(ANIME_SOURCES, s.animeSource)}</select>
+            <span class="hint">No key needed. Automatic asks the anime database, Kitsu and AniList: uploads name an anime in English, a name one site may have and another lack. Of 253 official episode uploads, every source's names found 92%, Kitsu's alone 42%.</span>
+          </label>
+        </div>
+        <div class="hint">Each type you switch off saves your daily searches for the rest. Switch all three off to use ${ADDON_NAME} for YouTube alone.</div>
       </div>
 
 

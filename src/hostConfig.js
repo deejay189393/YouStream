@@ -48,6 +48,9 @@
  *   IMDB_DATASETS               off to match films on Cinemeta's runtimes
  *                               alone instead of loading IMDb's own data
  *                               daily (see metadata/imdb.js)
+ *   ANIME_DATASET               off to look anime up on Kitsu and AniList
+ *                               alone instead of loading the anime offline
+ *                               database weekly (see metadata/animeDb.js)
  *   TVDB_API_KEY, TVDB_PIN      TheTVDB's API, for episodes' own runtimes
  *                               and air dates (see metadata/tvdb.js). The
  *                               PIN only for a subscriber-supported key
@@ -259,6 +262,7 @@ function readHostConfig(env = process.env) {
     },
     metadata: {
       imdbDatasets: !(given("IMDB_DATASETS") && OFF.includes(env.IMDB_DATASETS.trim().toLowerCase())),
+      animeDataset: !(given("ANIME_DATASET") && OFF.includes(env.ANIME_DATASET.trim().toLowerCase())),
       tvdbKey: given("TVDB_API_KEY") ? env.TVDB_API_KEY.trim() : null,
       tvdbPin: given("TVDB_PIN") ? env.TVDB_PIN.trim() : null
     },

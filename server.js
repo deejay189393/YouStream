@@ -14,6 +14,7 @@ const tmdb = require("./src/metadata/tmdb");
 const { hostConfig, describeCache, DAY_MS } = require("./src/hostConfig");
 const { NAMESPACES, cacheSettings, cacheStats, clearAllCaches, closeCache } = require("./src/cache");
 const imdb = require("./src/metadata/imdb");
+const animeDb = require("./src/metadata/animeDb");
 const { resolveSource } = require("./src/browse");
 const { SOURCE_KINDS } = require("./src/catalogs");
 const { trackRequest } = require("./src/requestContext");
@@ -36,13 +37,15 @@ const serverHasTmdbKey = () => Boolean(cleanKey(process.env.TMDB_API_KEY));
 
 /**
  * The data sources this server uses whose terms ask to be credited where
- * their data is used: IMDb's statement, TMDB's notice with its logo (a
- * reader may add a TMDB key even when the server has none), TheTVDB's link,
- * TVmaze's, whose data is CC BY-SA, and Return YouTube Dislike's.
+ * their data is used: IMDb's statement, the anime offline database's (its
+ * licence, the ODbL, asks for it), TMDB's notice with its logo (a reader may
+ * add a TMDB key even when the server has none), TheTVDB's link, TVmaze's,
+ * whose data is CC BY-SA, and Return YouTube Dislike's.
  */
 function credits(metadata = hostConfig.metadata) {
   const out = [];
   if (metadata.imdbDatasets) out.push({ text: imdb.ATTRIBUTION, href: "https://www.imdb.com" });
+  if (metadata.animeDataset) out.push({ text: animeDb.ATTRIBUTION, href: animeDb.SOURCE_URL });
   if (metadata.tvdbKey) out.push({ text: "Episode data from TheTVDB.com", href: "https://thetvdb.com" });
   out.push({
     text: "This product uses the TMDB API but is not endorsed or certified by TMDB.",
@@ -208,6 +211,7 @@ app.get("/health", (req, res) =>
     ok: true,
     cache: cacheSettings().store,
     imdb: hostConfig.metadata.imdbDatasets ? imdb.status() : "off",
+    anime: hostConfig.metadata.animeDataset ? animeDb.status() : "off",
     profiles: profiles.status()
   })
 );
@@ -412,7 +416,7 @@ app.use((req, res) => res.status(404).json({ error: "Not found" }));
 
 /**
  * Starts the server: says what the host set, and anything it could not
- * read, starts IMDb's data and profiles, and listens. A redeploy stops the
+ * read, starts IMDb's data, the anime database and profiles, and listens. A redeploy stops the
  * old container with SIGTERM: what is in flight finishes, the database
  * closes cleanly (SQLite folds its write-ahead log back in), then the
  * process ends. start.js calls it; the tests call it with stand-ins.
@@ -423,6 +427,7 @@ function start({ port = PORT, signals = process, exit = process.exit, log = cons
   hostConfig.warnings.forEach((w) => log.warn(`[config] ${w}`));
   log.log(`[cache] ${describeCache(cacheSettings())}`);
   if (hostConfig.metadata.imdbDatasets) imdb.start();
+  if (hostConfig.metadata.animeDataset) animeDb.start();
   profiles.start(hostConfig.profiles);
   const server = app.listen(port, () => log.log(`YouStream addon listening on port ${server.address().port}`));
   signals.once("SIGTERM", () => {

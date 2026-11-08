@@ -1,8 +1,10 @@
 const { metadataCache } = require("../src/cache");
-const { getJson, yearOf, dateOf, runtimeSeconds } = require("../src/metadata/http");
+const { getJson, postJson, yearOf, dateOf, runtimeSeconds } = require("../src/metadata/http");
 const cinemeta = require("../src/metadata/cinemeta");
 const tmdb = require("../src/metadata/tmdb");
 const kitsu = require("../src/metadata/kitsu");
+const anilist = require("../src/metadata/anilist");
+const animeDb = require("../src/metadata/animeDb");
 const tvmaze = require("../src/metadata/tvmaze");
 const { resolveTitle, uniqueAliases } = require("../src/metadata");
 const imdb = require("../src/metadata/imdb");
@@ -131,7 +133,41 @@ const KITSU_EPISODE = {
   data: [{ attributes: { number: 3, canonicalTitle: "PREPARE FOR THE INTERVIEW", length: 23, airdate: "2022-04-23" } }]
 };
 
+const ANILIST_MEDIA = {
+  data: {
+    Media: {
+      id: 140960,
+      idMal: 50265,
+      format: "TV",
+      episodes: 12,
+      duration: 24,
+      title: { english: "SPY x FAMILY", romaji: "SPY×FAMILY", native: "SPY×FAMILY" },
+      synonyms: ["SxF", "Spy Family", "间谍过家家", " "],
+      startDate: { year: 2022, month: 4, day: 9 }
+    }
+  }
+};
+
 // --- http ------------------------------------------------------------------
+
+describe("postJson", () => {
+  test("posts the JSON asked, and keeps the answer under the key given", async () => {
+    const fetch = routeFetch([["example.com", { data: 1 }]]);
+    expect(await postJson("https://example.com/graphql", { query: "q" }, { cacheKey: "g" })).toEqual({ data: 1 });
+    expect(await postJson("https://example.com/graphql", { query: "q" }, { cacheKey: "g" })).toEqual({ data: 1 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [, init] = fetch.mock.calls[0];
+    expect(init).toMatchObject({ method: "POST", body: '{"query":"q"}', headers: { "Content-Type": "application/json" } });
+  });
+
+  test("a 404 is null, kept like any answer; a failure throws, unkept", async () => {
+    routeFetch([]);
+    expect(await postJson("https://example.com/graphql", {}, { cacheKey: "missing" })).toBeNull();
+    routeFetch([["example.com", response({}, { status: 429 })]]);
+    await expect(postJson("https://example.com/graphql", {}, { cacheKey: "busy" })).rejects.toMatchObject({ status: 429 });
+    expect(await metadataCache.get("busy")).toBeUndefined();
+  });
+});
 
 describe("getJson", () => {
   test("returns the body and caches it under the given key", async () => {
@@ -552,6 +588,7 @@ describe("kitsu", () => {
     routeFetch([["/anime/45398", KITSU_ANIME]]);
     expect(await kitsu.anime("45398")).toEqual({
       title: "SPY x FAMILY",
+      english: "SPY x FAMILY",
       aliases: ["SPY×FAMILY", "SxF"],
       year: 2022,
       released: "2022-04-09",
@@ -597,6 +634,75 @@ describe("kitsu", () => {
 });
 
 // --- Resolution ------------------------------------------------------------
+
+describe("anilist", () => {
+  test("an anime by AniList's id, English name first, with its MyAnimeList id", async () => {
+    const fetch = routeFetch([["graphql.anilist.co", ANILIST_MEDIA]]);
+    expect(await anilist.anime({ anilist: 140960 })).toEqual({
+      title: "SPY x FAMILY",
+      english: "SPY x FAMILY",
+      aliases: ["SPY×FAMILY", "SxF", "Spy Family", "间谍过家家"],
+      year: 2022,
+      released: "2022-04-09",
+      typicalRuntimeSeconds: 1440,
+      isMovie: false,
+      ids: { anilist: 140960, mal: 50265 }
+    });
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe(anilist.BASE_URL);
+    expect(JSON.parse(init.body)).toEqual({ query: anilist.QUERY, variables: { id: 140960 } });
+  });
+
+  test("or by MyAnimeList's", async () => {
+    const fetch = routeFetch([["graphql.anilist.co", ANILIST_MEDIA]]);
+    expect((await anilist.anime({ mal: "50265" })).title).toBe("SPY x FAMILY");
+    expect(JSON.parse(fetch.mock.calls[0][1].body).variables).toEqual({ idMal: 50265 });
+  });
+
+  test("without an English name, its romanised one; a film is a film; a date not whole is no date", async () => {
+    routeFetch([
+      [
+        "graphql.anilist.co",
+        { data: { Media: { id: 21519, format: "MOVIE", title: { romaji: "Kimi no Na wa." }, startDate: { year: 2016 } } } }
+      ]
+    ]);
+    expect(await anilist.anime({ anilist: 21519 })).toEqual({
+      title: "Kimi no Na wa.",
+      english: null,
+      aliases: [],
+      year: 2016,
+      released: null,
+      typicalRuntimeSeconds: null,
+      isMovie: true,
+      ids: { anilist: 21519, mal: null }
+    });
+  });
+
+  test("whatever of it AniList leaves out: its title, its other names, its date, its ids", async () => {
+    routeFetch([["graphql.anilist.co", { data: { Media: { synonyms: ["Only A Synonym"] } } }]]);
+    expect(await anilist.anime({ anilist: 5 })).toEqual({
+      title: "Only A Synonym",
+      english: null,
+      aliases: [],
+      year: null,
+      released: null,
+      typicalRuntimeSeconds: null,
+      isMovie: false,
+      ids: { anilist: null, mal: null }
+    });
+  });
+
+  test("null for an anime AniList does not have, or one without a name", async () => {
+    routeFetch([["graphql.anilist.co", response({ errors: [{ status: 404 }], data: { Media: null } }, { status: 404 })]]);
+    expect(await anilist.anime({ anilist: 1 })).toBeNull();
+    freshCache();
+    routeFetch([["graphql.anilist.co", { data: { Media: { id: 2, title: {} } } }]]);
+    expect(await anilist.anime({ anilist: 2 })).toBeNull();
+    freshCache();
+    routeFetch([["graphql.anilist.co", { data: {} }]]);
+    expect(await anilist.anime({ mal: 3 })).toBeNull();
+  });
+});
 
 describe("resolveTitle", () => {
   const resolve = (id, options) => resolveTitle(parseStreamId(id), options);
@@ -1112,6 +1218,134 @@ describe("resolveTitle", () => {
   test("as is TMDB down for a tmdb: show", async () => {
     routeFetch([["/tv/5", new Error("down")]]);
     await expect(resolve("tmdb:5:1:1", { tmdbKey: "k" })).rejects.toMatchObject({ kind: "unavailable" });
+  });
+
+  describe("an anime by any database's id", () => {
+    // The anime database's line for it: every site's id, and the names
+    // uploads use that one site or another lacks.
+    const ENTRY = {
+      sources: ["https://kitsu.app/anime/45398", "https://myanimelist.net/anime/50265", "https://anilist.co/anime/140960", "https://anidb.net/anime/16591"],
+      title: "SPY x FAMILY",
+      type: "TV",
+      episodes: 12,
+      animeSeason: { year: 2022 },
+      duration: { value: 1440, unit: "SECONDS" },
+      synonyms: ["Spy Family", "SxF", "Spy Kyoushitsu Family"]
+    };
+    beforeEach(async () => {
+      async function* lines() {
+        yield JSON.stringify(ENTRY);
+      }
+      animeDb.useIndex(await animeDb.buildIndex(lines()));
+    });
+    afterEach(() => animeDb.useIndex(null));
+    const KITSU_NO_ENGLISH = { data: { attributes: { canonicalTitle: "Spy x Family", episodeLength: 24, startDate: "2022-04-09" } } };
+
+    test("by MyAnimeList's: Kitsu and the database asked, their names gathered, Kitsu's English name searched", async () => {
+      const fetch = routeFetch([
+        ["/anime/45398/episodes", KITSU_EPISODE],
+        ["/anime/45398", KITSU_ANIME],
+        ["graphql.anilist.co", ANILIST_MEDIA]
+      ]);
+      expect(await resolve("mal:50265:3")).toEqual({
+        isEpisode: true,
+        title: "SPY x FAMILY",
+        // Short names, abbreviations among them, are left out but for Kitsu's own.
+        aliases: ["SPY×FAMILY", "SxF", "Spy Family", "Spy Kyoushitsu Family"],
+        year: 2022,
+        people: [],
+        imdbId: null,
+        otherRuntimes: [],
+        runtimeSeconds: 1380,
+        runtimeKind: "exact",
+        season: 1,
+        episode: 3,
+        absoluteEpisode: 3,
+        episodeTitle: "PREPARE FOR THE INTERVIEW",
+        released: "2022-04-23",
+        releaseYear: 2022,
+        seasonCount: 1,
+        sources: ["kitsu", "anime database"]
+      });
+      // With an English name from Kitsu, AniList is not asked.
+      expect(fetch.mock.calls.some(([url]) => url.includes("anilist"))).toBe(false);
+    });
+
+    test("an English name searched in the short form uploads write it in", async () => {
+      routeFetch([["/anime/45398", { data: { attributes: { canonicalTitle: "Spy", titles: { en: "Spy Family: The Whole Long Subtitle Nobody Writes Out" } } } }]]);
+      const title = await resolve("kitsu:45398");
+      expect(title.title).toBe("Spy Family");
+      expect(title.aliases).toContain("Spy Family: The Whole Long Subtitle Nobody Writes Out");
+      freshCache();
+      // Not when the part before the colon is no name of its own.
+      routeFetch([["/anime/45398", { data: { attributes: { titles: { en: "Re:Zero - Starting Life" } } } }]]);
+      expect((await resolve("kitsu:45398")).title).toBe("Re:Zero - Starting Life");
+    });
+
+    test("without an English name on Kitsu, AniList's; with neither, the database's title", async () => {
+      routeFetch([
+        ["/anime/45398/episodes", { data: [] }],
+        ["/anime/45398", KITSU_NO_ENGLISH],
+        ["graphql.anilist.co", { data: { Media: { ...ANILIST_MEDIA.data.Media, title: { english: "Spy Family (English)", romaji: "SPY×FAMILY" } } } }]
+      ]);
+      expect(await resolve("anidb:16591:2")).toMatchObject({ title: "Spy Family (English)", runtimeSeconds: 1440, runtimeKind: "typical" });
+      freshCache();
+      routeFetch([
+        ["/anime/45398", KITSU_NO_ENGLISH],
+        ["graphql.anilist.co", { data: { Media: { ...ANILIST_MEDIA.data.Media, title: { romaji: "SPY×FAMILY" } } } }]
+      ]);
+      const film = await resolve("anilist:140960");
+      expect(film).toMatchObject({ isEpisode: false, title: "SPY x FAMILY", year: 2022, released: "2022-04-09" });
+      // Kitsu's "Spy x Family" is the title itself, in other letters' case.
+      expect(film.aliases).toEqual(["SPY×FAMILY", "Spy Family", "间谍过家家", "Spy Kyoushitsu Family"]);
+    });
+
+    test("when Kitsu and AniList have nothing, the database's own: title, names, year and length", async () => {
+      routeFetch([]);
+      expect(await resolve("kitsu:45398")).toEqual({
+        isEpisode: false,
+        title: "SPY x FAMILY",
+        aliases: ["Spy Family", "Spy Kyoushitsu Family"],
+        year: 2022,
+        released: null,
+        people: [],
+        imdbId: null,
+        otherRuntimes: [],
+        runtimeSeconds: 1440,
+        runtimeKind: "exact",
+        sources: ["anime database"]
+      });
+    });
+
+    test("Kitsu alone, with Kitsu not listing it, is an unknown title", async () => {
+      routeFetch([]);
+      expect(await resolve("kitsu:45398:1", { animeSource: "kitsu" })).toBeNull();
+    });
+
+    test("Kitsu alone, when chosen: no AniList, and names from Kitsu, found by the database", async () => {
+      const fetch = routeFetch([["/anime/45398", KITSU_ANIME]]);
+      expect(await resolve("mal:50265", { animeSource: "kitsu" })).toMatchObject({ title: "SPY x FAMILY", aliases: ["SPY×FAMILY", "SxF"], sources: ["kitsu"] });
+      expect(fetch.mock.calls.some(([url]) => url.includes("anilist"))).toBe(false);
+    });
+
+    test("an id the database does not know is asked of the one source that knows it", async () => {
+      animeDb.useIndex(null);
+      const fetch = routeFetch([["graphql.anilist.co", ANILIST_MEDIA]]);
+      expect(await resolve("anilist:140960")).toMatchObject({ title: "SPY x FAMILY", sources: ["anilist"] });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      // Kitsu alone cannot look up an AniList id without the database's map.
+      expect(await resolve("anilist:140960", { animeSource: "kitsu" })).toBeNull();
+      // Nor can anyone an AniDB id.
+      expect(await resolve("anidb:16591")).toBeNull();
+    });
+
+    test("an anime nobody knows is null; Kitsu and AniList down, with no database, a failed lookup", async () => {
+      animeDb.useIndex(null);
+      routeFetch([]);
+      expect(await resolve("mal:1:1")).toBeNull();
+      routeFetch([["graphql.anilist.co", response({}, { status: 503 })]]);
+      await expect(resolve("mal:2:1")).rejects.toMatchObject({ kind: "unavailable", message: "no title, as AniList anime mal:2 failed" });
+    });
   });
 });
 

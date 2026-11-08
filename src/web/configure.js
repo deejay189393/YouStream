@@ -714,15 +714,27 @@ module.exports = function start(window, hooks = {}) {
   ytSearch.addEventListener("change", syncSearch);
   syncSearch();
 
+  // Where anime names come from matters only with anime on.
+  const animeBox = $("type-anime");
+  animeBox.addEventListener("change", () => {
+    $("anime-source-field").hidden = !animeBox.checked;
+  });
+
   // --- The summary: the setup at a glance, each line a way to its tab.
   const summaryList = $("summary-list");
 
+  // "Movies, series and anime", "Series and anime", "Movies"...
   function lookingFor() {
-    const movies = $("type-movie").checked;
-    const series = $("type-series").checked;
-    if (movies && series) return "Movies and series";
-    if (movies || series) return movies ? "Movies" : "Series";
-    return "Neither: YouTube only";
+    const kinds = [
+      ["type-movie", "movies"],
+      ["type-series", "series"],
+      ["type-anime", "anime"]
+    ]
+      .filter(([id]) => $(id).checked)
+      .map(([, name]) => name);
+    if (!kinds.length) return "Nothing: YouTube only";
+    const text = kinds.length === 1 ? kinds[0] : kinds.slice(0, -1).join(", ") + " and " + kinds[kinds.length - 1];
+    return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
   function renderSummary() {
@@ -767,8 +779,9 @@ module.exports = function start(window, hooks = {}) {
     if (!isKeyText(tmdbKey)) return problem("That TMDB key has characters a key never has. Copy it again, without spaces.", "tmdb-key");
 
     const types = ["movie", "series"].filter((type) => $("type-" + type).checked);
-    if (!types.length && !ytSearch.checked && !CATALOGS.length) {
-      return problem("Choose something for YouStream to do: movies, series, YouTube search, or a catalog.", "type-movie");
+    const anime = animeBox.checked;
+    if (!types.length && !anime && !ytSearch.checked && !CATALOGS.length) {
+      return problem("Choose something for YouStream to do: movies, series, anime, YouTube search, or a catalog.", "type-movie");
     }
 
     const config = {};
@@ -795,6 +808,10 @@ module.exports = function start(window, hooks = {}) {
     config.playbackVersion = PAGE.playbackVersion;
 
     if (types.length < 2) config.types = types;
+    // Anime comes with films and series unless switched off (config.js).
+    if (anime !== types.length > 0) config.anime = anime;
+    const animeSource = $("anime-source");
+    if (anime && animeSource.value !== animeSource.options[0].value) config.animeSource = animeSource.value;
 
     const maxText = $("max-results").value.trim();
     const maxResults = parseInt(maxText, 10);

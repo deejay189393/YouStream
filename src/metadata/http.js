@@ -18,10 +18,23 @@ const TIMEOUT_MS = 8000;
  * rarely change, and an old answer beats none while a service is down.
  */
 async function getJson(url, { cacheKey = url, headers } = {}) {
+  return cachedJson(cacheKey, () => fetchJson(url, { headers }));
+}
+
+/**
+ * POST a JSON request, such as a GraphQL query, and read its JSON answer,
+ * cached by `cacheKey` and kept, failed and missing alike, as getJson's.
+ */
+async function postJson(url, payload, { cacheKey }) {
+  const init = { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(payload) };
+  return cachedJson(cacheKey, () => fetchJson(url, init));
+}
+
+async function cachedJson(cacheKey, load) {
   const hit = await metadataCache.get(cacheKey);
   if (hit && hit.fresh) return hit.value.body;
   try {
-    const body = await fetchJson(url, headers);
+    const body = await load();
     await metadataCache.set(cacheKey, { body });
     return body;
   } catch (err) {
@@ -30,10 +43,10 @@ async function getJson(url, { cacheKey = url, headers } = {}) {
   }
 }
 
-async function fetchJson(url, headers) {
+async function fetchJson(url, init) {
   let response;
   try {
-    response = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    response = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (err) {
     const wrapped = new Error(`Could not reach ${new URL(url).host}: ${err.message}`);
     wrapped.status = 502;
@@ -86,4 +99,4 @@ function runtimeSeconds(value) {
   return total > 0 ? Math.round(total * 60) : null;
 }
 
-module.exports = { getJson, yearOf, dateOf, runtimeSeconds, TIMEOUT_MS };
+module.exports = { getJson, postJson, yearOf, dateOf, runtimeSeconds, TIMEOUT_MS };

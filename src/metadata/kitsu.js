@@ -39,10 +39,11 @@ async function anime(kitsuId) {
   if (!names.length) return null;
   // English first when Kitsu has it: an English title is what most uploads
   // aimed at this addon's readers are written with.
-  const english = typeof (attributes.titles || {}).en === "string" && attributes.titles.en.trim();
+  const english = (typeof (attributes.titles || {}).en === "string" && attributes.titles.en.trim()) || null;
   const title = english || names[0];
   return {
     title,
+    english,
     aliases: names.filter((n) => n !== title),
     year: yearOf(attributes.startDate),
     released: dateOf(attributes.startDate),

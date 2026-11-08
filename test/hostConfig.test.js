@@ -34,7 +34,7 @@ describe("readHostConfig", () => {
       },
       streams: { maxAgeSeconds: 6 * 3600, emptyMaxAgeSeconds: 3600, failedMaxAgeSeconds: 60 },
       legal: { blockedVideos: [], blockedChannels: [], contact: "https://github.com/deejay189393/YouStream/issues" },
-      metadata: { imdbDatasets: true, tvdbKey: null, tvdbPin: null },
+      metadata: { imdbDatasets: true, animeDataset: true, tvdbKey: null, tvdbPin: null },
       warnings: []
     });
   });
@@ -146,6 +146,8 @@ describe("readHostConfig", () => {
     expect(readHostConfig({ IMDB_DATASETS: "OFF" }).metadata.imdbDatasets).toBe(false);
     expect(readHostConfig({ IMDB_DATASETS: "0" }).metadata.imdbDatasets).toBe(false);
     expect(readHostConfig({ IMDB_DATASETS: "on" }).metadata.imdbDatasets).toBe(true);
+    expect(readHostConfig({ ANIME_DATASET: " Off " }).metadata.animeDataset).toBe(false);
+    expect(readHostConfig({ ANIME_DATASET: "on" }).metadata.animeDataset).toBe(true);
     expect(readHostConfig({ TVDB_API_KEY: " key ", TVDB_PIN: " 1234 " }).metadata).toMatchObject({ tvdbKey: "key", tvdbPin: "1234" });
   });
 

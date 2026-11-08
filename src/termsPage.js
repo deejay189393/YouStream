@@ -101,7 +101,7 @@ ${profiles.enabled ? profilePrivacy(profiles) : `    <li>YouStream has no accoun
     <li>Your settings and keys are encoded into your personal install link. YouStream does not store them, but your app sends that link with every request, so the hosting provider's request logs record it for a limited time.</li>`}
     <li>Searches and video details are requested from YouTube with your key, so Google receives them under the ${a(GOOGLE_PRIVACY_URL, "Google Privacy Policy")}, including what you type into your app's search when YouTube search is on. The searches for films and episodes, and video details, are cached on this server for at most 30 days and shared by everyone who uses it, with nothing that identifies who asked.</li>
     <li>Your YouTube catalogs' results are cached on this server for the refresh interval you choose, and at most 30 days, filed under a one-way fingerprint of your key, never the key itself. Search results are kept a few minutes the same way. YouStream does not log what you search for; like your settings, it is part of the address your app requests, which the hosting provider's request logs record for a limited time.</li>
-    <li>Film and episode details are looked up in Cinemeta, IMDb's published data, TheTVDB, TVmaze, TMDB and Kitsu. Those requests carry nothing about you, except your TMDB key if you add one.</li>
+    <li>Film and episode details are looked up in Cinemeta, IMDb's published data, TheTVDB, TVmaze and TMDB, and anime in Kitsu, AniList and the anime offline database. Those requests carry nothing about you, except your TMDB key if you add one.</li>
     <li>When you open a YouTube video's page, its dislike estimate is asked of ${a("https://returnyoutubedislike.com", "Return YouTube Dislike")}, with nothing but the video's id. The answer is cached on this server like the video's details and shared by everyone who uses it.</li>
     <li>${
       profiles.enabled
@@ -117,7 +117,7 @@ ${profiles.enabled ? profilePrivacy(profiles) : `    <li>YouStream has no accoun
   <ul class="credits">
     ${credits.map(creditItem).join("\n    ")}
     <li><a href="https://www.stremio.com" target="_blank" rel="noopener">Titles and episode lists from Cinemeta</a></li>
-    <li><a href="https://kitsu.io" target="_blank" rel="noopener">Anime from Kitsu</a></li>
+    <li><a href="https://kitsu.io" target="_blank" rel="noopener">Anime from Kitsu</a> and <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a></li>
   </ul>
 
   <a class="back" href="/configure">&larr; Back to setup</a>

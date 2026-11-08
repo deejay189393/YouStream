@@ -23,6 +23,11 @@ const { normalizeCatalogs, toStoredCatalogs, SORTS, LENGTHS } = require("./catal
  *   playback        ["app", "youtube"]  the ways to watch, in order
  *   playbackVersion 1      the option list the above was saved against
  *   types           ["movie", "series"]
+ *   anime           true   anime, by Kitsu, MyAnimeList, AniList or AniDB
+ *                   id. Unless saved, on when films or series are, as
+ *                   anime always came with them
+ *   animeSource     "auto" where an anime's names come from: every source
+ *                   (the anime database, Kitsu and AniList), or "kitsu"
  *   maxResults      5      how many matching videos to list
  *   minViews        1000   fewer views than this and a video is not offered
  *   region          "IN"   hides videos blocked there, ranks for it
@@ -88,6 +93,16 @@ const DEFAULT_MARGINS = {
 };
 
 const CONTENT_TYPES = ["movie", "series"];
+
+/**
+ * Where an anime's names, length and episode titles come from. Neither
+ * needs a key. Automatic gathers every source's names, which find the most
+ * uploads (README, "Anime"); Kitsu alone is how anime were looked up before.
+ */
+const ANIME_SOURCES = [
+  { id: "auto", label: "Automatic: every source" },
+  { id: "kitsu", label: "Kitsu alone" }
+];
 const DEFAULT_MAX_RESULTS = 5;
 
 /** YouTube search's SafeSearch: moderate is what YouTube does unasked. */
@@ -283,6 +298,9 @@ function cleanTypes(raw) {
   return Array.isArray(raw) ? CONTENT_TYPES.filter((t) => raw.includes(t)) : [...CONTENT_TYPES];
 }
 
+/** Anime came with films and series before it had a switch of its own, and still does unless switched off. */
+const animeByDefault = (types) => types.length > 0;
+
 function cleanMaxResults(raw) {
   const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
   return Number.isSafeInteger(n) && n >= 1 && n <= MAX_RESULTS_LIMIT ? n : DEFAULT_MAX_RESULTS;
@@ -314,6 +332,8 @@ function normalizeConfig(config) {
     typicalMargin: margin("typicalMargin"),
     playback: normalizePlayback(c.playback),
     types: cleanTypes(c.types),
+    anime: typeof c.anime === "boolean" ? c.anime : animeByDefault(cleanTypes(c.types)),
+    animeSource: optionIdOf(ANIME_SOURCES, c.animeSource),
     maxResults: cleanMaxResults(c.maxResults),
     minViews: cleanMinViews(c.minViews),
     region: typeof c.region === "string" && COUNTRY_SET.has(c.region) ? c.region : "",
@@ -353,6 +373,8 @@ function compactConfig(config) {
   out.playback = n.playback;
   out.playbackVersion = PLAYBACK_VERSION;
   if (!sameList(n.types, CONTENT_TYPES)) out.types = n.types;
+  if (n.anime !== animeByDefault(n.types)) out.anime = n.anime;
+  if (n.animeSource !== ANIME_SOURCES[0].id) out.animeSource = n.animeSource;
   if (n.maxResults !== DEFAULT_MAX_RESULTS) out.maxResults = n.maxResults;
   if (n.minViews !== DEFAULT_MIN_VIEWS) out.minViews = n.minViews;
   if (n.region) out.region = n.region;
@@ -448,5 +470,6 @@ module.exports = {
   MAX_MIN_VIEWS,
   MAX_RESULTS_LIMIT,
   MAX_QUERY_LENGTH,
-  CONTENT_TYPES
+  CONTENT_TYPES,
+  ANIME_SOURCES
 };

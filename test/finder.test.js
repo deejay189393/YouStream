@@ -104,6 +104,19 @@ describe("findVideos", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  test("anime has a switch of its own: off, no anime id costs anything, whatever films and series are", async () => {
+    const fetch = routeFetch([]);
+    const off = normalizeConfig({ youtubeKey: "KEY", anime: false });
+    for (const id of ["kitsu:45398:3", "mal:50265", "anilist:140960:1", "anidb:16591:2"]) {
+      expect((await findVideos(id, off)).status).toBe("type switched off");
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    // On alone, anime is looked for while films are not.
+    const alone = normalizeConfig({ youtubeKey: "KEY", types: [], anime: true });
+    expect((await findVideos("tt0111161", alone)).status).toBe("type switched off");
+    expect((await findVideos("kitsu:1:1", alone)).status).toBe("unknown title");
+  });
+
   test("a title nobody knows", async () => {
     routeFetch([]);
     expect((await findVideos("tt0000001", SETTINGS)).status).toBe("unknown title");

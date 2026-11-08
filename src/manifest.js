@@ -1,4 +1,5 @@
-const { normalizeConfig, isConfigured, effectiveTmdbKey } = require("./config");
+const { normalizeConfig, isConfigured, effectiveTmdbKey, CONTENT_TYPES } = require("./config");
+const { ANIME_SOURCES } = require("./ids");
 const { ITEM_TYPE, ITEM_PREFIX, LEGACY_TYPE, LEGACY_PREFIX, CHANNEL_TYPE } = require("./items");
 const { SKIP_OPTIONS } = require("./catalogs");
 
@@ -19,7 +20,7 @@ const { SKIP_OPTIONS } = require("./catalogs");
  *   YouTube add-on ("channel", yt_id:) get streams.
  */
 const ADDON_ID = "org.deejay189393.youstream";
-const ADDON_VERSION = "0.13.0";
+const ADDON_VERSION = "0.14.0";
 const ADDON_NAME = "YouStream";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION =
@@ -54,13 +55,18 @@ function stremioAddonsConfig() {
   return { issuer: process.env.STREMIO_ADDONS_CONFIG_ISSUER || "https://stremio-addons.net", signature };
 }
 
+/** The ids anime databases name an anime by (ids.js): kitsu:, mal:, anilist:, anidb:. */
+const ANIME_PREFIXES = ANIME_SOURCES.map((source) => `${source}:`);
+
 /**
- * The id prefixes this server can read for a given reader. `tmdb:` ids need
+ * The id prefixes this server can read for a given reader: films' and
+ * shows' when they are switched on, anime's when anime is. `tmdb:` ids need
  * a TMDB key -- the reader's or the server's -- so without one the prefix is
  * not claimed, and the app does not ask about ids that could only fail.
  */
 function idPrefixes(settings) {
-  return ["tt", "kitsu:", ...(effectiveTmdbKey(settings) ? ["tmdb:"] : [])];
+  const titles = settings.types.length ? ["tt", ...(effectiveTmdbKey(settings) ? ["tmdb:"] : [])] : [];
+  return [...titles, ...(settings.anime ? ANIME_PREFIXES : [])];
 }
 
 /**
@@ -73,12 +79,14 @@ function idPrefixes(settings) {
 const UNCONFIGURED_PREFIX = "youstream-not-configured:";
 
 /**
- * The types films and shows are streamed for. Kitsu-backed anime addons
- * file their titles under "anime" as well as the usual types, so that type
- * is claimed alongside them -- unless the reader turned films and shows off.
+ * The types titles are streamed for: films and shows as switched on, and
+ * with anime "anime" -- which Kitsu-backed addons file anime under -- and
+ * the usual two, which they file some under too. An app matches a type and
+ * a prefix each on its own, so a film's id may then be asked about with
+ * films off; the stream handler answers only what is switched on (finder.js).
  */
 function typesFor(settings) {
-  return settings.types.length ? [...settings.types, "anime"] : [];
+  return settings.anime ? [...CONTENT_TYPES, "anime"] : [...settings.types];
 }
 
 /**
@@ -174,7 +182,7 @@ function buildInterfaceManifest() {
     description: "Internal routing manifest (not served).",
     resources: ["catalog", "meta", "stream"],
     types: ["movie", "series", "anime", ITEM_TYPE],
-    idPrefixes: ["tt", "kitsu:", "tmdb:", ...VIDEO_PREFIXES],
+    idPrefixes: ["tt", "tmdb:", ...ANIME_PREFIXES, ...VIDEO_PREFIXES],
     catalogs: [{ type: ITEM_TYPE, id: SEARCH_CATALOG_ID, name: ADDON_NAME, extra: [{ name: "search", isRequired: true }] }],
     config: [{ key: "youtubeKey", type: "password", title: "YouTube API key" }],
     behaviorHints: { configurable: true, configurationRequired: true }
@@ -191,6 +199,7 @@ module.exports = {
   releaseChannel,
   stremioAddonsConfig,
   idPrefixes,
+  ANIME_PREFIXES,
   UNCONFIGURED_PREFIX,
   SEARCH_CATALOG_ID,
   ADDON_ID,

@@ -8,6 +8,9 @@
  *   kitsu:45398            an anime film by Kitsu id
  *   kitsu:45398:3          episode 3 of an anime; Kitsu has no seasons, each
  *                          season is its own entry
+ *   mal:16498:3            the same by MyAnimeList's id, AniList's
+ *   anilist:16498:3        (anilist:) or AniDB's (anidb:), numbered as
+ *   anidb:9541:3           Kitsu's are, within the entry
  *
  * Nuvio documents the same shapes when it falls back to a meta request
  * (StreamRepositoryImpl.fetchInlineStreamsFromMeta). The request's `type` is
@@ -20,7 +23,13 @@ const NUMERIC = /^\d{1,10}$/;
 const NUMBER = /^\d{1,5}$/;
 
 /**
- * @returns {{ source: "imdb"|"tmdb"|"kitsu", id: string, season: number|null,
+ * The anime databases an app may name an anime by. Each of their entries is
+ * one season, its episodes numbered from 1, so their ids read alike.
+ */
+const ANIME_SOURCES = ["kitsu", "mal", "anilist", "anidb"];
+
+/**
+ * @returns {{ source: "imdb"|"tmdb"|"kitsu"|"mal"|"anilist"|"anidb", id: string, season: number|null,
  *   episode: number|null, isEpisode: boolean } | null}
  */
 function parseStreamId(rawId) {
@@ -34,7 +43,7 @@ function parseStreamId(rawId) {
     source = "imdb";
     id = parts[0];
     rest = parts.slice(1);
-  } else if ((parts[0] === "tmdb" || parts[0] === "kitsu") && NUMERIC.test(parts[1] || "")) {
+  } else if ((parts[0] === "tmdb" || ANIME_SOURCES.includes(parts[0])) && NUMERIC.test(parts[1] || "")) {
     source = parts[0];
     id = parts[1];
     rest = parts.slice(2);
@@ -47,10 +56,10 @@ function parseStreamId(rawId) {
 
   if (numbers.length === 0) return { source, id, season: null, episode: null, isEpisode: false };
 
-  // Kitsu numbers its episodes without a season: kitsu:ID:EPISODE. A
-  // season-shaped Kitsu id is accepted too, with the episode taken from the
-  // end, since the entry itself already is the season.
-  if (source === "kitsu") {
+  // The anime databases number their episodes without a season:
+  // kitsu:ID:EPISODE. A season-shaped id is accepted too, with the episode
+  // taken from the end, since the entry itself already is the season.
+  if (ANIME_SOURCES.includes(source)) {
     if (numbers.length > 2) return null;
     return { source, id, season: 1, episode: numbers[numbers.length - 1], isEpisode: true };
   }
@@ -60,9 +69,10 @@ function parseStreamId(rawId) {
   return { source, id, season, episode, isEpisode: true };
 }
 
-/** "movie" or "series": what the reader's content-type switches call it. */
+/** "movie", "series" or "anime": the reader's switch that lets it be looked for. */
 function contentKind(parsed) {
+  if (ANIME_SOURCES.includes(parsed.source)) return "anime";
   return parsed.isEpisode ? "series" : "movie";
 }
 
-module.exports = { parseStreamId, contentKind };
+module.exports = { parseStreamId, contentKind, ANIME_SOURCES };

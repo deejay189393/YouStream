@@ -38,22 +38,25 @@ describe("basic routes", () => {
   test("/health", async () => {
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, cache: "memory", imdb: { loaded: false }, profiles: "off" });
+    expect(res.body).toEqual({ ok: true, cache: "memory", imdb: { loaded: false }, anime: { loaded: false }, profiles: "off" });
   });
 
-  test("/health says when IMDb's data is turned off", async () => {
+  test("/health says when IMDb's data or the anime database is turned off", async () => {
     const { hostConfig } = require("../src/hostConfig");
     hostConfig.metadata.imdbDatasets = false;
+    hostConfig.metadata.animeDataset = false;
     try {
-      expect((await request(app).get("/health")).body.imdb).toBe("off");
+      expect((await request(app).get("/health")).body).toMatchObject({ imdb: "off", anime: "off" });
     } finally {
       hostConfig.metadata.imdbDatasets = true;
+      hostConfig.metadata.animeDataset = true;
     }
   });
 
   test("/configure credits the data sources whose terms ask for it", async () => {
     const html = (await request(app).get("/configure")).text;
     expect(html).toContain("Information courtesy of IMDb (https://www.imdb.com). Used with permission.");
+    expect(html).toContain("Anime names and ids from the anime offline database, under the Open Database License (ODbL 1.0)");
     expect(html).not.toContain("TheTVDB");
   });
 
@@ -61,8 +64,12 @@ describe("basic routes", () => {
     const always = ["https://www.themoviedb.org", "https://www.tvmaze.com", "https://returnyoutubedislike.com"];
     expect(credits({ imdbDatasets: false, tvdbKey: null }).map((c) => c.href)).toEqual(always);
     expect(credits({ imdbDatasets: false, tvdbKey: "k" })[0]).toEqual({ text: "Episode data from TheTVDB.com", href: "https://thetvdb.com" });
-    expect(credits().map((c) => c.href)).toEqual(["https://www.imdb.com", ...always]);
-    expect(credits()[1]).toMatchObject({
+    expect(credits({ imdbDatasets: false, animeDataset: true, tvdbKey: null })[0]).toEqual({
+      text: "Anime names and ids from the anime offline database, under the Open Database License (ODbL 1.0)",
+      href: "https://github.com/manami-project/anime-offline-database"
+    });
+    expect(credits().map((c) => c.href)).toEqual(["https://www.imdb.com", "https://github.com/manami-project/anime-offline-database", ...always]);
+    expect(credits()[2]).toMatchObject({
       text: "This product uses the TMDB API but is not endorsed or certified by TMDB.",
       image: "/tmdb.svg"
     });

@@ -2,6 +2,8 @@ const { AsyncLocalStorage } = require("async_hooks");
 const cinemeta = require("./cinemeta");
 const tmdb = require("./tmdb");
 const kitsu = require("./kitsu");
+const anilist = require("./anilist");
+const animeDb = require("./animeDb");
 const tvmaze = require("./tvmaze");
 const imdb = require("./imdb");
 const tvdb = require("./tvdb");
@@ -233,30 +235,30 @@ async function tmdbEpisode(id, season, episode, { tmdbKey, region }) {
   };
 }
 
-async function kitsuTitle(id, isEpisode, episode) {
-  const [entry, ep] = await Promise.all([
-    attempt(`Kitsu anime ${id}`, () => kitsu.anime(id)),
-    isEpisode ? attempt(`Kitsu episode ${id} ${episode}`, () => kitsu.episode(id, episode)) : null
-  ]);
-  if (!entry) return null;
+/**
+ * An anime as matching needs it, from what the anime sources said: `title`,
+ * the name searched for; `aliases`, every other name a match may use; the
+ * year, release and usual length; and for an episode, Kitsu's record of it.
+ */
+function animeResult({ title, aliases, year, released, typicalSeconds, sources }, isEpisode, episode, ep) {
   const base = {
-    title: entry.title,
-    aliases: uniqueAliases(entry.title, entry.aliases),
-    year: entry.year,
-    released: entry.released,
+    title,
+    aliases: uniqueAliases(title, aliases),
+    year,
+    released,
     people: [],
     imdbId: null,
     otherRuntimes: [],
-    sources: ["kitsu"]
+    sources
   };
   if (!isEpisode) {
     // A film's "episode length" is the film's length.
-    return { isEpisode: false, ...base, ...runtime(entry.typicalRuntimeSeconds, null) };
+    return { isEpisode: false, ...base, ...runtime(typicalSeconds, null) };
   }
   return {
     isEpisode: true,
     ...base,
-    ...runtime(ep && ep.runtimeSeconds, entry.typicalRuntimeSeconds),
+    ...runtime(ep && ep.runtimeSeconds, typicalSeconds),
     season: 1,
     episode,
     absoluteEpisode: episode,
@@ -267,6 +269,89 @@ async function kitsuTitle(id, isEpisode, episode) {
   };
 }
 
+function kitsuEpisode(id, isEpisode, episode) {
+  return isEpisode ? attempt(`Kitsu episode ${id} ${episode}`, () => kitsu.episode(id, episode)) : null;
+}
+
+async function kitsuTitle(id, isEpisode, episode) {
+  const [entry, ep] = await Promise.all([attempt(`Kitsu anime ${id}`, () => kitsu.anime(id)), kitsuEpisode(id, isEpisode, episode)]);
+  if (!entry) return null;
+  const { title, aliases, year, released, typicalRuntimeSeconds } = entry;
+  return animeResult({ title, aliases, year, released, typicalSeconds: typicalRuntimeSeconds, sources: ["kitsu"] }, isEpisode, episode, ep);
+}
+
+/**
+ * The form of an anime's name that uploads write: the part before a colon,
+ * when that is a name of its own. Light novels' adaptations carry their
+ * whole subtitle in their English titles ("Magic Repo Man: Dumped by My
+ * Party, I'll Cash In With..."), which no upload writes out, and searching
+ * for all of it finds recaps of the season rather than its episodes.
+ */
+function shortForm(name) {
+  const main = name.split(":")[0].trim();
+  return main !== name && tokens(main).join("").length >= 4 ? main : name;
+}
+
+/**
+ * A name worth matching an anime by: one of four letters or more. Sites
+ * list abbreviations too ("SxF", "AoT"), which any title may happen to
+ * contain.
+ */
+const distinctive = (name) => tokens(name).join("").length >= 4;
+
+/**
+ * An anime by any id the anime databases name it by: Kitsu's, MyAnimeList's,
+ * AniList's or AniDB's. The anime database (animeDb.js) maps it to the
+ * others, and holds every name each site knows it by: official uploads name
+ * an anime in English, an English name one site may have and another lack.
+ * The name searched for is an English one, Kitsu's, or else AniList's --
+ * asked only then, as it allows so many requests a minute -- or else the
+ * database's own title, in the short form uploads use (shortForm). The
+ * episode's title and length are Kitsu's, as anime have always been.
+ *
+ * `animeSource` "kitsu" asks Kitsu alone, as before the others were added.
+ */
+async function animeTitle(parsed, animeSource) {
+  const { isEpisode, episode } = parsed;
+  const entry = animeDb.find(parsed.source, parsed.id);
+  const ids = { ...(entry ? entry.ids : {}), [parsed.source]: Number(parsed.id) };
+  if (animeSource === "kitsu") return ids.kitsu ? kitsuTitle(ids.kitsu, isEpisode, episode) : null;
+
+  const [fromKitsu, ep] = await Promise.all([
+    ids.kitsu ? attempt(`Kitsu anime ${ids.kitsu}`, () => kitsu.anime(ids.kitsu)) : null,
+    ids.kitsu ? kitsuEpisode(ids.kitsu, isEpisode, episode) : null
+  ]);
+  const fromAnilist =
+    !(fromKitsu && fromKitsu.english) && (ids.anilist || ids.mal)
+      ? await attempt(`AniList anime ${ids.anilist || `mal:${ids.mal}`}`, () => anilist.anime({ anilist: ids.anilist, mal: ids.mal }))
+      : null;
+  if (!fromKitsu && !fromAnilist && !entry) return null;
+
+  const listed = [fromKitsu, fromAnilist].filter(Boolean);
+  const chosen =
+    (fromKitsu && fromKitsu.english) || (fromAnilist && fromAnilist.english) || (entry && entry.title) || listed[0].title;
+  const title = shortForm(chosen);
+  const names = [
+    chosen,
+    ...(fromKitsu ? [fromKitsu.title, ...fromKitsu.aliases] : []),
+    ...[...(fromAnilist ? [fromAnilist.title, ...fromAnilist.aliases] : []), ...(entry ? [entry.title, ...entry.names] : [])].filter(distinctive)
+  ];
+  const first = (pick) => listed.map(pick).find(Boolean) || null;
+  return animeResult(
+    {
+      title,
+      aliases: names,
+      year: first((source) => source.year) || (entry && entry.year),
+      released: first((source) => source.released),
+      typicalSeconds: first((source) => source.typicalRuntimeSeconds) || (entry && entry.seconds),
+      sources: [...(fromKitsu ? ["kitsu"] : []), ...(fromAnilist ? ["anilist"] : []), ...(entry ? ["anime database"] : [])]
+    },
+    isEpisode,
+    episode,
+    ep
+  );
+}
+
 /**
  * The title an id names, or null when the services that know it say there is
  * no such title. When it is not found and a service could not be asked -- a
@@ -275,8 +360,9 @@ async function kitsuTitle(id, isEpisode, episode) {
  * ask again in a minute.
  *
  * @param parsed   from ids.parseStreamId
- * @param options  { tmdbKey, region }: the key may be the reader's or the
- *                 server's; without one, `tmdb:` ids cannot be read at all.
+ * @param options  { tmdbKey, region, animeSource }: the key may be the
+ *                 reader's or the server's; without one, `tmdb:` ids cannot
+ *                 be read at all. animeSource: "auto" or "kitsu" (config.js)
  */
 async function resolveTitle(parsed, options) {
   const failed = [];
@@ -289,7 +375,7 @@ async function resolveTitle(parsed, options) {
   return title;
 }
 
-async function lookUp(parsed, { tmdbKey = "", region = "" } = {}) {
+async function lookUp(parsed, { tmdbKey = "", region = "", animeSource = "auto" } = {}) {
   const options = { tmdbKey, region };
   if (parsed.source === "imdb") {
     return parsed.isEpisode
@@ -302,7 +388,7 @@ async function lookUp(parsed, { tmdbKey = "", region = "" } = {}) {
       ? tmdbEpisode(parsed.id, parsed.season, parsed.episode, options)
       : tmdbMovie(parsed.id, options);
   }
-  return kitsuTitle(parsed.id, parsed.isEpisode, parsed.episode);
+  return animeTitle(parsed, animeSource);
 }
 
 module.exports = { resolveTitle, uniqueAliases };

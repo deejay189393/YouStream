@@ -171,7 +171,7 @@ describe("reading and saving", () => {
     const plain = await c.put("", { config: { ...KEY_CONFIG, maxResults: 9 } });
     expect(plain.body).toEqual({ saved: true, manifestChanged: false });
     expect(await store.resolveLink(id, token)).toEqual(expect.objectContaining({ maxResults: 9 }));
-    const rows = await c.put("", { config: { ...KEY_CONFIG, maxResults: 9, types: ["movie"] } });
+    const rows = await c.put("", { config: { ...KEY_CONFIG, maxResults: 9, types: ["movie"], anime: false } });
     expect(rows.body).toEqual({ saved: true, manifestChanged: true });
     const catalog = await c.put("", { config: { ...KEY_CONFIG, types: ["movie"], catalogs: [{ q: "lofi music" }] } });
     expect(catalog.body.manifestChanged).toBe(true);

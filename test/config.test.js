@@ -11,6 +11,7 @@ const {
   presetFor,
   parseRefresh,
   refreshMs,
+  ANIME_SOURCES,
   DEFAULT_CATALOG_REFRESH,
   DEFAULT_MARGINS,
   DEFAULT_EXCLUDE,
@@ -87,6 +88,8 @@ describe("normalizeConfig", () => {
       typicalMargin: DEFAULT_MARGINS.typicalMargin,
       playback: ["app", "youtube"],
       types: ["movie", "series"],
+      anime: true,
+      animeSource: "auto",
       maxResults: DEFAULT_MAX_RESULTS,
       minViews: DEFAULT_MIN_VIEWS,
       region: "",
@@ -351,6 +354,28 @@ describe("encodeConfig", () => {
   test("films and episodes both off is stored, and read back, as no types", () => {
     expect(decoded({ youtubeKey: "yt", types: [] }).types).toEqual([]);
     expect(decodeConfig(encodeConfig({ youtubeKey: "yt", types: [] })).types).toEqual([]);
+  });
+
+  test("anime comes with films or series, as it always did, unless saved otherwise", () => {
+    expect(normalizeConfig({}).anime).toBe(true);
+    expect(normalizeConfig({ types: ["movie"] }).anime).toBe(true);
+    expect(normalizeConfig({ types: [] }).anime).toBe(false);
+    expect(normalizeConfig({ types: [], anime: true }).anime).toBe(true);
+    expect(normalizeConfig({ anime: false }).anime).toBe(false);
+    expect(normalizeConfig({ anime: "yes" }).anime).toBe(true);
+    // Stored only when it differs from that.
+    expect(decoded({ youtubeKey: "yt" }).anime).toBeUndefined();
+    expect(decoded({ youtubeKey: "yt", types: [] }).anime).toBeUndefined();
+    expect(decoded({ youtubeKey: "yt", types: [], anime: true }).anime).toBe(true);
+    expect(decoded({ youtubeKey: "yt", anime: false }).anime).toBe(false);
+  });
+
+  test("anime names from every source unless Kitsu alone is chosen, which is stored", () => {
+    expect(ANIME_SOURCES.map((source) => source.id)).toEqual(["auto", "kitsu"]);
+    expect(normalizeConfig({ animeSource: "kitsu" }).animeSource).toBe("kitsu");
+    expect(normalizeConfig({ animeSource: "anidb" }).animeSource).toBe("auto");
+    expect(decoded({ youtubeKey: "yt", animeSource: "kitsu" }).animeSource).toBe("kitsu");
+    expect(decoded({ youtubeKey: "yt", animeSource: "auto" }).animeSource).toBeUndefined();
   });
 
   test("round-trips through decodeConfig", () => {

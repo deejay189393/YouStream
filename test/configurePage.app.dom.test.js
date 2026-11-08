@@ -241,7 +241,7 @@ describe("the summary", () => {
   test("the setup at a glance", () => {
     const summary = open().summary();
     expect(summary).toEqual({
-      "Looks for": "Movies and series",
+      "Looks for": "Movies, series and anime",
       "Country and language": "United States · Any language",
       "When you press play": "Play in app, then Open in the YouTube app",
       "Stream format": "YouStream",
@@ -268,12 +268,18 @@ describe("the summary", () => {
       p.fire(el, "change");
     };
     change("type-series", false);
+    expect(p.summary()["Looks for"]).toBe("Movies and anime");
+    change("type-anime", false);
     expect(p.summary()["Looks for"]).toBe("Movies");
     change("type-movie", false);
     change("type-series", true);
     expect(p.summary()["Looks for"]).toBe("Series");
+    change("type-anime", true);
+    expect(p.summary()["Looks for"]).toBe("Series and anime");
     change("type-series", false);
-    expect(p.summary()["Looks for"]).toBe("Neither: YouTube only");
+    expect(p.summary()["Looks for"]).toBe("Anime");
+    change("type-anime", false);
+    expect(p.summary()["Looks for"]).toBe("Nothing: YouTube only");
     change("search-sort", "date");
     change("search-length", "long");
     expect(p.summary()["YouTube search in your app"]).toBe("On · Newest · Over 20 minutes");

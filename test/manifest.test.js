@@ -2,6 +2,7 @@ const {
   buildManifest,
   getUnconfiguredManifest,
   buildInterfaceManifest,
+  ANIME_PREFIXES,
   identity,
   stremioAddonsConfig,
   catalogsFor,
@@ -57,14 +58,28 @@ describe("the served manifest", () => {
   });
 
   test("the reader's content types, and YouTube's own, lower case like them", () => {
-    expect(buildManifest({ youtubeKey: "k", types: ["series"] }, BASE).types).toEqual(["series", "anime", "youtube"]);
+    expect(buildManifest({ youtubeKey: "k", types: ["series"], anime: false }, BASE).types).toEqual(["series", "youtube"]);
+  });
+
+  test("anime: 'anime' and the usual two, which anime addons file anime under too, and the anime databases' ids", () => {
+    const series = buildManifest({ youtubeKey: "k", types: ["series"] }, BASE);
+    expect(series.types).toEqual(["movie", "series", "anime", "youtube"]);
+    expect(series.idPrefixes).toEqual(["tt", "kitsu:", "mal:", "anilist:", "anidb:", "yt_id:", "youstream:"]);
+    const alone = buildManifest({ youtubeKey: "k", types: [], anime: true }, BASE);
+    expect(alone.types).toEqual(["movie", "series", "anime", "youtube"]);
+    // Anime's ids only: an app asks nothing about films or shows.
+    expect(alone.idPrefixes).toEqual(["kitsu:", "mal:", "anilist:", "anidb:", "yt_id:", "youstream:"]);
+    expect(ANIME_PREFIXES).toEqual(["kitsu:", "mal:", "anilist:", "anidb:"]);
+    const none = buildManifest({ youtubeKey: "k", types: [], anime: false, catalogs: [{ trending: "all" }] }, BASE);
+    expect(none.types).toEqual(["youtube"]);
+    expect(none.idPrefixes).toEqual(["yt_id:", "youstream:"]);
   });
 
   test("tmdb: ids are claimed only when there is a TMDB key to read them with", () => {
-    expect(buildManifest({ youtubeKey: "k" }, BASE).idPrefixes).toEqual(["tt", "kitsu:", "yt_id:", "youstream:"]);
-    expect(buildManifest({ youtubeKey: "k", tmdbKey: "t" }, BASE).idPrefixes).toEqual(["tt", "kitsu:", "tmdb:", "yt_id:", "youstream:"]);
+    expect(buildManifest({ youtubeKey: "k" }, BASE).idPrefixes).toEqual(["tt", "kitsu:", "mal:", "anilist:", "anidb:", "yt_id:", "youstream:"]);
+    expect(buildManifest({ youtubeKey: "k", tmdbKey: "t" }, BASE).idPrefixes).toEqual(["tt", "tmdb:", "kitsu:", "mal:", "anilist:", "anidb:", "yt_id:", "youstream:"]);
     process.env.TMDB_API_KEY = "server";
-    expect(buildManifest({ youtubeKey: "k" }, BASE).idPrefixes).toEqual(["tt", "kitsu:", "tmdb:", "yt_id:", "youstream:"]);
+    expect(buildManifest({ youtubeKey: "k" }, BASE).idPrefixes).toEqual(["tt", "tmdb:", "kitsu:", "mal:", "anilist:", "anidb:", "yt_id:", "youstream:"]);
   });
 
   test("metadata only for YouTube items, streams for those and for films and shows, each resource with its own ids", () => {
@@ -77,7 +92,7 @@ describe("the served manifest", () => {
       {
         name: "stream",
         types: ["movie", "series", "anime", "youtube", "YouTube", "channel"],
-        idPrefixes: ["tt", "kitsu:", "yt_id:", "youstream:"]
+        idPrefixes: ["tt", "kitsu:", "mal:", "anilist:", "anidb:", "yt_id:", "youstream:"]
       }
     ]);
     // Only the current type is listed; the others are answered, not offered.
@@ -160,7 +175,7 @@ test("the internal routing manifest has the config array the SDK needs for /:con
   const manifest = buildInterfaceManifest();
   expect(manifest.config.length).toBeGreaterThan(0);
   expect(manifest.resources).toEqual(["catalog", "meta", "stream"]);
-  expect(manifest.idPrefixes).toEqual(["tt", "kitsu:", "tmdb:", "yt_id:", "youstream:"]);
+  expect(manifest.idPrefixes).toEqual(["tt", "tmdb:", "kitsu:", "mal:", "anilist:", "anidb:", "yt_id:", "youstream:"]);
   // One catalog, so the router serves catalogs at all; each reader's own
   // catalog ids are read from their config.
   expect(manifest.catalogs.map((c) => c.id)).toEqual([SEARCH_CATALOG_ID]);

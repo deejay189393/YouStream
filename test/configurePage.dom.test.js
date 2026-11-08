@@ -186,6 +186,57 @@ describe("building the install link", () => {
   });
 });
 
+describe("anime", () => {
+  const tick = (p, id, on) => {
+    p.check(id, on);
+    p.$(`#${id}`).dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
+  };
+  test("on with films and series, its names from every source, which is not stored", () => {
+    const p = loadPage({ existing: normalizeConfig({ youtubeKey: "k" }) });
+    expect(p.$("#type-anime").checked).toBe(true);
+    expect(p.$("#anime-source-field").hidden).toBe(false);
+    expect(p.$("#anime-source").value).toBe("auto");
+    expect([...p.$("#anime-source").options].map((o) => o.textContent)).toEqual([
+      "Automatic: every source",
+      "Kitsu alone"
+    ]);
+    p.submit();
+    expect(p.rawGenerated().anime).toBeUndefined();
+    expect(p.rawGenerated().animeSource).toBeUndefined();
+  });
+
+  test("switched off, its names have no say and are not shown; Kitsu alone is stored", () => {
+    const p = loadPage({ existing: normalizeConfig({ youtubeKey: "k" }) });
+    p.set("anime-source", "kitsu");
+    p.submit();
+    expect(p.rawGenerated()).toMatchObject({ animeSource: "kitsu" });
+    tick(p, "type-anime", false);
+    expect(p.$("#anime-source-field").hidden).toBe(true);
+    p.submit();
+    expect(p.rawGenerated().anime).toBe(false);
+    expect(p.rawGenerated().animeSource).toBeUndefined();
+    tick(p, "type-anime", true);
+    expect(p.$("#anime-source-field").hidden).toBe(false);
+  });
+
+  test("on alone, it is stored, as it would otherwise go with films and series", () => {
+    const p = loadPage({ existing: normalizeConfig({ youtubeKey: "k" }) });
+    p.check("type-movie", false);
+    p.check("type-series", false);
+    p.submit();
+    expect(p.error()).toBeNull();
+    expect(p.rawGenerated()).toMatchObject({ types: [], anime: true });
+  });
+
+  test("opened again as saved", () => {
+    const off = loadPage({ existing: normalizeConfig({ youtubeKey: "k", anime: false }) });
+    expect(off.$("#type-anime").checked).toBe(false);
+    expect(off.$("#anime-source-field").hidden).toBe(true);
+    const kitsu = loadPage({ existing: normalizeConfig({ youtubeKey: "k", animeSource: "kitsu" }) });
+    expect(kitsu.$("#anime-source").value).toBe("kitsu");
+  });
+});
+
 describe("validation", () => {
   const attempt = (setup) => {
     const p = loadPage();
@@ -200,13 +251,14 @@ describe("validation", () => {
     ["a key with spaces", (p) => p.set("youtube-key", "AIza Key"), "That YouTube key has characters"],
     ["a TMDB key with symbols", (p) => p.set("tmdb-key", "tm<db"), "That TMDB key has characters"],
     [
-      "nothing to do: no films, no shows, no search and no catalog",
+      "nothing to do: no films, no shows, no anime, no search and no catalog",
       (p) => {
         p.check("type-movie", false);
         p.check("type-series", false);
+        p.check("type-anime", false);
         p.check("yt-search", false);
       },
-      "Choose something for YouStream to do: movies, series, YouTube search, or a catalog."
+      "Choose something for YouStream to do: movies, series, anime, YouTube search, or a catalog."
     ],
     ["a refresh interval that is no number", (p) => p.set("refresh-value", "soon"), "Refresh catalogs every: enter a number."],
     ["a refresh interval of nothing", (p) => p.set("refresh-value", "0"), "Refresh catalogs every: enter a number."],
