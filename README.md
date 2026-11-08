@@ -1023,6 +1023,35 @@ The configure page and the terms page show the credits these terms ask for.
   has no Shorts filter. A search row's length filter (4 minutes and over)
   keeps nearly all of them out.
 
+## Maybe later
+
+Ideas looked into and parked, with what was measured, so that picking one
+up starts from the numbers.
+
+- **An exact length range for search rows**, such as 30 to 60 minutes.
+  YouTube's search knows three lengths: under 4 minutes, 4 to 20, and over
+  20. A finer range would be trimmed from the results, and every page it
+  takes to fill a row is another 101-unit search. Pages needed are about 1
+  divided by the share of results inside the range, measured on real
+  searches:
+
+  | Range | stand-up | Hindi podcasts | lofi | documentaries |
+  |---|---|---|---|---|
+  | 5 to 15 minutes | 44% | 1% | 4% | 1% |
+  | 10 to 30 minutes | 57% | 9% | 7% | 2% |
+  | 30 to 60 minutes | 10% | 22% | 6% | 45% |
+  | over 60 minutes | 7% | 56% | 80% | 40% |
+
+  Searching within the YouTube length that holds the range (over 20
+  minutes, for 30 to 60) and trimming from there takes about 1.1 to 3.5
+  searches a row instead of 1: 3.5 for 30 to 60 minutes of stand-up, 1.9
+  for documentaries, 1.5 for Hindi podcasts over an hour, 1.1 for lofi
+  over an hour. A range across 4 or 20 minutes, which no YouTube length
+  holds, takes 2 to 50. Rows stop at 5 pages, so a row never costs more
+  than 5 searches. Parked because YouTube's three lengths cover most rows
+  at no extra cost; if it is built, the range should sit inside one of
+  them.
+
 ## Legal
 
 **What YouStream does.** It searches YouTube, with each reader's own YouTube
