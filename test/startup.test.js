@@ -10,7 +10,10 @@ const http = require("http");
  */
 describe("server startup", () => {
   let child;
-  const PORT = 34568;
+  // Below the ports the system hands out to listen(0) and to outgoing
+  // connections (32768 and up on Linux, 49152 and up on macOS), so that no
+  // other test's server, running alongside, can be holding it.
+  const PORT = 28457;
 
   afterEach(() => {
     if (child && !child.killed) child.kill("SIGKILL");
@@ -19,8 +22,8 @@ describe("server startup", () => {
   test("listens on the PORT given in the environment and serves /health", async () => {
     child = spawn(process.execPath, [path.join(__dirname, "..", "start.js")], {
       // The cache settings this machine happens to have are left out, and one
-      // is mistyped on purpose.
-      env: { ...process.env, PORT: String(PORT), REDIS_URL: "", CACHE_STORE: "", CACHE_SEARCH_TTL: "a day", IMDB_DATASETS: "off" },
+      // is mistyped on purpose. No dataset is downloaded.
+      env: { ...process.env, PORT: String(PORT), REDIS_URL: "", CACHE_STORE: "", CACHE_SEARCH_TTL: "a day", IMDB_DATASETS: "off", ANIME_DATASET: "off" },
       stdio: ["ignore", "pipe", "pipe"]
     });
 
@@ -30,7 +33,7 @@ describe("server startup", () => {
       stderr += buf.toString();
     });
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("server did not start in time")), 15000);
+      const timer = setTimeout(() => reject(new Error(`server did not start in time\n${stderr}`)), 15000);
       child.stdout.on("data", (buf) => {
         stdout += buf.toString();
         if (stdout.includes("listening")) {
@@ -39,6 +42,11 @@ describe("server startup", () => {
         }
       });
       child.on("error", reject);
+      // A server that stops before it listens says why, at once.
+      child.on("exit", (code, signal) => {
+        clearTimeout(timer);
+        reject(new Error(`server stopped before listening (${signal || `exit code ${code}`}):\n${stderr}`));
+      });
     });
 
     expect(stdout).toContain(`listening on port ${PORT}`);
