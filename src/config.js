@@ -1,7 +1,7 @@
 const { normalizePlayback, PLAYBACK_VERSION } = require("./playback");
 const { COUNTRY_SET, LANGUAGE_SET } = require("./regions");
 const { PRESETS, DEFAULT_FORMAT, MAX_NAME_TEMPLATE, MAX_DESCRIPTION_TEMPLATE } = require("./streamFormat");
-const { normalizeCatalogs, toStoredCatalogs, SORTS, LENGTHS } = require("./catalogs");
+const { normalizeCatalogs, toStoredCatalogs, SORTS, lengthOf } = require("./catalogs");
 
 /**
  * The reader's settings travel in the addon URL as its first path segment,
@@ -51,7 +51,8 @@ const { normalizeCatalogs, toStoredCatalogs, SORTS, LENGTHS } = require("./catal
  *                   search existed has it as well
  *   searchSort      "relevance"  YouTube's own ranking; or date, viewCount,
  *                   rating
- *   searchLength    "any"  or short (under 4 minutes), medium, long
+ *   searchLength    "any"  or YouTube's short (under 4 minutes), medium,
+ *                   long, or ranges and minutes as a row's (catalogs.js)
  *   safeSearch      "moderate"  YouTube's default; or strict, none
  *   catalogs        []     the reader's rows: searches, channels, playlists,
  *                   Trending, in order (catalogs.js)
@@ -350,7 +351,7 @@ function normalizeConfig(config) {
     descriptionTemplate,
     search: c.search !== false,
     searchSort: optionIdOf(SORTS, c.searchSort),
-    searchLength: optionIdOf(LENGTHS, c.searchLength),
+    searchLength: lengthOf(c.searchLength).id,
     safeSearch: SAFE_SEARCH.includes(c.safeSearch) ? c.safeSearch : SAFE_SEARCH[0],
     catalogs: normalizeCatalogs(c.catalogs),
     catalogRefresh: parseRefresh(c.catalogRefresh) || { ...DEFAULT_CATALOG_REFRESH }
@@ -393,7 +394,7 @@ function compactConfig(config) {
   }
   if (!n.search) out.search = false;
   if (n.searchSort !== SORTS[0].id) out.searchSort = n.searchSort;
-  if (n.searchLength !== LENGTHS[0].id) out.searchLength = n.searchLength;
+  if (n.searchLength !== "any") out.searchLength = n.searchLength;
   if (n.safeSearch !== SAFE_SEARCH[0]) out.safeSearch = n.safeSearch;
   if (n.catalogs.length) out.catalogs = toStoredCatalogs(n.catalogs);
   if (!sameMargin(n.catalogRefresh, DEFAULT_CATALOG_REFRESH)) out.catalogRefresh = formatMargin(n.catalogRefresh);

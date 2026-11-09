@@ -29,6 +29,11 @@ const crypto = require("crypto");
  *
  *   { q: "cricket highlights", sort: "date", types: ["videos", "live"] }
  *
+ * Any of them can have a name of its own, which apps show in place of the
+ * one made from what it lists:
+ *
+ *   { q: "lofi hip hop", sort: "date", label: "Lofi" }
+ *
  * Any of them can also keep only, or leave out, the videos that mention some
  * words in their title, channel name or description:
  *
@@ -44,13 +49,118 @@ const SORTS = [
   { id: "rating", label: "Top rated", short: "Top rated" }
 ];
 
-/** YouTube search's length filter. Shorts are all under four minutes. */
-const LENGTHS = [
-  { id: "any", label: "Any length" },
-  { id: "short", label: "Under 4 minutes", short: "Under 4 min" },
-  { id: "medium", label: "4 to 20 minutes", short: "4–20 min" },
-  { id: "long", label: "Over 20 minutes", short: "Over 20 min" }
+/**
+ * The lengths a row can keep to: any of four ranges, together or not, or a
+ * range of minutes of the reader's own. Kept as one word:
+ *
+ *   any                    every length
+ *   short, medium, long    YouTube's own: under 4 minutes, 4 to 20, over 20
+ *   under4+over60          ranges together
+ *   30-45, 90-, 0-10       minutes, from and to, either left open
+ *
+ * YouTube's search knows only its own three, so a search asks for the
+ * narrowest that holds the length and trims the rest from its results;
+ * every other row trims its own. Ranges that make up one of YouTube's
+ * lengths are kept as its word, so a row from before ranges keeps its id.
+ * Bounds are in seconds, inclusive.
+ */
+const LENGTH_RANGES = [
+  { id: "under4", label: "Under 4", min: 0, max: 239, from: 0, to: 4 },
+  { id: "4to20", label: "4–20", min: 240, max: 1200, from: 4, to: 20 },
+  { id: "20to60", label: "20–60", min: 1201, max: 3600, from: 20, to: 60 },
+  { id: "over60", label: "Over 60", min: 3601, max: Infinity, from: 60, to: null }
 ];
+const YOUTUBE_LENGTHS = [
+  { id: "short", ranges: ["under4"] },
+  { id: "medium", ranges: ["4to20"] },
+  { id: "long", ranges: ["20to60", "over60"] }
+];
+const MAX_LENGTH_MINUTES = 1440;
+const ANY_LENGTH = { id: "any", ranges: [], youtube: null, trims: false, short: "" };
+
+/**
+ * The narrowest of YouTube's lengths that holds [min, max] seconds, or
+ * null for none. A second either way of its bounds is let in: a search for
+ * "over 20 minutes" leaves out only what runs exactly 20:00.
+ */
+function youtubeLengthHolding(min, max) {
+  if (max <= 240) return "short";
+  if (min >= 240 && max <= 1201) return "medium";
+  if (min >= 1200) return "long";
+  return null;
+}
+
+/** "Under 4 min", "4–60 min", "Over 1 hr": minutes, from and to, either open. */
+function minutesName(from, to) {
+  const say = (m) => (m === 60 ? "1 hr" : `${m} min`);
+  if (!from) return `Under ${say(to)}`;
+  if (to === null) return `Over ${say(from)}`;
+  return `${from}–${to} min`;
+}
+
+/** A length made of ranges (their ids), as lengthOf gives it. */
+function rangesLength(ids) {
+  const chosen = LENGTH_RANGES.filter((range) => ids.includes(range.id));
+  if (!chosen.length || chosen.length === LENGTH_RANGES.length) return ANY_LENGTH;
+  const key = chosen.map((range) => range.id).join("+");
+  const youtube = YOUTUBE_LENGTHS.find((length) => length.ranges.join("+") === key);
+  // Side by side, ranges read as one: "under 20 minutes" for the first two.
+  const spans = [];
+  chosen.forEach((range) => {
+    const last = spans[spans.length - 1];
+    if (last && LENGTH_RANGES.indexOf(last[1]) === LENGTH_RANGES.indexOf(range) - 1) last[1] = range;
+    else spans.push([range, range]);
+  });
+  const names = spans.map(([first, last], i) => {
+    const name = minutesName(first.from, last.to);
+    return i ? name.charAt(0).toLowerCase() + name.slice(1) : name;
+  });
+  return {
+    id: youtube ? youtube.id : key,
+    ranges: chosen.map((range) => [range.min, range.max]),
+    youtube: youtubeLengthHolding(chosen[0].min, chosen[chosen.length - 1].max),
+    trims: !youtube,
+    short: names.join(" & ")
+  };
+}
+
+/** A length in minutes, from and to, either one open. */
+function minutesLength(from, to) {
+  if (from === 0 && to === null) return ANY_LENGTH;
+  const min = from * 60;
+  const max = to === null ? Infinity : to * 60;
+  return {
+    id: `${from}-${to === null ? "" : to}`,
+    ranges: [[min, max]],
+    youtube: youtubeLengthHolding(min, max),
+    trims: true,
+    short: minutesName(from, to)
+  };
+}
+
+/**
+ * A row's length, from the word it is kept as: its id, the ranges in
+ * seconds it keeps (none for any length), YouTube's own length a search
+ * asks for, whether results must be trimmed beyond that, and its name in
+ * the row's name. Anything else is any length.
+ */
+function lengthOf(raw) {
+  const text = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  const youtube = YOUTUBE_LENGTHS.find((length) => length.id === text);
+  if (youtube) return rangesLength(youtube.ranges);
+  const ids = text.split("+");
+  if (ids.every((id) => LENGTH_RANGES.some((range) => range.id === id))) return rangesLength(ids);
+  const minutes = /^(\d{1,4})-(\d{1,4})?$/.exec(text);
+  if (minutes) {
+    const from = Number(minutes[1]);
+    const to = minutes[2] === undefined ? null : Number(minutes[2]);
+    if (from <= MAX_LENGTH_MINUTES && (to === null || (to > from && to <= MAX_LENGTH_MINUTES))) return minutesLength(from, to);
+  }
+  return ANY_LENGTH;
+}
+
+/** The end of a row's id for its length, unless it is any length. */
+const lengthSuffix = (length) => (length.id === "any" ? "" : `.${length.id}`);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -229,7 +339,7 @@ function searchEntry(raw) {
   const types = typesOf(raw.types, ALL_TYPES);
   // A row of Shorts alone asks YouTube for videos under four minutes, which
   // every Short is (browse.js), so a length it was given has no say.
-  const length = onlyShorts(types) ? LENGTHS[0] : optionOf(LENGTHS, raw.length);
+  const length = rowLength(raw, types);
   const within = optionOf(PERIODS, raw.within);
   const words = slug(q);
   // A row of every kind keeps the id it had before kinds could be chosen.
@@ -246,6 +356,9 @@ function searchEntry(raw) {
     types
   };
 }
+
+/** A row's length: none of its own for Shorts alone, which are all short. */
+const rowLength = (raw, types) => (onlyShorts(types) ? ANY_LENGTH : lengthOf(raw.length));
 
 /**
  * A channel's or playlist's own name: `name` as stored, or `title` in an
@@ -269,15 +382,17 @@ function channelEntry(raw) {
   if (typeof raw.channel !== "string" || !CHANNEL_ID.test(raw.channel)) return null;
   const types = channelTypes(raw);
   const sort = optionOf(CHANNEL_SORTS, raw.sort);
+  const length = rowLength(raw, types);
   const title = tidy(ownTitle(raw), MAX_NAME_LENGTH) || "YouTube channel";
   return {
     kind: "channel",
-    id: `channel.${raw.channel}.${typesKey(types)}${sort === CHANNEL_SORTS[0] ? "" : `.${sort.id}`}`,
-    name: tidy(withOptions(title, [typesOption(types, CHANNEL_TYPES), sort]), MAX_NAME_LENGTH),
+    id: `channel.${raw.channel}.${typesKey(types)}${sort === CHANNEL_SORTS[0] ? "" : `.${sort.id}`}${lengthSuffix(length)}`,
+    name: tidy(withOptions(title, [typesOption(types, CHANNEL_TYPES), sort, length]), MAX_NAME_LENGTH),
     title,
     channel: raw.channel,
     types,
-    sort: sort.id
+    sort: sort.id,
+    length: length.id
   };
 }
 
@@ -285,13 +400,15 @@ function playlistEntry(raw) {
   if (typeof raw.playlist !== "string" || !PLAYLIST_ID.test(raw.playlist)) return null;
   const title = tidy(ownTitle(raw), MAX_NAME_LENGTH) || "YouTube playlist";
   const types = typesOf(raw.types, ALL_TYPES);
+  const length = rowLength(raw, types);
   return {
     kind: "playlist",
-    id: `playlist.${raw.playlist}${typesSuffix(types)}`,
-    name: tidy(withOptions(title, [typesOption(types, ALL_TYPES)]), MAX_NAME_LENGTH),
+    id: `playlist.${raw.playlist}${typesSuffix(types)}${lengthSuffix(length)}`,
+    name: tidy(withOptions(title, [typesOption(types, ALL_TYPES), length]), MAX_NAME_LENGTH),
     title,
     playlist: raw.playlist,
-    types
+    types,
+    length: length.id
   };
 }
 
@@ -299,12 +416,14 @@ function trendingEntry(raw) {
   const chart = TRENDING.find((t) => t.id === raw.trending);
   if (!chart) return null;
   const types = typesOf(raw.types, ALL_TYPES);
+  const length = rowLength(raw, types);
   return {
     kind: "trending",
-    id: `trending.${chart.id}${typesSuffix(types)}`,
-    name: withOptions(chart.label, [typesOption(types, ALL_TYPES)]),
+    id: `trending.${chart.id}${typesSuffix(types)}${lengthSuffix(length)}`,
+    name: withOptions(chart.label, [typesOption(types, ALL_TYPES), length]),
     trending: chart.id,
-    types
+    types,
+    length: length.id
   };
 }
 
@@ -352,9 +471,11 @@ function normalizeEntry(raw) {
   else if (raw.channel !== undefined) entry = channelEntry(raw);
   else if (raw.playlist !== undefined) entry = playlistEntry(raw);
   else if (raw.trending !== undefined) entry = trendingEntry(raw);
-  // The filter changes which of the videos are listed, not what is fetched,
-  // so it is no part of the id: editing it never makes the row a new one.
-  return entry && { ...entry, filter: filterOf(raw) };
+  if (!entry) return null;
+  // A name of the reader's own is what apps show; like the filter, it is no
+  // part of the id, so renaming a row never makes it a new one.
+  const label = tidy(raw.label, MAX_NAME_LENGTH);
+  return { ...entry, ...(label ? { name: label, label } : {}), filter: filterOf(raw) };
 }
 
 /** The reader's catalogs, in their order, without repeats, at most MAX_CATALOGS. */
@@ -374,7 +495,7 @@ function normalizeCatalogs(raw) {
 
 /** The compact form the install URL carries. */
 function toStoredEntry(entry) {
-  const source = toStoredSource(entry);
+  const source = { ...toStoredSource(entry), ...(entry.label ? { label: entry.label } : {}) };
   if (!entry.filter) return source;
   const { mode, words, scope } = entry.filter;
   return { ...source, [mode]: words, ...(scope === "title" ? { filterIn: "title" } : {}) };
@@ -393,16 +514,18 @@ function toStoredSource(entry) {
       ...storedTypes(entry.types, ALL_TYPES)
     };
   }
+  const length = entry.length !== "any" ? { length: entry.length } : {};
   if (entry.kind === "channel") {
     return {
       channel: entry.channel,
       name: entry.title,
       ...storedTypes(entry.types, CHANNEL_TYPES),
-      ...(entry.sort !== "date" ? { sort: entry.sort } : {})
+      ...(entry.sort !== "date" ? { sort: entry.sort } : {}),
+      ...length
     };
   }
-  if (entry.kind === "playlist") return { playlist: entry.playlist, name: entry.title, ...storedTypes(entry.types, ALL_TYPES) };
-  return { trending: entry.trending, ...storedTypes(entry.types, ALL_TYPES) };
+  if (entry.kind === "playlist") return { playlist: entry.playlist, name: entry.title, ...storedTypes(entry.types, ALL_TYPES), ...length };
+  return { trending: entry.trending, ...storedTypes(entry.types, ALL_TYPES), ...length };
 }
 
 const toStoredCatalogs = (entries) => entries.map(toStoredEntry);
@@ -511,7 +634,9 @@ function parseSourceLink(raw, kind) {
 
 module.exports = {
   SORTS,
-  LENGTHS,
+  LENGTH_RANGES,
+  MAX_LENGTH_MINUTES,
+  lengthOf,
   PERIODS,
   VIDEO_TYPES,
   ALL_TYPES,

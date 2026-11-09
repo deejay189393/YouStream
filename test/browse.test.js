@@ -323,6 +323,72 @@ describe("a catalog's kinds of video", () => {
   });
 });
 
+describe("a row's length", () => {
+  // Videos of every length: 3 min, 10 min, 30 min, 2 hours, and a stream live now.
+  const LENGTHS = {
+    m3: { contentDetails: { duration: "PT3M" } },
+    m10: { contentDetails: { duration: "PT10M" } },
+    m30: { contentDetails: { duration: "PT30M" } },
+    h2: { contentDetails: { duration: "PT2H" } },
+    live: { snippet: { liveBroadcastContent: "live" }, contentDetails: { duration: "P0D" } }
+  };
+  const ALL = Object.keys(LENGTHS);
+  const videos = (url) => ({ items: new URL(url).searchParams.get("id").split(",").map((id) => apiVideo(id, LENGTHS[id])) });
+  const listed = async (raw, config = {}) => (await browse.catalogItems({ entry: normalizeEntry(raw), settings: settingsFor(config) })).map((i) => i.id);
+
+  test("YouTube's own: asked of YouTube, nothing trimmed", async () => {
+    const fetch = routeFetch([["/search?", searchBody(ALL)], ["/videos?", videos]]);
+    expect(await listed({ q: "x", length: "long" })).toEqual(ALL);
+    expect(params(fetch, 0).videoDuration).toBe("long");
+  });
+
+  test("within one of YouTube's: YouTube's asked for, the rest trimmed; a stream live now has no length and stays", async () => {
+    const fetch = routeFetch([["/search?", searchBody(ALL)], ["/videos?", videos]]);
+    expect(await listed({ q: "x", length: "20to60" })).toEqual(["m30", "live"]);
+    expect(params(fetch, 0).videoDuration).toBe("long");
+  });
+
+  test("across YouTube's: every length asked for, all but the ranges trimmed", async () => {
+    const fetch = routeFetch([["/search?", searchBody(ALL)], ["/videos?", videos]]);
+    expect(await listed({ q: "x", length: "under4+over60" })).toEqual(["m3", "h2", "live"]);
+    expect(params(fetch, 0).videoDuration).toBeUndefined();
+  });
+
+  test("minutes of the reader's own", async () => {
+    routeFetch([["/search?", searchBody(ALL)], ["/videos?", videos]]);
+    expect(await listed({ q: "x", length: "5-40" })).toEqual(["m10", "m30", "live"]);
+  });
+
+  test("a channel's, a playlist's and Trending's are trimmed here, whatever the length", async () => {
+    routeFetch([
+      ["/playlistItems?", { items: ALL.map((videoId) => ({ contentDetails: { videoId } })) }],
+      ["/videos?", (url) => (new URL(url).searchParams.get("chart") ? { items: ALL.map((id) => apiVideo(id, LENGTHS[id])) } : videos(url))]
+    ]);
+    expect(await listed({ channel: "UCBJycsmduvYEL83R_U4JriQ", length: "short" })).toEqual(["m3", "live"]);
+    expect(await listed({ playlist: "PLBCF2DAC6FFB574DE", length: "over60" })).toEqual(["h2", "live"]);
+    expect(await listed({ trending: "all", length: "medium" })).toEqual(["m10", "live"]);
+  });
+
+  test("the app's search keeps to its length the same way", async () => {
+    const fetch = routeFetch([["/search?", searchBody(ALL)], ["/videos?", videos]]);
+    const { items } = await browse.searchItems({ query: "lofi radio", settings: settingsFor({ searchLength: "over60" }), settleOptions: { waitMs: 0 } });
+    expect(items.map((i) => i.id)).toEqual(["h2", "live"]);
+    expect(params(fetch, 0).videoDuration).toBe("long");
+  });
+
+  test("what is trimmed, and when not", () => {
+    expect(browse.lengthsToTrim("any", true)).toBeNull();
+    expect(browse.lengthsToTrim("long", true)).toBeNull();
+    expect(browse.lengthsToTrim("long", false)).toEqual([
+      [1201, 3600],
+      [3601, Infinity]
+    ]);
+    expect(browse.lengthsToTrim("20to60", true)).toEqual([[1201, 3600]]);
+    expect(browse.ofLength({ durationSeconds: 100 }, null)).toBe(true);
+    expect(browse.ofLength({ durationSeconds: null }, [[0, 10]])).toBe(true);
+  });
+});
+
 describe("channel, playlist and Trending catalogs", () => {
   test("a channel's videos without Shorts, or its Shorts, newest or most viewed first, from the playlists YouTube keeps", async () => {
     const fetch = routeFetch([

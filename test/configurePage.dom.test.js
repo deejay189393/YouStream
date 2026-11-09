@@ -622,6 +622,25 @@ const pick = (p, select, value) => {
   select.dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
 };
 const source = (p, kind) => pick(p, p.$("#catalog-source"), kind);
+/** A length picker: a row's (by index) or the app's search's ("search"). */
+const lengthBox = (p, where) =>
+  where === "search" ? p.$("#search-length .cat-lengths") : p.document.querySelectorAll("#catalog-list .cat-row")[where].querySelector(".cat-lengths");
+const lengthChecks = (p, where) => [...lengthBox(p, where).querySelectorAll('input[type="checkbox"]')];
+const lengthsTicked = (p, where) => lengthChecks(p, where).filter((box) => box.checked).map((box) => box.value);
+/** Ticks or unticks one of a picker's boxes: a range's id, or "custom". */
+const tickLength = (p, where, id) => {
+  const box = lengthChecks(p, where).find((b) => b.value === id);
+  box.checked = !box.checked;
+  box.dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
+};
+/** Custom minutes typed into a picker, from and to ("" leaves one open). */
+const typeMinutes = (p, where, from, to) => {
+  const [low, high] = lengthBox(p, where).querySelectorAll(".cat-minutes input");
+  low.value = from;
+  high.value = to;
+  low.dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
+};
+
 /** A row's kinds of video, as its toggles show them, and a toggle clicked. */
 const typeBoxes = (p, row) => [...p.document.querySelectorAll("#catalog-list .cat-row")[row].querySelectorAll(".cat-types input")];
 const ticked = (p, row) => typeBoxes(p, row).filter((box) => box.checked).map((box) => box.value);
@@ -881,8 +900,8 @@ describe("the YouTube card", () => {
     expect(labels(0)).toEqual([["Newest", "Most viewed"]]);
     expect(labels(2)[0]).toEqual(["Most relevant", "Newest", "Most viewed", "Top rated"]);
     pick(p, selects(2)[0], "date");
-    pick(p, selects(2)[1], "medium");
-    pick(p, selects(2)[2], "day");
+    tickLength(p, 2, "4to20");
+    pick(p, selects(2)[1], "day");
     toggle(p, 0, "live");
     toggle(p, 0, "videos");
     pick(p, selects(0)[0], "viewCount");
@@ -958,23 +977,195 @@ describe("the YouTube card", () => {
   test("a search of Shorts alone has no length to choose: it asks for under four minutes", () => {
     const p = loadPage({ existing: normalizeConfig({ youtubeKey: "k" }) });
     add(p, "cricket");
-    const length = () => p.document.querySelectorAll("#catalog-list .cat-opts select")[1];
-    pick(p, length(), "long");
+    tickLength(p, 0, "20to60");
+    tickLength(p, 0, "over60");
     expect(names(p)).toEqual(["cricket · Over 20 min"]);
     toggle(p, 0, "videos");
     toggle(p, 0, "live");
     expect(ticked(p, 0)).toEqual(["shorts"]);
-    expect(length().hidden).toBe(true);
-    expect(length().value).toBe("any");
+    expect(lengthBox(p, 0).hidden).toBe(true);
+    expect(lengthsTicked(p, 0)).toEqual([]);
     expect(names(p)).toEqual(["cricket · Shorts"]);
     p.submit();
     expect(p.rawGenerated().catalogs).toEqual([{ q: "cricket", types: ["shorts"] }]);
     toggle(p, 0, "videos");
-    expect(length().hidden).toBe(false);
+    expect(lengthBox(p, 0).hidden).toBe(false);
     expect(names(p)).toEqual(["cricket · Videos & Shorts"]);
     // Opened again, a row of Shorts alone shows no length.
     const again = loadPage({ existing: normalizeConfig({ youtubeKey: "k", catalogs: [{ q: "cricket", types: ["shorts"] }] }) });
-    expect(again.document.querySelectorAll("#catalog-list .cat-opts select")[1].hidden).toBe(true);
+    expect(lengthBox(again, 0).hidden).toBe(true);
+  });
+
+  test("every row keeps to lengths: any of four ranges, said in its name and kept with it", () => {
+    const existing = normalizeConfig({ youtubeKey: "k", catalogs: [{ channel: CHANNEL, name: "MKBHD" }, { trending: "music" }] });
+    const p = loadPage({ existing });
+    add(p, "lofi");
+    expect(lengthChecks(p, 0).map((box) => box.parentNode.textContent)).toEqual(["Under 4", "4–20", "20–60", "Over 60", "Custom"]);
+    expect(lengthBox(p, 0).getAttribute("aria-label")).toBe("Lengths of video in MKBHD");
+    tickLength(p, 0, "over60");
+    tickLength(p, 1, "under4");
+    tickLength(p, 1, "4to20");
+    tickLength(p, 2, "under4");
+    tickLength(p, 2, "over60");
+    expect(names(p)).toEqual(["MKBHD · Over 1 hr", "Trending Music · Under 20 min", "lofi · Under 4 min & over 1 hr"]);
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([
+      { channel: CHANNEL, name: "MKBHD", length: "over60" },
+      { trending: "music", length: "under4+4to20" },
+      { q: "lofi", length: "under4+over60" }
+    ]);
+    expect(p.generated().catalogs.map((c) => c.name)).toEqual(names(p));
+    // Unticked to none, any length again; and all four are any length too.
+    tickLength(p, 0, "over60");
+    expect(names(p)[0]).toBe("MKBHD");
+    ["under4", "4to20", "20to60", "over60"].forEach((id) => tickLength(p, 0, id));
+    expect(names(p)[0]).toBe("MKBHD");
+    expect(lengthsTicked(p, 0)).toEqual([]);
+  });
+
+  test("one channel's rows of different lengths are different rows", () => {
+    const existing = normalizeConfig({ youtubeKey: "k", catalogs: [{ channel: CHANNEL, name: "N", length: "under4" }, { channel: CHANNEL, name: "N" }] });
+    const p = loadPage({ existing });
+    const sort = p.document.querySelectorAll("#catalog-list .cat-row")[1].querySelector(".cat-opts select");
+    pick(p, sort, "viewCount");
+    expect(note(p)).toBe("");
+    expect(names(p)).toEqual(["N · Under 4 min", "N · Most viewed"]);
+  });
+
+  test("a search row says when YouTube cannot search for its lengths itself", () => {
+    const p = loadPage();
+    add(p, "lofi");
+    const hint = () => lengthBox(p, 0).querySelector(".cat-hint");
+    expect(hint().hidden).toBe(true);
+    tickLength(p, 0, "20to60");
+    expect(hint().hidden).toBe(false);
+    expect(hint().textContent).toBe("YouTube is asked for videos over 20 minutes and the rest is left out here, so a page may hold fewer videos.");
+    tickLength(p, 0, "over60");
+    expect(hint().hidden).toBe(true);
+    tickLength(p, 0, "under4");
+    expect(hint().textContent).toMatch(/^YouTube cannot search for these lengths together/);
+    // A channel's row trims its own, and says nothing.
+    const channel = loadPage({ existing: normalizeConfig({ youtubeKey: "k", catalogs: [{ channel: CHANNEL, name: "N", length: "20to60" }] }) });
+    expect(lengthBox(channel, 0).querySelector(".cat-hint").hidden).toBe(true);
+  });
+
+  test("minutes of the reader's own, which must make a range", () => {
+    const p = loadPage({ existing: normalizeConfig({ youtubeKey: "k" }) });
+    add(p, "podcast");
+    tickLength(p, 0, "under4");
+    tickLength(p, 0, "custom");
+    expect(lengthsTicked(p, 0)).toEqual(["custom"]);
+    const minutes = lengthBox(p, 0).querySelector(".cat-minutes");
+    expect(minutes.hidden).toBe(false);
+    // Nothing typed yet: no length chosen.
+    expect(names(p)).toEqual(["podcast"]);
+    typeMinutes(p, 0, "30", "45");
+    expect(names(p)).toEqual(["podcast · 30–45 min"]);
+    typeMinutes(p, 0, "90", "");
+    expect(names(p)).toEqual(["podcast · Over 90 min"]);
+    typeMinutes(p, 0, "50", "20");
+    expect(names(p)).toEqual(["podcast · Over 90 min"]);
+    const hint = lengthBox(p, 0).querySelector(".cat-hint");
+    expect(hint.className).toBe("cat-hint note-warn");
+    expect(hint.textContent).toBe("Minutes are whole numbers, the first less than the second, up to 1440.");
+    // Past a day, too.
+    typeMinutes(p, 0, "1500", "");
+    expect(hint.className).toBe("cat-hint note-warn");
+    typeMinutes(p, 0, "", "10");
+    expect(names(p)).toEqual(["podcast · Under 10 min"]);
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([{ q: "podcast", length: "0-10" }]);
+    // Opened again, the minutes are filled in; a chip leaves them.
+    const again = loadPage({ existing: normalizeConfig({ youtubeKey: "k", catalogs: [{ q: "podcast", length: "0-10" }] }) });
+    expect(lengthsTicked(again, 0)).toEqual(["custom"]);
+    expect([...lengthBox(again, 0).querySelectorAll(".cat-minutes input")].map((i) => i.value)).toEqual(["0", "10"]);
+    tickLength(again, 0, "4to20");
+    expect(lengthsTicked(again, 0)).toEqual(["4to20"]);
+    expect(names(again)).toEqual(["podcast · 4–20 min"]);
+    // Custom unticked with minutes in it: back to the ranges, none.
+    tickLength(again, 0, "custom");
+    typeMinutes(again, 0, "5", "6");
+    tickLength(again, 0, "custom");
+    expect(names(again)).toEqual(["podcast"]);
+  });
+
+  test("a length that would repeat another row is put back", () => {
+    const p = loadPage();
+    add(p, "news");
+    tickLength(p, 0, "under4");
+    add(p, "news");
+    tickLength(p, 1, "under4");
+    expect(note(p)).toBe("You already have that catalog.");
+    expect(lengthsTicked(p, 1)).toEqual([]);
+    tickLength(p, 1, "4to20");
+    expect(note(p)).toBe("");
+  });
+
+  test("a row renamed with its pencil: apps show the name, the page the made one beneath", () => {
+    const p = loadPage({ existing: normalizeConfig({ youtubeKey: "k" }) });
+    add(p, "cricket highlights");
+    tickLength(p, 0, "20to60");
+    const row = () => p.document.querySelectorAll("#catalog-list .cat-row")[0];
+    const pencil = () => row().querySelector(".cat-rename");
+    const input = () => row().querySelector(".cat-name-input");
+    const made = () => row().querySelector(".cat-made");
+    expect(pencil().querySelector("svg")).not.toBeNull();
+    expect(pencil().getAttribute("aria-label")).toBe("Rename cricket highlights · 20–60 min");
+    expect(made().hidden).toBe(true);
+    p.click(pencil());
+    expect(input().placeholder).toBe("cricket highlights · 20–60 min");
+    expect(input().value).toBe("");
+    expect(p.document.activeElement).toBe(input());
+    const box = input();
+    const catalogsLine = () =>
+      [...p.document.querySelectorAll("#summary-list .summary-row")].find((r) => r.querySelector(".s-name").textContent === "Catalogs").querySelector(".s-value").textContent;
+    box.value = "  Cricket   ";
+    // Typing a name is no edit yet: the summary waits for it to be kept.
+    box.dispatchEvent(new p.dom.window.Event("input", { bubbles: true }));
+    expect(catalogsLine()).toBe("1 row: cricket highlights · 20–60 min");
+    box.dispatchEvent(new p.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(input()).toBeNull();
+    // Leaving the box, as a browser says it when it goes, keeps it once only.
+    box.dispatchEvent(new p.dom.window.Event("blur"));
+    expect(names(p)).toEqual(["Cricket"]);
+    expect(made().hidden).toBe(false);
+    expect(made().textContent).toBe("cricket highlights · 20–60 min");
+    expect(p.document.activeElement).toBe(pencil());
+    expect(catalogsLine()).toBe("1 row: Cricket");
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([{ q: "cricket highlights", length: "20to60", label: "Cricket" }]);
+    expect(p.generated().catalogs[0].name).toBe("Cricket");
+    // Its options still change what the made name says.
+    tickLength(p, 0, "over60");
+    expect(made().textContent).toBe("cricket highlights · Over 20 min");
+    expect(names(p)).toEqual(["Cricket"]);
+  });
+
+  test("Escape leaves a name as it was, leaving the box keeps it, and emptied it is the made name again", () => {
+    const p = loadPage();
+    add(p, "lofi");
+    const row = () => p.document.querySelectorAll("#catalog-list .cat-row")[0];
+    const open = () => p.click(row().querySelector(".cat-rename"));
+    const input = () => row().querySelector(".cat-name-input");
+    open();
+    input().value = "Never mind";
+    input().dispatchEvent(new p.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(names(p)).toEqual(["lofi"]);
+    open();
+    input().value = "Chill";
+    input().dispatchEvent(new p.dom.window.KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+    input().dispatchEvent(new p.dom.window.Event("blur"));
+    expect(names(p)).toEqual(["Chill"]);
+    open();
+    expect(input().value).toBe("Chill");
+    input().value = "   ";
+    input().dispatchEvent(new p.dom.window.Event("blur"));
+    expect(names(p)).toEqual(["lofi"]);
+    expect(row().querySelector(".cat-made").hidden).toBe(true);
+    // The same name kept again is no change.
+    open();
+    input().dispatchEvent(new p.dom.window.Event("blur"));
+    expect(names(p)).toEqual(["lofi"]);
   });
 
   test("the last kind stays ticked, and kinds that would repeat another row are put back", () => {
@@ -1033,17 +1224,19 @@ describe("the YouTube card", () => {
     const p = loadPage();
     p.set("youtube-key", "k");
     p.set("search-sort", "date");
-    p.set("search-length", "long");
+    tickLength(p, "search", "20to60");
+    tickLength(p, "search", "over60");
     p.set("safe-search", "strict");
     p.set("refresh-value", "3");
     p.check("yt-search", false);
     p.$("#yt-search").dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
     expect(p.$("#search-sort").disabled).toBe(true);
+    expect(lengthChecks(p, "search").every((box) => box.disabled)).toBe(true);
     p.submit();
     expect(p.rawGenerated()).toMatchObject({ search: false, searchSort: "date", searchLength: "long", safeSearch: "strict", catalogRefresh: "3h" });
     p.check("yt-search", true);
     p.$("#yt-search").dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
-    expect(p.$("#search-length").disabled).toBe(false);
+    expect(lengthChecks(p, "search").some((box) => box.disabled)).toBe(false);
     p.submit();
     expect(p.rawGenerated()).not.toHaveProperty("search");
   });
@@ -1064,7 +1257,7 @@ describe("the YouTube card", () => {
     const p = loadPage({ existing });
     expect(p.$("#yt-search").checked).toBe(false);
     expect(p.$("#search-sort").value).toBe("rating");
-    expect(p.$("#search-length").value).toBe("short");
+    expect(lengthsTicked(p, "search")).toEqual(["under4"]);
     expect(p.$("#safe-search").value).toBe("none");
     expect(p.$("#refresh-value").value).toBe("45");
     expect(p.$("#refresh-unit").value).toBe("m");
@@ -1158,7 +1351,8 @@ describe("editing an installed addon", () => {
     first.set("name-template", "YouStream {video.definition}");
     first.set("description-template", "{video.title}");
     first.set("search-sort", "viewCount");
-    first.set("search-length", "long");
+    tickLength(first, "search", "20to60");
+    tickLength(first, "search", "over60");
     first.set("safe-search", "strict");
     first.set("refresh-value", "1.5");
     first.set("refresh-unit", "d");
@@ -1172,7 +1366,7 @@ describe("editing an installed addon", () => {
     first.click([...first.document.querySelectorAll("#trending-chips button")].find((b) => b.textContent === "+ Music"));
     const selects = (p, row) => p.document.querySelectorAll("#catalog-list .cat-row")[row].querySelectorAll(".cat-opts select");
     pick(first, selects(first, 0)[0], "date");
-    pick(first, selects(first, 0)[2], "week");
+    pick(first, selects(first, 0)[1], "week");
     toggle(first, 1, "shorts");
     toggle(first, 1, "videos");
     pick(first, selects(first, 1)[0], "viewCount");

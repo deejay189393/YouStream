@@ -323,7 +323,7 @@ module.exports = function start(window, hooks = {}) {
   const trendingChips = $("trending-chips");
   const ytSearch = $("yt-search");
   const searchSort = $("search-sort");
-  const searchLength = $("search-length");
+  const searchLengthBox = $("search-length");
   const refreshValue = $("refresh-value");
   const refreshUnit = $("refresh-unit");
   const quotaNote = $("quota-note");
@@ -349,20 +349,93 @@ module.exports = function start(window, hooks = {}) {
       .join(" & ");
   }
 
+  // Lengths, as catalogs.js reads them: any of four ranges, or minutes of
+  // the reader's own, kept as one word. JSON has no Infinity: an open end
+  // comes as null.
+  const LENGTH_RANGES = YT.lengthRanges.map((range) => ({ ...range, max: range.max === null ? Infinity : range.max }));
+  const ANY_LENGTH = { id: "any", ranges: [], minutes: null, youtube: null, trims: false, short: "" };
+
+  function youtubeLengthHolding(min, max) {
+    if (max <= 240) return "short";
+    if (min >= 240 && max <= 1201) return "medium";
+    if (min >= 1200) return "long";
+    return null;
+  }
+
+  function minutesName(from, to) {
+    const say = (m) => (m === 60 ? "1 hr" : m + " min");
+    if (!from) return "Under " + say(to);
+    if (to === null) return "Over " + say(from);
+    return from + "–" + to + " min";
+  }
+
+  function rangesLength(ids) {
+    const chosen = LENGTH_RANGES.filter((range) => ids.indexOf(range.id) !== -1);
+    if (!chosen.length || chosen.length === LENGTH_RANGES.length) return ANY_LENGTH;
+    const key = chosen.map((range) => range.id).join("+");
+    const youtube = YT.youtubeLengths.find((length) => length.ranges.join("+") === key);
+    const spans = [];
+    chosen.forEach((range) => {
+      const last = spans[spans.length - 1];
+      if (last && LENGTH_RANGES.indexOf(last[1]) === LENGTH_RANGES.indexOf(range) - 1) last[1] = range;
+      else spans.push([range, range]);
+    });
+    const names = spans.map((span, i) => {
+      const name = minutesName(span[0].from, span[1].to);
+      return i ? name.charAt(0).toLowerCase() + name.slice(1) : name;
+    });
+    return {
+      id: youtube ? youtube.id : key,
+      ranges: chosen.map((range) => range.id),
+      minutes: null,
+      youtube: youtubeLengthHolding(chosen[0].min, chosen[chosen.length - 1].max),
+      trims: !youtube,
+      short: names.join(" & ")
+    };
+  }
+
+  function minutesLength(from, to) {
+    if (from === 0 && to === null) return ANY_LENGTH;
+    return {
+      id: from + "-" + (to === null ? "" : to),
+      ranges: [],
+      minutes: [from, to],
+      youtube: youtubeLengthHolding(from * 60, to === null ? Infinity : to * 60),
+      trims: true,
+      short: minutesName(from, to)
+    };
+  }
+
+  function lengthOf(word) {
+    const text = String(word || "").trim().toLowerCase();
+    const youtube = YT.youtubeLengths.find((length) => length.id === text);
+    if (youtube) return rangesLength(youtube.ranges);
+    const ids = text.split("+");
+    if (ids.every((id) => LENGTH_RANGES.some((range) => range.id === id))) return rangesLength(ids);
+    // Minutes come checked: the server hands over lengths it has read, and
+    // the picker's boxes check what is typed into them.
+    const minutes = /^(\d{1,4})-(\d{1,4})?$/.exec(text);
+    return minutes ? minutesLength(Number(minutes[1]), minutes[2] === undefined ? null : Number(minutes[2])) : ANY_LENGTH;
+  }
+
   // What a row is called: the names the server gives catalogs.
   function catalogName(entry) {
     let parts;
+    const length = lengthOf(entry.length).short;
     if (entry.kind === "search") {
-      parts = [entry.q, choice(YT.sorts, entry.sort).short, choice(YT.lengths, entry.length).short, choice(YT.periods, entry.within).short, typesName(entry)];
+      parts = [entry.q, choice(YT.sorts, entry.sort).short, length, choice(YT.periods, entry.within).short, typesName(entry)];
     } else if (entry.kind === "channel") {
-      parts = [entry.title, typesName(entry), choice(YT.channelSorts, entry.sort).short];
+      parts = [entry.title, typesName(entry), choice(YT.channelSorts, entry.sort).short, length];
     } else if (entry.kind === "playlist") {
-      parts = [entry.title, typesName(entry)];
+      parts = [entry.title, typesName(entry), length];
     } else {
-      parts = [choice(YT.trending, entry.trending).label, typesName(entry)];
+      parts = [choice(YT.trending, entry.trending).label, typesName(entry), length];
     }
     return parts.filter(Boolean).join(" · ");
   }
+
+  // What apps show: the reader's own name for the row, or the one made from what it lists.
+  const shownName = (entry) => entry.label || catalogName(entry);
 
   // Two rows that would list the same videos.
   function sameCatalog(a, b) {
@@ -370,6 +443,7 @@ module.exports = function start(window, hooks = {}) {
     if (a.kind === "search") {
       return a.q.toLowerCase() === b.q.toLowerCase() && a.sort === b.sort && a.length === b.length && a.within === b.within;
     }
+    if (a.length !== b.length) return false;
     if (a.kind === "channel") return a.channel === b.channel && a.sort === b.sort;
     if (a.kind === "playlist") return a.playlist === b.playlist;
     return a.trending === b.trending;
@@ -391,6 +465,7 @@ module.exports = function start(window, hooks = {}) {
     }
     if (!sameTypes(entry.types, usualTypes(entry))) stored.types = entry.types;
     if (entry.kind === "channel" && entry.sort !== "date") stored.sort = entry.sort;
+    if (entry.kind !== "search" && entry.length !== "any") stored.length = entry.length;
     return stored;
   }
 
@@ -398,6 +473,7 @@ module.exports = function start(window, hooks = {}) {
   // keyword filter when it has words.
   function storedCatalog(entry) {
     const stored = storedSource(entry);
+    if (entry.label) stored.label = entry.label;
     if (entry.filter && entry.filter.words.length) {
       stored[entry.filter.mode] = entry.filter.words;
       if (entry.filter.scope === "title") stored.filterIn = "title";
@@ -439,7 +515,7 @@ module.exports = function start(window, hooks = {}) {
   }
 
   // A row's option changed: kept, unless the row would then repeat another.
-  function changeCatalog(index, field, select, nameEl) {
+  function changeCatalog(index, field, select, paint) {
     const entry = CATALOGS[index];
     const changed = { ...entry, [field]: select.value };
     if (CATALOGS.some((other, i) => i !== index && sameCatalog(other, changed))) {
@@ -448,9 +524,125 @@ module.exports = function start(window, hooks = {}) {
       return;
     }
     CATALOGS[index] = changed;
-    nameEl.textContent = catalogName(changed);
+    paint();
     note("");
     renderQuota();
+  }
+
+  // YouTube's own lengths, as its search is asked for them.
+  const YOUTUBE_LENGTH_NAMES = { short: "under 4 minutes", medium: "4 to 20 minutes", long: "over 20 minutes" };
+
+  // A length to keep to: any of four ranges, or minutes of the reader's own
+  // ("Custom"). Tells onChange each new length's word, which answers false
+  // to have it put back. `searched` says the videos come from a YouTube
+  // search, which a hint then says how the length is searched for.
+  function lengthPicker({ value, label, searched, onChange }) {
+    const box = node("div", "cat-lengths");
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", label);
+    box.appendChild(node("span", "cat-lengths-name", "Minutes"));
+    const toggle = (text, id, name) => {
+      const wrap = node("label", "type-toggle");
+      const check = node("input");
+      check.type = "checkbox";
+      check.value = id;
+      check.setAttribute("aria-label", name);
+      wrap.appendChild(check);
+      wrap.appendChild(node("span", "", text));
+      box.appendChild(wrap);
+      return check;
+    };
+    const checks = LENGTH_RANGES.map((range) => toggle(range.label, range.id, range.label + " minutes"));
+    const custom = toggle("Custom", "custom", "Custom minutes");
+    const minutes = node("span", "cat-minutes");
+    const number = (name) => {
+      const input = node("input");
+      input.type = "number";
+      input.min = "0";
+      input.max = String(YT.maxLengthMinutes);
+      input.step = "1";
+      input.inputMode = "numeric";
+      input.setAttribute("aria-label", name);
+      return input;
+    };
+    const from = number("From minutes");
+    const to = number("To minutes");
+    minutes.appendChild(from);
+    minutes.appendChild(node("span", "", "to"));
+    minutes.appendChild(to);
+    minutes.appendChild(node("span", "", "min"));
+    box.appendChild(minutes);
+    const hint = node("div", "cat-hint");
+    box.appendChild(hint);
+    let word = lengthOf(value).id;
+    // Custom stays chosen while its minutes are still being typed.
+    let ownMinutes = Boolean(lengthOf(word).minutes);
+
+    function show() {
+      const length = lengthOf(word);
+      checks.forEach((check) => (check.checked = length.ranges.indexOf(check.value) !== -1));
+      custom.checked = ownMinutes;
+      minutes.hidden = !ownMinutes;
+      if (length.minutes) {
+        from.value = String(length.minutes[0]);
+        to.value = length.minutes[1] === null ? "" : String(length.minutes[1]);
+      }
+      hint.className = "cat-hint";
+      hint.hidden = !(searched && length.trims);
+      hint.textContent = length.youtube
+        ? "YouTube is asked for videos " + YOUTUBE_LENGTH_NAMES[length.youtube] + " and the rest is left out here, so a page may hold fewer videos."
+        : "YouTube cannot search for these lengths together: every length is searched for and the rest left out here, so a page may hold fewer videos.";
+    }
+
+    // The word the boxes say now, or null for minutes that are no range.
+    function read() {
+      if (!ownMinutes) return lengthOf(checks.filter((check) => check.checked).map((check) => check.value).join("+")).id;
+      const low = from.value.trim() === "" ? 0 : Number(from.value);
+      const high = to.value.trim() === "" ? null : Number(to.value);
+      const whole = (n) => Number.isInteger(n) && n >= 0 && n <= YT.maxLengthMinutes;
+      if (!whole(low) || (high !== null && (!whole(high) || high <= low))) return null;
+      return lengthOf(low + "-" + (high === null ? "" : high)).id;
+    }
+
+    function changed() {
+      const next = read();
+      if (next === null) {
+        hint.className = "cat-hint note-warn";
+        hint.hidden = false;
+        hint.textContent = "Minutes are whole numbers, the first less than the second, up to " + YT.maxLengthMinutes + ".";
+        return;
+      }
+      if (next !== word && onChange(next) === false) return show();
+      word = next;
+      show();
+    }
+    checks.forEach((check) =>
+      check.addEventListener("change", () => {
+        ownMinutes = false;
+        changed();
+      })
+    );
+    custom.addEventListener("change", () => {
+      ownMinutes = custom.checked;
+      if (ownMinutes) checks.forEach((check) => (check.checked = false));
+      changed();
+      // Nothing typed yet: any length until there is.
+      if (ownMinutes && !from.value && !to.value) from.focus();
+    });
+    [from, to].forEach((input) => input.addEventListener("change", changed));
+    show();
+    return {
+      box,
+      value: () => word,
+      set(next) {
+        word = lengthOf(next).id;
+        ownMinutes = Boolean(lengthOf(word).minutes);
+        show();
+      },
+      disable(off) {
+        [...checks, custom, from, to].forEach((input) => (input.disabled = off));
+      }
+    };
   }
 
   // A filter's words as the server keeps them: comma separated, trimmed,
@@ -472,12 +664,12 @@ module.exports = function start(window, hooks = {}) {
   // alone are searched for as videos under four minutes, so a search row of
   // them has no length to choose. The row is read and written in CATALOGS
   // by its index, as its other options replace its object there.
-  function typeControls(index, title, nameEl, lengthSelect) {
+  function typeControls(index, title, paint, lengths) {
     const box = node("div", "cat-types");
     box.setAttribute("role", "group");
     box.setAttribute("aria-label", "Kinds of video in " + title);
     function sync(entry) {
-      if (lengthSelect) lengthSelect.hidden = onlyShorts(entry.types);
+      lengths.box.hidden = onlyShorts(entry.types);
     }
     YT.types.forEach((type) => {
       const toggle = node("label", "type-toggle");
@@ -493,14 +685,14 @@ module.exports = function start(window, hooks = {}) {
           return note("A row lists at least one kind of video.", true);
         }
         const changed = { ...entry, types };
-        if (changed.kind === "search" && onlyShorts(types)) changed.length = "any";
+        if (onlyShorts(types)) changed.length = "any";
         if (CATALOGS.some((other, i) => i !== index && sameCatalog(other, changed))) {
           check.checked = !check.checked;
           return note("You already have that catalog.", true);
         }
         CATALOGS[index] = changed;
-        if (lengthSelect) lengthSelect.value = changed.length;
-        nameEl.textContent = catalogName(changed);
+        lengths.set(changed.length);
+        paint();
         sync(changed);
         note("");
         renderQuota();
@@ -548,32 +740,97 @@ module.exports = function start(window, hooks = {}) {
     return box;
   }
 
+  // A drawn pencil, for renaming a row.
+  const PENCIL =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>';
+
+  // A row's name of the reader's own, typed in place of the one shown:
+  // Enter or leaving the box keeps it, Escape leaves the name as it was, and
+  // an empty box goes back to the name made from what the row lists.
+  function renameButton(index, nameEl, paint) {
+    const button = node("button", "cat-rename");
+    button.type = "button";
+    button.innerHTML = PENCIL;
+    button.title = "Rename";
+    button.setAttribute("aria-label", "Rename " + shownName(CATALOGS[index]));
+    button.addEventListener("click", () => {
+      const entry = CATALOGS[index];
+      const input = node("input", "cat-name-input");
+      input.type = "text";
+      input.maxLength = YT.maxName;
+      input.value = entry.label || "";
+      input.placeholder = catalogName(entry);
+      input.setAttribute("aria-label", "Name in your app, or empty for " + catalogName(entry));
+      // A name being typed is no edit yet; the one kept is.
+      ["input", "change"].forEach((type) => input.addEventListener(type, (e) => e.stopPropagation()));
+      nameEl.hidden = true;
+      button.hidden = true;
+      nameEl.parentNode.insertBefore(input, nameEl);
+      input.focus();
+      let done = false;
+      function finish(keep, byKey) {
+        if (done) return;
+        done = true;
+        const label = input.value.replace(/\s+/g, " ").trim();
+        input.remove();
+        nameEl.hidden = false;
+        button.hidden = false;
+        if (keep && label !== (CATALOGS[index].label || "")) {
+          const next = { ...CATALOGS[index] };
+          if (label) next.label = label;
+          else delete next.label;
+          CATALOGS[index] = next;
+          paint();
+          edited();
+        }
+        if (byKey) button.focus();
+      }
+      input.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== "Escape") return;
+        e.preventDefault();
+        finish(e.key === "Enter", true);
+      });
+      input.addEventListener("blur", () => finish(true, false));
+    });
+    return button;
+  }
+
   function renderCatalogs() {
     catalogList.textContent = "";
     if (!CATALOGS.length) {
       catalogList.appendChild(node("div", "cat-empty", "No catalogs yet. Add a search, a channel, a playlist or a Trending row below."));
     }
     CATALOGS.forEach((entry, index) => {
-      const title = catalogName(entry);
+      const title = shownName(entry);
       const row = node("div", "cat-row");
       row.setAttribute("data-kind", entry.kind);
       row.appendChild(node("div", "cat-rank", String(index + 1)));
       const main = node("div", "cat-main");
       const label = node("div", "cat-label");
       const name = node("span", "cat-name", title);
+      // With a name of the reader's own, the one made from what the row lists, beneath.
+      const made = node("span", "cat-made");
+      const paint = () => {
+        const current = CATALOGS[index];
+        name.textContent = shownName(current);
+        made.textContent = catalogName(current);
+        made.hidden = !current.label;
+        rename.setAttribute("aria-label", "Rename " + shownName(current));
+      };
+      const rename = renameButton(index, name, () => paint());
       label.appendChild(name);
+      label.appendChild(rename);
       label.appendChild(node("span", "chip", entry.kind));
+      label.appendChild(made);
       main.appendChild(label);
       const opts = node("div", "cat-opts");
       const addOption = (list, field, what) => {
-        const select = optionSelect(list, entry[field], what, (changed) => changeCatalog(index, field, changed, name));
+        const select = optionSelect(list, entry[field], what, (changed) => changeCatalog(index, field, changed, paint));
         opts.appendChild(select);
         return select;
       };
-      let lengthSelect = null;
       if (entry.kind === "search") {
         addOption(YT.sorts, "sort", "Order of " + title);
-        lengthSelect = addOption(YT.lengths, "length", "Length of videos in " + title);
         addOption(YT.periods, "within", "Upload date of videos in " + title);
       } else if (entry.kind === "channel") {
         addOption(YT.channelSorts, "sort", "Order of " + title);
@@ -597,8 +854,27 @@ module.exports = function start(window, hooks = {}) {
         })
       );
       row.appendChild(btns);
-      row.appendChild(typeControls(index, title, name, lengthSelect));
+      const lengths = lengthPicker({
+        value: entry.length,
+        label: "Lengths of video in " + title,
+        searched: entry.kind === "search",
+        onChange(word) {
+          const changed = { ...CATALOGS[index], length: word };
+          if (CATALOGS.some((other, i) => i !== index && sameCatalog(other, changed))) {
+            note("You already have that catalog.", true);
+            return false;
+          }
+          CATALOGS[index] = changed;
+          paint();
+          note("");
+          renderQuota();
+          return true;
+        }
+      });
+      row.appendChild(typeControls(index, title, paint, lengths));
+      row.appendChild(lengths.box);
       row.appendChild(filterControls(index, title));
+      paint();
       catalogList.appendChild(row);
     });
     renderTrendingChips();
@@ -707,9 +983,18 @@ module.exports = function start(window, hooks = {}) {
   refreshValue.addEventListener("input", renderQuota);
   refreshUnit.addEventListener("change", renderQuota);
 
+  // The app's search keeps to a length the way a row does.
+  const searchLength = lengthPicker({
+    value: searchLengthBox.getAttribute("data-length"),
+    label: "Lengths of video in your app's search",
+    searched: true,
+    onChange: () => true
+  });
+  searchLengthBox.appendChild(searchLength.box);
+
   function syncSearch() {
     searchSort.disabled = !ytSearch.checked;
-    searchLength.disabled = !ytSearch.checked;
+    searchLength.disable(!ytSearch.checked);
   }
   ytSearch.addEventListener("change", syncSearch);
   syncSearch();
@@ -745,10 +1030,10 @@ module.exports = function start(window, hooks = {}) {
       ["Country and language", shown(regionSelect) + " · " + shown($("audio-language")), "streams"],
       ["When you press play", playing.length ? playing.join(", then ") : "Nothing chosen yet", "playback"],
       ["Stream format", shown(presetSelect), "playback"],
-      ["YouTube search in your app", ytSearch.checked ? ["On", shown(searchSort), shown(searchLength)].join(" · ") : "Off", "catalogs"],
+      ["YouTube search in your app", ytSearch.checked ? ["On", shown(searchSort), lengthOf(searchLength.value()).short || "Any length"].join(" · ") : "Off", "catalogs"],
       [
         "Catalogs",
-        CATALOGS.length ? CATALOGS.length + (CATALOGS.length === 1 ? " row: " : " rows: ") + CATALOGS.map(catalogName).join(", ") : "None yet",
+        CATALOGS.length ? CATALOGS.length + (CATALOGS.length === 1 ? " row: " : " rows: ") + CATALOGS.map(shownName).join(", ") : "None yet",
         "catalogs"
       ]
     ];
@@ -858,7 +1143,7 @@ module.exports = function start(window, hooks = {}) {
 
     if (!ytSearch.checked) config.search = false;
     if (searchSort.value !== "relevance") config.searchSort = searchSort.value;
-    if (searchLength.value !== "any") config.searchLength = searchLength.value;
+    if (searchLength.value() !== "any") config.searchLength = searchLength.value();
     const safeSearch = $("safe-search").value;
     if (safeSearch !== "moderate") config.safeSearch = safeSearch;
     if (CATALOGS.length) config.catalogs = CATALOGS.map(storedCatalog);
@@ -1051,7 +1336,7 @@ module.exports = function start(window, hooks = {}) {
   );
   document.addEventListener("click", (e) => {
     const button = e.target.closest("button");
-    if (!button || button.form !== form || button.type === "submit" || button.matches(".key-toggle, .preview-tab")) return;
+    if (!button || button.form !== form || button.type === "submit" || button.matches(".key-toggle, .preview-tab, .cat-rename")) return;
     edited();
   });
   window.addEventListener("beforeunload", (e) => {

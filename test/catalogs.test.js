@@ -7,7 +7,9 @@ const {
   tidy,
   slug,
   SORTS,
-  LENGTHS,
+  LENGTH_RANGES,
+  MAX_LENGTH_MINUTES,
+  lengthOf,
   PERIODS,
   CHANNEL_SHOWS,
   TRENDING,
@@ -100,6 +102,7 @@ describe("a channel catalog", () => {
       channel: CHANNEL,
       types: ["videos"],
       sort: "date",
+      length: "any",
       filter: null
     });
   });
@@ -139,6 +142,7 @@ describe("a playlist catalog", () => {
       title: "Google Search Stories",
       playlist: PLAYLIST,
       types: ["videos", "shorts", "live"],
+      length: "any",
       filter: null
     });
     expect(normalizeEntry({ playlist: PLAYLIST }).name).toBe("YouTube playlist");
@@ -216,6 +220,7 @@ describe("a Trending catalog", () => {
       name: "Trending",
       trending: "all",
       types: ["videos", "shorts", "live"],
+      length: "any",
       filter: null
     });
     expect(normalizeEntry({ trending: "music" }).name).toBe("Trending Music");
@@ -284,6 +289,102 @@ test("the stored form leaves every default out", () => {
     { trending: "gaming" }
   ]);
   expect(normalizeCatalogs(toStoredCatalogs(entries))).toEqual(entries);
+});
+
+describe("a row's length", () => {
+  test("YouTube's own three, any of four ranges, or minutes, each kept as one word", () => {
+    const cases = [
+      ["any", "any", null, false, ""],
+      ["short", "short", "short", false, "Under 4 min"],
+      ["medium", "medium", "medium", false, "4–20 min"],
+      ["long", "long", "long", false, "Over 20 min"],
+      ["20to60+over60", "long", "long", false, "Over 20 min"],
+      ["over60+under4", "under4+over60", null, true, "Under 4 min & over 1 hr"],
+      ["under4+4to20", "under4+4to20", null, true, "Under 20 min"],
+      ["4to20+20to60", "4to20+20to60", null, true, "4–60 min"],
+      ["under4+4to20+20to60", "under4+4to20+20to60", null, true, "Under 1 hr"],
+      ["20to60", "20to60", "long", true, "20–60 min"],
+      ["over60", "over60", "long", true, "Over 1 hr"],
+      ["under4+4to20+20to60+over60", "any", null, false, ""],
+      [" 30-45 ", "30-45", "long", true, "30–45 min"],
+      ["90-", "90-", "long", true, "Over 90 min"],
+      ["60-", "60-", "long", true, "Over 1 hr"],
+      ["0-10", "0-10", null, true, "Under 10 min"],
+      ["0-3", "0-3", "short", true, "Under 3 min"],
+      ["5-15", "5-15", "medium", true, "5–15 min"]
+    ];
+    for (const [raw, id, youtube, trims, short] of cases) {
+      expect([raw, lengthOf(raw)]).toEqual([raw, expect.objectContaining({ id, youtube, trims, short })]);
+    }
+  });
+
+  test("anything else is any length", () => {
+    for (const raw of ["0-", "45-30", "30-30", "0-2000", "1441-", "x", "under4+x", "", null, 7]) expect(lengthOf(raw).id).toBe("any");
+  });
+
+  test("the ranges it keeps, in seconds", () => {
+    expect(lengthOf("under4+over60").ranges).toEqual([
+      [0, 239],
+      [3601, Infinity]
+    ]);
+    expect(lengthOf("30-45").ranges).toEqual([[1800, 2700]]);
+    expect(lengthOf("90-").ranges).toEqual([[5400, Infinity]]);
+    expect(lengthOf("any").ranges).toEqual([]);
+  });
+
+  test("YouTube's length holding a range lets in a second either side of its bounds", () => {
+    expect(lengthOf("20-").youtube).toBe("long");
+    expect(lengthOf("0-4").youtube).toBe("short");
+    expect(lengthOf("4-20").youtube).toBe("medium");
+  });
+
+  test("every kind of row may keep to one, said in its name and its id, and stored; rows of any length keep their ids", () => {
+    const rows = [
+      [{ q: "lofi", length: "20to60" }, /^search\.lofi\./, "lofi · 20–60 min"],
+      [{ channel: CHANNEL, name: "N", length: "over60" }, `channel.${CHANNEL}.videos.over60`, "N · Over 1 hr"],
+      [{ channel: CHANNEL, name: "N", sort: "viewCount", length: "30-45" }, `channel.${CHANNEL}.videos.viewCount.30-45`, "N · Most viewed · 30–45 min"],
+      [{ playlist: PLAYLIST, name: "P", length: "under4+4to20" }, `playlist.${PLAYLIST}.under4+4to20`, "P · Under 20 min"],
+      [{ trending: "music", types: ["videos"], length: "long" }, "trending.music.videos.long", "Trending Music · Videos · Over 20 min"]
+    ];
+    for (const [raw, id, name] of rows) {
+      const entry = normalizeEntry(raw);
+      expect(entry.id).toEqual(id instanceof RegExp ? expect.stringMatching(id) : id);
+      expect(entry.name).toBe(name);
+      expect(toStoredEntry(entry).length).toBe(entry.length);
+      expect(normalizeEntry(toStoredEntry(entry))).toEqual(entry);
+    }
+    expect(normalizeEntry({ q: "lofi", length: "20to60" }).id).not.toBe(normalizeEntry({ q: "lofi" }).id);
+    expect(normalizeEntry({ q: "lofi", length: "20to60+over60" }).id).toBe(normalizeEntry({ q: "lofi", length: "long" }).id);
+    expect(normalizeEntry({ playlist: PLAYLIST }).id).toBe(`playlist.${PLAYLIST}`);
+    expect(toStoredEntry(normalizeEntry({ trending: "all", length: "nonsense" }))).toEqual({ trending: "all" });
+  });
+
+  test("a row of Shorts alone has none, every Short being under four minutes", () => {
+    for (const raw of [{ q: "x", types: ["shorts"], length: "over60" }, { channel: CHANNEL, types: ["shorts"], length: "under4" }, { trending: "all", types: ["shorts"], length: "30-45" }]) {
+      expect(normalizeEntry(raw).length).toBe("any");
+    }
+  });
+});
+
+describe("a row's name of its own", () => {
+  test("is what apps show, tidied; the id and the made name's parts stay", () => {
+    const made = normalizeEntry({ q: "cricket highlights", sort: "date" });
+    const named = normalizeEntry({ q: "cricket highlights", sort: "date", label: "  My   cricket \n " });
+    expect(named).toEqual({ ...made, name: "My cricket", label: "My cricket" });
+    expect(toStoredEntry(named)).toEqual({ q: "cricket highlights", sort: "date", label: "My cricket" });
+    expect(normalizeEntry(named)).toEqual(named);
+  });
+
+  test("a blank one, or one that is no text, is none", () => {
+    expect(normalizeEntry({ trending: "all", label: "   " })).not.toHaveProperty("label");
+    expect(normalizeEntry({ trending: "all", label: 5 }).name).toBe("Trending");
+  });
+
+  test("cut to the longest name a row can have, and stored before the filter", () => {
+    const entry = normalizeEntry({ playlist: PLAYLIST, name: "P", label: "x".repeat(200), exclude: ["a"] });
+    expect(entry.label).toHaveLength(MAX_NAME_LENGTH);
+    expect(Object.keys(toStoredEntry(entry))).toEqual(["playlist", "name", "label", "exclude"]);
+  });
 });
 
 describe("a catalog's kinds of video", () => {
@@ -460,7 +561,13 @@ test("the paging steps are YouTube's page, five deep", () => {
 
 test("the choices offered are YouTube's own", () => {
   expect(SORTS.map((s) => s.id)).toEqual(["relevance", "date", "viewCount", "rating"]);
-  expect(LENGTHS.map((l) => l.id)).toEqual(["any", "short", "medium", "long"]);
+  expect(LENGTH_RANGES.map((l) => [l.id, l.min, l.max])).toEqual([
+    ["under4", 0, 239],
+    ["4to20", 240, 1200],
+    ["20to60", 1201, 3600],
+    ["over60", 3601, Infinity]
+  ]);
+  expect(MAX_LENGTH_MINUTES).toBe(1440);
   expect(PERIODS.map((p) => p.id)).toEqual(["any", "day", "week", "month", "year"]);
   expect(CHANNEL_SHOWS.map((c) => [c.id, c.playlist, c.popular])).toEqual([
     ["videos", "UULF", "UULP"],

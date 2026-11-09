@@ -356,6 +356,15 @@ describe("encodeConfig", () => {
     expect(decodeConfig(encodeConfig({ youtubeKey: "yt", types: [] })).types).toEqual([]);
   });
 
+  test("the app's search keeps to a length as a row does, stored only when not any", () => {
+    expect(normalizeConfig({ searchLength: "long" }).searchLength).toBe("long");
+    expect(normalizeConfig({ searchLength: "under4+over60" }).searchLength).toBe("under4+over60");
+    expect(normalizeConfig({ searchLength: "30-45" }).searchLength).toBe("30-45");
+    expect(normalizeConfig({ searchLength: "forever" }).searchLength).toBe("any");
+    expect(decoded({ youtubeKey: "yt", searchLength: "20to60" }).searchLength).toBe("20to60");
+    expect(decoded({ youtubeKey: "yt", searchLength: "any" }).searchLength).toBeUndefined();
+  });
+
   test("anime comes with films or series, as it always did, unless saved otherwise", () => {
     expect(normalizeConfig({}).anime).toBe(true);
     expect(normalizeConfig({ types: ["movie"] }).anime).toBe(true);

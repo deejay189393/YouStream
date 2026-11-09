@@ -19,6 +19,7 @@ const {
   parseSourceLink,
   onlyShorts,
   everyType,
+  lengthOf,
   tidy
 } = require("./catalogs");
 
@@ -107,8 +108,9 @@ function searchSource(q, { sort, length, within, types }, settings) {
     q,
     order: sort,
     // Every Short is under four minutes, so a row of Shorts alone asks for
-    // those, and fills with far more of them.
-    videoDuration: types && onlyShorts(types) ? "short" : length === "any" ? null : length,
+    // those, and fills with far more of them. Otherwise YouTube's length
+    // that holds the row's, the rest trimmed (lengthsToTrim).
+    videoDuration: types && onlyShorts(types) ? "short" : lengthOf(length).youtube,
     within,
     safeSearch: settings.safeSearch,
     regionCode: settings.region || null,
@@ -184,9 +186,9 @@ const isMissing = (err) => err.kind === "error" && [400, 403, 404].includes(err.
  * `types` are the kinds of video the row keeps to, when it must tell them
  * apart itself (typesToTell).
  */
-function context(settings, source, freshMs, staleMs, types = null) {
+function context(settings, source, freshMs, staleMs, { types = null, lengths = null } = {}) {
   const user = keyId(settings.youtubeKey);
-  return { apiKey: settings.youtubeKey, user, source, freshMs, staleMs, types, key: JSON.stringify({ user, source }) };
+  return { apiKey: settings.youtubeKey, user, source, freshMs, staleMs, types, lengths, key: JSON.stringify({ user, source }) };
 }
 
 /**
@@ -269,6 +271,24 @@ function typesToTell(entry) {
   return entry.types;
 }
 
+/**
+ * The ranges of length, in seconds, a row or search trims to, or null:
+ * none for any length, nor when YouTube's search did it all itself.
+ */
+function lengthsToTrim(length, searched) {
+  const chosen = lengthOf(length);
+  return chosen.trims || (!searched && chosen.id !== "any") ? chosen.ranges : null;
+}
+
+/**
+ * Whether a video is of a length kept: null keeps all. A stream live now
+ * has no length yet, and the Live kind decides it.
+ */
+function ofLength(item, ranges) {
+  if (!ranges || !item.durationSeconds) return true;
+  return ranges.some(([min, max]) => item.durationSeconds >= min && item.durationSeconds <= max);
+}
+
 /** Whether a catalog's filter keeps the video: null keeps all. */
 async function passes(item, filter) {
   if (!filter) return true;
@@ -288,7 +308,7 @@ async function passes(item, filter) {
  * rather than YouTube's positions, gives both the same unbroken sequence.
  */
 async function assemble(ctx, skip, settings, filter = null) {
-  const types = ctx.types;
+  const { types, lengths } = ctx;
   const offset = offsetOf(skip);
   const seen = new Set();
   let before = 0;
@@ -300,7 +320,8 @@ async function assemble(ctx, skip, settings, filter = null) {
     const page = await loadPage(ctx, index, token);
     const items = [];
     for (const item of page.items) {
-      if (seen.has(item.id) || !playable(item, settings) || !ofKind(item, types) || !(await passes(item, filter))) continue;
+      if (seen.has(item.id) || !playable(item, settings) || !ofKind(item, types) || !ofLength(item, lengths)) continue;
+      if (!(await passes(item, filter))) continue;
       seen.add(item.id);
       items.push(item);
     }
@@ -315,7 +336,11 @@ async function assemble(ctx, skip, settings, filter = null) {
 /** A page of one of the reader's catalogs, its kinds of video and keyword filter applied. */
 function catalogItems({ entry, settings, skip }) {
   const freshMs = Math.min(refreshMs(settings.catalogRefresh), MAX_YOUTUBE_DATA_MS);
-  return assemble(context(settings, sourceOf(entry, settings), freshMs, undefined, typesToTell(entry)), skip, settings, entry.filter);
+  const ctx = context(settings, sourceOf(entry, settings), freshMs, undefined, {
+    types: typesToTell(entry),
+    lengths: lengthsToTrim(entry.length, entry.kind === "search")
+  });
+  return assemble(ctx, skip, settings, entry.filter);
 }
 
 /**
@@ -394,7 +419,7 @@ async function searchItems({ query, settings, skip, settleOptions }) {
     return { items: [], skipped: true };
   }
   const source = searchSource(q, { sort: settings.searchSort, length: settings.searchLength, within: "any" }, settings);
-  const ctx = context(settings, source, SEARCH_REUSE_MS, SEARCH_STALE_MS);
+  const ctx = context(settings, source, SEARCH_REUSE_MS, SEARCH_STALE_MS, { lengths: lengthsToTrim(settings.searchLength, true) });
   if (offsetOf(skip) === 0) {
     const hit = await browseCache.get(`${ctx.key}#0`);
     if (!(hit && hit.fresh) && !(await settle(ctx.user, q, settleOptions))) return { items: [], skipped: true };
@@ -465,6 +490,8 @@ module.exports = {
   mentions,
   ofKind,
   typesToTell,
+  ofLength,
+  lengthsToTrim,
   catalogItems,
   searchItems,
   getItem,

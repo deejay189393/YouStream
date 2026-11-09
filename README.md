@@ -393,9 +393,9 @@ before 0.8.0, type `YouTube` with `youstream:` ids, keep working.
 
 The app's search gets one row of YouTube results, named **YouStream**. It is
 on unless you switch it off in Catalogs, ranked the way YouTube ranks it
-unless you choose newest, most viewed or top rated, optionally kept to under
-4 minutes, 4 to 20, or over 20, with **SafeSearch** moderate (YouTube's
-default), strict or off. Your country and audio language are ranking hints,
+unless you choose newest, most viewed or top rated, kept to lengths the way
+a row is (below), with **SafeSearch** moderate (YouTube's default), strict or
+off. Your country and audio language are ranking hints,
 not filters.
 
 A search costs **100 of your 10,000 daily units**, and Nuvio searches as you
@@ -455,6 +455,28 @@ changing them costs nothing, but a row of some kinds has an id of its own.
 Leaving a kind out thins a row: without Shorts, a page of one search for
 cricket highlights kept 6 of its 50 videos. A page that keeps none moves on
 to the next, which for a search costs another 101 units.
+
+**Length.** Under each row, tick any of Under 4, 4–20, 20–60 and Over 60
+minutes, or Custom for minutes of your own (30 to 45, say); none ticked is
+any length. YouTube's search knows three lengths, under 4 minutes, 4 to 20
+and over 20, and takes one per search, so a search row asks for the
+narrowest that holds yours and leaves the rest out itself: **one search per
+page, never more**. 20–60 is searched as over 20 and trimmed; a choice
+across YouTube's lengths, such as Under 4 with Over 60, searches every
+length and trims. The page says so under the row, as a page may then hold
+fewer videos, how many fewer depending on the subject: in earlier
+measurements, over an hour kept 80% of a lofi search's results and 7% of a
+stand-up search's. Channel, playlist and Trending rows trim their own, at no
+cost. A stream live now has no length yet and is kept, and a row of Shorts
+alone has no length to choose. The length is stored as one word:
+`length: "20to60"`, `"under4+over60"` or `"30-45"`, and YouTube's own
+`short`, `medium` and `long` as before, so older rows keep their ids. The
+app's search keeps to a length the same way.
+
+**Your own names.** The pencil beside a row's name renames it: apps show
+your name, and the page keeps the one made from what the row lists beneath
+it. Clear the name to go back to that one. A renamed row keeps its id, so
+apps keep its place; it is stored as `label: "Cricket"`.
 
 A pasted playlist or channel is looked up once, at 1 unit, on the configure
 page (`POST /api/youtube-source`), as the source you chose. Something else
@@ -607,10 +629,12 @@ encodeURIComponent(JSON.stringify({
   descriptionTemplate: "…",
   search: true,                         // the app's search searches YouTube too; false switches it off
   searchSort: "relevance",              // YouTube's ranking; or date, viewCount, rating
-  searchLength: "any",                  // or short (under 4 min), medium, long (over 20 min)
+  searchLength: "any",                  // or a length as a row's
   safeSearch: "moderate",               // YouTube's default; or strict, none
   catalogs: [                           // rows on the home screen, in order, up to 20
-    { q: "lofi hip hop", sort: "date", length: "long", within: "week", types: ["videos", "live"] },
+    { q: "lofi hip hop", sort: "date", length: "20to60", within: "week", types: ["videos", "live"], label: "Lofi" },
+                                        // length: any of under4, 4to20, 20to60, over60 joined by +,
+                                        // or minutes ("30-45", "90-"), or YouTube's short, medium, long
     { channel: "UC…", name: "A channel", types: ["shorts"], sort: "viewCount" },
                                         // types: any of videos, shorts, live (a channel's default: videos);
                                         // sort: date (default), viewCount
@@ -1056,35 +1080,6 @@ The configure page and the terms page show the credits these terms ask for.
   tells a Short by its shape and length, and a past stream from a premiere
   by its timing (see [Catalogs](#catalogs)). About 1 Short in 70 slips
   through, the square ones. A channel row of one kind is exact.
-
-## Maybe later
-
-Ideas looked into and parked, with what was measured, so that picking one
-up starts from the numbers.
-
-- **An exact length range for search rows**, such as 30 to 60 minutes.
-  YouTube's search knows three lengths: under 4 minutes, 4 to 20, and over
-  20. A finer range would be trimmed from the results, and every page it
-  takes to fill a row is another 101-unit search. Pages needed are about 1
-  divided by the share of results inside the range, measured on real
-  searches:
-
-  | Range | stand-up | Hindi podcasts | lofi | documentaries |
-  |---|---|---|---|---|
-  | 5 to 15 minutes | 44% | 1% | 4% | 1% |
-  | 10 to 30 minutes | 57% | 9% | 7% | 2% |
-  | 30 to 60 minutes | 10% | 22% | 6% | 45% |
-  | over 60 minutes | 7% | 56% | 80% | 40% |
-
-  Searching within the YouTube length that holds the range (over 20
-  minutes, for 30 to 60) and trimming from there takes about 1.1 to 3.5
-  searches a row instead of 1: 3.5 for 30 to 60 minutes of stand-up, 1.9
-  for documentaries, 1.5 for Hindi podcasts over an hour, 1.1 for lofi
-  over an hour. A range across 4 or 20 minutes, which no YouTube length
-  holds, takes 2 to 50. Rows stop at 5 pages, so a row never costs more
-  than 5 searches. Parked because YouTube's three lengths cover most rows
-  at no extra cost; if it is built, the range should sit inside one of
-  them.
 
 ## Legal
 

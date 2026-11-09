@@ -410,7 +410,14 @@ function youtubeData(entries) {
   return {
     catalogs: entries,
     sorts: pick(catalogs.SORTS),
-    lengths: pick(catalogs.LENGTHS),
+    lengthRanges: catalogs.LENGTH_RANGES.map(({ id, label, min, max, from, to }) => ({ id, label, min, max: max === Infinity ? null : max, from, to })),
+    youtubeLengths: [
+      { id: "short", ranges: ["under4"] },
+      { id: "medium", ranges: ["4to20"] },
+      { id: "long", ranges: ["20to60", "over60"] }
+    ],
+    maxLengthMinutes: catalogs.MAX_LENGTH_MINUTES,
+    maxName: catalogs.MAX_NAME_LENGTH,
     periods: pick(catalogs.PERIODS),
     types: catalogs.VIDEO_TYPES.map(({ id, label, short, inner }) => ({ id, label, short, inner })),
     channelTypes: catalogs.CHANNEL_TYPES,
@@ -771,12 +778,27 @@ const STYLE = `
   .type-toggle input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
   .type-toggle:has(input:checked) { border-color: var(--accent-2); background: rgba(122,26,43,.3); }
   .type-toggle:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 1px; }
+  .cat-lengths { flex: 0 0 calc(100% - 32px); margin: 8px 0 0 32px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  #search-length .cat-lengths { margin: 0; }
+  .cat-lengths-name { font-size: 12px; color: var(--muted); margin-right: 2px; }
+  .cat-minutes { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .cat-minutes input { width: 72px; padding: 5px 8px; font-size: 14px; border-radius: 7px; }
+  .cat-hint { flex: 1 1 100%; font-size: 12px; color: var(--muted); line-height: 1.45; }
+  .cat-rename {
+    display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin: -4px 0 -4px 2px;
+    padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted);
+    cursor: pointer; vertical-align: middle;
+  }
+  .cat-rename:hover, .cat-rename:focus-visible { color: var(--text); border-color: var(--border); background: var(--field); }
+  .cat-rename svg { width: 16px; height: 16px; }
+  .cat-name-input { width: 100%; max-width: 420px; padding: 6px 9px; font-size: 14px; font-weight: 600; border-radius: 7px; }
+  .cat-made { display: block; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 2px; }
   .cat-empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
   .cat-fixed { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
   .cat-filter { flex: 0 0 calc(100% - 32px); margin: 7px 0 0 32px; display: flex; flex-direction: column; gap: 6px; }
   .cat-filter select { width: 100%; padding: 6px 8px; font-size: 13px; border-radius: 7px; }
   .cat-filter .cat-words { padding: 8px 9px; font-size: 14px; border-radius: 7px; }
-  @media (max-width: 480px) { .cat-types, .cat-filter { flex-basis: 100%; margin-left: 0; } }
+  @media (max-width: 480px) { .cat-types, .cat-lengths, .cat-filter { flex-basis: 100%; margin-left: 0; } }
   .btns { flex: 0 0 auto; display: flex; gap: 4px; }
   .btns button { font-size: 11px; }
   .btns button.remove { color: #ff6b6b; }
@@ -1161,10 +1183,10 @@ ${
             <span class="label-text">Order search results by</span>
             <select id="search-sort">${choiceOptions(catalogs.SORTS, s.searchSort)}</select>
           </label>
-          <label class="field">
-            <span class="label-text">Video length</span>
-            <select id="search-length">${choiceOptions(catalogs.LENGTHS, s.searchLength)}</select>
-          </label>
+        </div>
+        <div class="field">
+          <span class="label-text">Video length</span>
+          <div id="search-length" data-length="${escapeHtml(s.searchLength)}"></div>
         </div>
         <label class="field">
           <span class="label-text">SafeSearch</span>

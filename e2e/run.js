@@ -157,7 +157,9 @@ async function addonChecks(state) {
     { channel: CHANNEL, name: "Channel", types: ["shorts"] },
     { playlist: PLAYLIST, name: "Playlist" },
     { q: "cricket highlights", sort: "date" },
-    { q: "cricket highlights", sort: "date", types: ["videos", "live"] }
+    { q: "cricket highlights", sort: "date", types: ["videos", "live"] },
+    { trending: "all", length: "under4+4to20", label: "Short and medium" },
+    { channel: CHANNEL, name: "Channel", length: "20to60" }
   ];
   const config = { catalogs: rows, region: "IN" };
   const seg = segment(config);
@@ -208,6 +210,17 @@ async function addonChecks(state) {
     const without = await catalog(6);
     expect(every.length > 0 && without.length <= every.length, `${without.length} of ${every.length}`);
     return `${without.length} of ${every.length} kept`;
+  });
+  await check("addon", "a row's own name is what the app shows", async () => {
+    expect(manifest.catalogs[7].name === "Short and medium", `named "${manifest.catalogs[7].name}"`);
+  });
+  await check("addon", "lengths: Trending under 20 minutes, a channel's 20 to 60, each trimmed here", async () => {
+    const short = await catalog(7);
+    const long = await catalog(8);
+    const outside = (metas, min, max) => metas.filter((m) => m.runtime && (seconds(m.runtime) < min || seconds(m.runtime) > max));
+    expect(short.length > 0 && !outside(short, 0, 20 * 60 + 30).length, `${outside(short, 0, 1230).length} of ${short.length} outside`);
+    expect(!outside(long, 20 * 60 - 30, 60 * 60 + 30).length, `${outside(long, 1170, 3630).length} of ${long.length} outside`);
+    return `${short.length} and ${long.length} videos`;
   });
   await check("addon", "a keyword filter leaves out what mentions its word", async () => {
     const word = (trending.map((m) => (m.name.match(/\p{L}{6,}/u) || [])[0]).find(Boolean) || "").toLowerCase();
@@ -424,6 +437,15 @@ async function browserRun(browser, device, options, state) {
       await page.locator("#trending-chips button", { hasText: "Music" }).click();
       const line = await summaryLine(page, "Catalogs");
       expect(line === "2 rows: lofi hip hop · Videos & live, Trending Music", `Catalogs: ${line}`);
+      // Renamed with its pencil; kept to an hour or more.
+      const music = page.locator("#catalog-list .cat-row").nth(1);
+      await music.locator(".cat-rename").click();
+      await music.locator(".cat-name-input").fill("Music");
+      await music.locator(".cat-name-input").press("Enter");
+      await music.locator('.cat-lengths input[value="over60"]').check();
+      const renamed = await summaryLine(page, "Catalogs");
+      expect(renamed === "2 rows: lofi hip hop · Videos & live, Music", `Catalogs: ${renamed}`);
+      expect((await music.locator(".cat-made").textContent()) === "Trending Music · Over 1 hr", "no made name beneath");
       expect((await overflow(page)) <= 0, "the rows scroll sideways");
     });
     await check("browser", `${device}: an install link that carries the settings`, async () => {
@@ -436,7 +458,8 @@ async function browserRun(browser, device, options, state) {
       const link = await page.inputValue("#manifest-url");
       const settings = JSON.parse(decodeURIComponent(link.slice(link.indexOf(BASE) + BASE.length + 1, -"/manifest.json".length)));
       expect(JSON.stringify(settings.types) === '["movie"]', `types ${JSON.stringify(settings.types)}`);
-      expect(JSON.stringify(settings.catalogs) === JSON.stringify([{ q: "lofi hip hop", types: ["videos", "live"] }, { trending: "music" }]), "rows not as made");
+      const rows = [{ q: "lofi hip hop", types: ["videos", "live"] }, { trending: "music", length: "over60", label: "Music" }];
+      expect(JSON.stringify(settings.catalogs) === JSON.stringify(rows), `rows: ${JSON.stringify(settings.catalogs)}`);
       expect(await page.locator("#install-app").count(), "no Install in Nuvio");
     });
     if (device === "desktop") {

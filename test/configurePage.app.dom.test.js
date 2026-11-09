@@ -281,8 +281,12 @@ describe("the summary", () => {
     change("type-anime", false);
     expect(p.summary()["Looks for"]).toBe("Nothing: YouTube only");
     change("search-sort", "date");
-    change("search-length", "long");
-    expect(p.summary()["YouTube search in your app"]).toBe("On · Newest · Over 20 minutes");
+    for (const id of ["20to60", "over60"]) {
+      const box = p.$(`#search-length input[value="${id}"]`);
+      box.checked = true;
+      p.fire(box, "change");
+    }
+    expect(p.summary()["YouTube search in your app"]).toBe("On · Newest · Over 20 min");
     change("yt-search", false);
     expect(p.summary()["YouTube search in your app"]).toBe("Off");
     p.set("catalog-input", "lofi");
