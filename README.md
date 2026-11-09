@@ -953,16 +953,16 @@ project, `youstream`, with a service per release channel.
 
 | Service | Branch | Domain | Region | Variables |
 |---|---|---|---|---|
-| `youstream` | `main` | [youstream.up.railway.app](https://youstream.up.railway.app/configure) | Singapore | `PORT=3000`, `TVDB_API_KEY`, optionally `TMDB_API_KEY`, `REDIS_URL` |
-| `youstream-beta` | `beta` | [youstream-beta.up.railway.app](https://youstream-beta.up.railway.app/configure) | Singapore | the same, plus `RELEASE_CHANNEL=beta`, for profiles `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `SECRET_KEY=${{shared.SECRET_KEY}}`, and `CACHE_STORE=database` |
-| `Postgres` | | private network only | Singapore | Railway's PostgreSQL template: the profiles, and beta's cache. Its volume is backed up daily (kept 6 days) and weekly (kept 27 days) |
+| `youstream` | `main` | [youstream.up.railway.app](https://youstream.up.railway.app/configure) | Singapore | `PORT=3000`, `TVDB_API_KEY`, optionally `TMDB_API_KEY`, `REDIS_URL`; for profiles `DATABASE_URL=${{Postgres.DATABASE_URL}}` and `SECRET_KEY=${{shared.SECRET_KEY}}` |
+| `youstream-beta` | `beta` | [youstream-beta.up.railway.app](https://youstream-beta.up.railway.app/configure) | Singapore | the same, plus `RELEASE_CHANNEL=beta` and `CACHE_STORE=database` |
+| `Postgres` | | private network only | Singapore | Railway's PostgreSQL template: the profiles of both, and beta's cache. Its volume is backed up daily (kept 6 days) and weekly (kept 27 days) |
 
 `SECRET_KEY` is a shared variable of the project's environment, generated
 by Railway (`${{ secret(64, "abcdef0123456789") }}`), so its value is in no
-file and no log. Prod can take the same two references to share beta's
-profiles: one database, one key, and a profile's install link then works on
-either address. Migrations only ever add, so prod's older code keeps
-working on a database beta has moved ahead.
+file and no log. Prod and beta take the same two references, so they share
+their profiles: one database, one key, and a profile's install link works on
+either address. Migrations only ever add, so prod's code keeps working on a
+database beta has moved ahead.
 
 Work happens on `beta`, which beta deploys on every push; `main` moves only
 when a release goes to prod. CI runs on both: the tests, on Node 24 like the
@@ -970,8 +970,8 @@ image, against a real Redis and PostgreSQL, and a build of the production
 image, started and asked for `/health` and its manifest, and started again
 with profiles on SQLite.
 
-Beta's cache survives redeploys in that same database. Prod can do the
-same with the same two references and `CACHE_STORE=database`; with the same
+Beta's cache survives redeploys in that same database. Prod, which has the
+database already, can do the same with `CACHE_STORE=database`; with the same
 `CACHE_PREFIX` (the default), the two then share their searches. Or add
 Railway's Redis to the project and set `REDIS_URL=${{Redis.REDIS_URL}}` on
 each service; Railway's private network is IPv6, and the Redis client is
