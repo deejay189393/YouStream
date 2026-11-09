@@ -1173,7 +1173,7 @@ ${
         "YouTube in your app: a row of YouTube's own results when you search, and rows of your own on the home screen, <strong>in this order</strong>. A video you open from one plays the ways you choose under Playback, and one you save to your library is listed under the type <strong>youtube</strong>."
       )}
       <div class="card" id="youtube-card">
-        <h3>The search row</h3>
+        <h3>Search row</h3>
         <div class="row-box">
           <label class="check"><input type="checkbox" id="yt-search"${s.search ? " checked" : ""} />
             <span><strong>Search YouTube</strong><em>Your app's search shows a row of YouTube's own results, live. Each search costs one of your 100 a day, so ${ADDON_NAME} waits until you stop typing and skips anything under 3 letters.</em></span></label>
@@ -1194,17 +1194,19 @@ ${
             (id) => `<option value="${id}"${id === s.safeSearch ? " selected" : ""}>${escapeHtml(SAFE_SEARCH_LABELS[id])}</option>`
           ).join("")}</select>
         </label>
-        <div class="hint">When you search in your app, a row of YouTube's own results comes with the rest. SafeSearch applies to it and to your search rows below.</div>
+        <div class="hint">When you search in your app, a row of YouTube's own results comes with the rest. SafeSearch applies to it and to your search catalogs below.</div>
       </div>
 
 
       <div class="card">
-        <h3>Your rows</h3>
-        <p class="hint cat-lead">
-          Choose where a row's videos come from, type the search or paste the playlist or channel, then choose
-          how its videos are ordered. Use the arrows to arrange them.
-        </p>
+        <h3>Catalogs</h3>
+        <p class="hint cat-lead">Your app shows them in this order. Use the arrows to rearrange them, and the pencil to rename one.</p>
         <div id="catalog-list"></div>
+      </div>
+
+      <div class="card">
+        <h3>Add a new catalog</h3>
+        <p class="hint cat-lead">Choose where its videos come from, then type the search or paste the playlist or channel.</p>
         <div class="add-row source-row">
           <select id="catalog-source" aria-label="Where the catalog's videos come from">${choiceOptions(CATALOG_SOURCES, CATALOG_SOURCES[0].id)}</select>
           <input type="text" id="catalog-input" maxlength="500" placeholder="${escapeHtml(CATALOG_SOURCES[0].placeholder)}" aria-label="${escapeHtml(CATALOG_SOURCES[0].prompt)}" spellcheck="false" />
@@ -1217,7 +1219,7 @@ ${
 
 
       <div class="card">
-        <h3>Refreshing</h3>
+        <h3>Catalog refresh</h3>
         <div class="field">
           <span class="label-text">Refresh catalogs every</span>
           <div class="inline-inputs">

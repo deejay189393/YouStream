@@ -587,7 +587,7 @@ The configure page is an app, in five tabs:
 | **Summary** | A new setup's three steps: your YouTube key (checked the moment it is pasted, for 1 unit of quota), your setup at a glance, then your profile or an install link. Signed in: your install link, a warning only when your key needs you, and your setup at a glance |
 | **Streams** | How a film, an episode or an anime is found: what to look for (movies, series, anime, and where anime names come from), the results kept, runtime matching, and fine-tuning |
 | **Playback** | How each video found is offered in your app, and how its stream reads |
-| **Catalogs** | YouTube in your app: the search row (on or off, its order and length, SafeSearch), your rows (each with its order, its kinds of video and a keyword filter), and how often they refresh |
+| **Catalogs** | YouTube in your app: the search row (on or off, its order and length, SafeSearch), your catalogs (each with its order, kinds of video, length, name and keyword filter), adding new ones, and how often they refresh |
 | **Account** | Signed in: your profile, with its whole ID to sign in with elsewhere, your keys, backups, and your password and link. Otherwise signing in and backups; **More** on a server without profiles |
 
 On a phone the tabs are a bar along the bottom; on a wider screen, a column

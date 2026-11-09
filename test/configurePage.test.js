@@ -125,6 +125,24 @@ describe("the page as an app", () => {
     expect(page(null, { profile: { enabled: true } })).toContain("<span>Account</span>");
   });
 
+  test("Catalogs: the search row, the catalogs, then adding one in a card of its own, then refreshing", () => {
+    const { JSDOM } = require("jsdom");
+    const { document } = new JSDOM(html).window;
+    const panel = document.querySelector('.panel[data-tab="catalogs"]');
+    expect([...panel.querySelectorAll(".card > h3")].map((h) => h.textContent)).toEqual([
+      "Search row",
+      "Catalogs",
+      "Add a new catalog",
+      "Catalog refresh"
+    ]);
+    const list = document.getElementById("catalog-list").closest(".card");
+    const adding = document.getElementById("catalog-add").closest(".card");
+    expect(list.nextElementSibling).toBe(adding);
+    for (const id of ["catalog-source", "catalog-input", "catalog-note", "trending-chips"]) {
+      expect(document.getElementById(id).closest(".card")).toBe(adding);
+    }
+  });
+
   test("runs one script, its own, at the address of its version; everything else is data", () => {
     const { version } = require("../src/webApp").configureScript();
     const scripts = [...html.matchAll(/<script([^>]*)>/g)].map((m) => m[1]);
