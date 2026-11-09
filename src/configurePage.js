@@ -798,7 +798,24 @@ const STYLE = `
   .cat-filter { flex: 0 0 calc(100% - 32px); margin: 7px 0 0 32px; display: flex; flex-direction: column; gap: 6px; }
   .cat-filter select { width: 100%; padding: 6px 8px; font-size: 13px; border-radius: 7px; }
   .cat-filter .cat-words { padding: 8px 9px; font-size: 14px; border-radius: 7px; }
-  @media (max-width: 480px) { .cat-types, .cat-lengths, .cat-filter { flex-basis: 100%; margin-left: 0; } }
+  /* Show in Home: a switch, on unless turned off, and where the row shows beside it. */
+  .cat-home { flex: 0 0 calc(100% - 32px); margin: 9px 0 1px 32px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+  .home-toggle { position: relative; display: inline-flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; user-select: none; }
+  .home-toggle input { position: absolute; top: 0; left: 0; width: 34px; height: 20px; margin: 0; opacity: 0; cursor: pointer; }
+  .home-switch {
+    position: relative; flex: 0 0 auto; width: 34px; height: 20px; border-radius: 999px;
+    background: var(--field); border: 1px solid var(--border); transition: background-color .15s, border-color .15s;
+  }
+  .home-switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--muted); transition: transform .15s, background-color .15s;
+  }
+  .home-toggle input:checked + .home-switch { background: var(--accent); border-color: var(--accent-2); }
+  .home-toggle input:checked + .home-switch::after { transform: translateX(14px); background: #fff; }
+  .home-toggle input:focus-visible + .home-switch { outline: 2px solid var(--link); outline-offset: 2px; }
+  .home-where { font-size: 12px; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { .home-switch, .home-switch::after { transition: none; } }
+  @media (max-width: 480px) { .cat-types, .cat-lengths, .cat-filter, .cat-home { flex-basis: 100%; margin-left: 0; } }
   .btns { flex: 0 0 auto; display: flex; gap: 4px; }
   .btns button { font-size: 11px; }
   .btns button.remove { color: #ff6b6b; }
@@ -1200,7 +1217,8 @@ ${
 
       <div class="card">
         <h3>Catalogs</h3>
-        <p class="hint cat-lead">Your app shows them in this order. Use the arrows to rearrange them, and the pencil to rename one.</p>
+        <p class="hint cat-lead">Your app shows them in this order. Use the arrows to rearrange them, and the pencil to rename one.
+          With <strong>Show in Home</strong> on, a catalog is on Stremio's and Nuvio's home screen as well as in Discover; turned off, it's in Discover only.</p>
         <div id="catalog-list"></div>
       </div>
 

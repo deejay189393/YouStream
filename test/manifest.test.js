@@ -116,6 +116,16 @@ describe("the served manifest", () => {
     expect(SKIP_OPTIONS).toEqual(["0", "50", "100", "150", "200"]);
   });
 
+  test("a catalog kept off the home screen requires a genre of one option, so only Discover lists it", () => {
+    const manifest = buildManifest({ youtubeKey: "k", catalogs: [{ trending: "all" }, { trending: "music", home: false }] }, BASE);
+    const skip = { name: "skip", options: SKIP_OPTIONS };
+    expect(manifest.catalogs.map((c) => [c.id, c.extra])).toEqual([
+      ["trending.all", [skip]],
+      ["trending.music", [{ name: "genre", options: ["All"], isRequired: true }, skip]],
+      [SEARCH_CATALOG_ID, [{ name: "search", isRequired: true }, skip]]
+    ]);
+  });
+
   test("search alone is a catalog too, on unless switched off, and with search off and no catalogs there is none", () => {
     // An addon installed before search existed has it too.
     expect(buildManifest({ youtubeKey: "k" }, BASE).catalogs.map((c) => c.id)).toEqual([SEARCH_CATALOG_ID]);

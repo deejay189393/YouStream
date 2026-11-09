@@ -20,7 +20,7 @@ const { SKIP_OPTIONS } = require("./catalogs");
  *   YouTube add-on ("channel", yt_id:) get streams.
  */
 const ADDON_ID = "org.deejay189393.youstream";
-const ADDON_VERSION = "0.15.0";
+const ADDON_VERSION = "0.16.0";
 const ADDON_NAME = "YouStream";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION =
@@ -96,11 +96,19 @@ function typesFor(settings) {
  * named for the addon. Its `search` extra is required, which keeps it off
  * the home screen and out of Discover, where it would be an empty row.
  * Every catalog declares its page steps (catalogs.SKIP_OPTIONS).
+ *
+ * A catalog the reader keeps off the home screen requires a genre, of one
+ * option. Stremio's home screen (its Board) and Nuvio's list only catalogs
+ * that need nothing, while both Discovers list a catalog whose required
+ * extras have options, asking for the first: so it is in Discover alone,
+ * the same videos under the same id.
  */
+const DISCOVER_ONLY = { name: "genre", options: ["All"], isRequired: true };
+
 function catalogsFor(settings) {
   const skip = { name: "skip", options: SKIP_OPTIONS };
   return [
-    ...settings.catalogs.map((entry) => ({ type: ITEM_TYPE, id: entry.id, name: entry.name, extra: [skip] })),
+    ...settings.catalogs.map((entry) => ({ type: ITEM_TYPE, id: entry.id, name: entry.name, extra: entry.home ? [skip] : [DISCOVER_ONLY, skip] })),
     ...(settings.search
       ? [{ type: ITEM_TYPE, id: SEARCH_CATALOG_ID, name: identity().name, extra: [{ name: "search", isRequired: true }, skip] }]
       : [])

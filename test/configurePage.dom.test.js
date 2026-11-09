@@ -1168,6 +1168,49 @@ describe("the YouTube card", () => {
     expect(names(p)).toEqual(["lofi"]);
   });
 
+  test("Show in Home: on for every catalog; off keeps one to Discover, on the summary and in the link", () => {
+    const p = loadPage({ existing: normalizeConfig({ youtubeKey: "k" }) });
+    add(p, "cricket highlights");
+    add(p, "news");
+    const rows = () => [...p.document.querySelectorAll("#catalog-list .cat-row")];
+    const home = (i) => rows()[i].querySelector(".cat-home input");
+    const where = (i) => rows()[i].querySelector(".home-where").textContent;
+    const flip = (i) => {
+      home(i).checked = !home(i).checked;
+      home(i).dispatchEvent(new p.dom.window.Event("change", { bubbles: true }));
+    };
+    const catalogsLine = () =>
+      [...p.document.querySelectorAll("#summary-list .summary-row")].find((r) => r.querySelector(".s-name").textContent === "Catalogs").querySelector(".s-value").textContent;
+    expect(rows().map((_, i) => home(i).checked)).toEqual([true, true]);
+    expect(home(0).getAttribute("role")).toBe("switch");
+    expect(home(0).getAttribute("aria-label")).toBe("Show cricket highlights in Home");
+    expect(rows()[0].querySelector(".home-toggle").textContent).toBe("Show in Home");
+    expect([where(0), where(1)]).toEqual(["Home and Discover", "Home and Discover"]);
+    flip(1);
+    expect(where(1)).toBe("Discover only");
+    expect(catalogsLine()).toBe("2 rows: cricket highlights, news (Discover only)");
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([{ q: "cricket highlights" }, { q: "news", home: false }]);
+    expect(p.generated().catalogs.map((c) => c.home)).toEqual([true, false]);
+    // Its other options keep it where it is.
+    toggle(p, 1, "shorts");
+    expect(home(1).checked).toBe(false);
+    flip(1);
+    expect(where(1)).toBe("Home and Discover");
+    expect(catalogsLine()).toBe("2 rows: cricket highlights, news · Videos & live");
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([{ q: "cricket highlights" }, { q: "news", types: ["videos", "live"] }]);
+  });
+
+  test("a saved catalog kept to Discover opens with its switch off", () => {
+    const p = loadPage({ existing: normalizeConfig({ youtubeKey: "k", catalogs: [{ trending: "music", home: false }, { trending: "all" }] }) });
+    const switches = [...p.document.querySelectorAll("#catalog-list .cat-home input")];
+    expect(switches.map((s) => s.checked)).toEqual([false, true]);
+    expect([...p.document.querySelectorAll("#catalog-list .home-where")].map((w) => w.textContent)).toEqual(["Discover only", "Home and Discover"]);
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([{ trending: "music", home: false }, { trending: "all" }]);
+  });
+
   test("the last kind stays ticked, and kinds that would repeat another row are put back", () => {
     const p = loadPage();
     add(p, "news");

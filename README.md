@@ -478,6 +478,12 @@ your name, and the page keeps the one made from what the row lists beneath
 it. Clear the name to go back to that one. A renamed row keeps its id, so
 apps keep its place; it is stored as `label: "Cricket"`.
 
+**Home or Discover.** Each row has a Show in Home switch, on unless you turn
+it off. Off, the row is left off Stremio's and Nuvio's home screens and
+listed in Discover alone: it requires a `genre` with the one option `All`,
+which both apps' home screens skip and both Discovers choose for you. It
+keeps its id and its videos, and is stored as `home: false`.
+
 A pasted playlist or channel is looked up once, at 1 unit, on the configure
 page (`POST /api/youtube-source`), as the source you chose. Something else
 is explained rather than added: a channel pasted as a playlist or the other
@@ -587,7 +593,7 @@ The configure page is an app, in five tabs:
 | **Summary** | A new setup's three steps: your YouTube key (checked the moment it is pasted, for 1 unit of quota), your setup at a glance, then your profile or an install link. Signed in: your install link, a warning only when your key needs you, and your setup at a glance |
 | **Streams** | How a film, an episode or an anime is found: what to look for (movies, series, anime, and where anime names come from), the results kept, runtime matching, and fine-tuning |
 | **Playback** | How each video found is offered in your app, and how its stream reads |
-| **Catalogs** | YouTube in your app: the search row (on or off, its order and length, SafeSearch), your catalogs (each with its order, kinds of video, length, name and keyword filter), adding new ones, and how often they refresh |
+| **Catalogs** | YouTube in your app: the search row (on or off, its order and length, SafeSearch), your catalogs (each with its order, kinds of video, length, name, keyword filter and whether it shows on Home), adding new ones, and how often they refresh |
 | **Account** | Signed in: your profile, with its whole ID to sign in with elsewhere, your keys, backups, and your password and link. Otherwise signing in and backups; **More** on a server without profiles |
 
 On a phone the tabs are a bar along the bottom; on a wider screen, a column
@@ -631,7 +637,7 @@ encodeURIComponent(JSON.stringify({
   searchSort: "relevance",              // YouTube's ranking; or date, viewCount, rating
   searchLength: "any",                  // or a length as a row's
   safeSearch: "moderate",               // YouTube's default; or strict, none
-  catalogs: [                           // rows on the home screen, in order, up to 20
+  catalogs: [                           // rows on the home screen and in Discover, in order, up to 20
     { q: "lofi hip hop", sort: "date", length: "20to60", within: "week", types: ["videos", "live"], label: "Lofi" },
                                         // length: any of under4, 4to20, 20to60, over60 joined by +,
                                         // or minutes ("30-45", "90-"), or YouTube's short, medium, long
@@ -639,7 +645,8 @@ encodeURIComponent(JSON.stringify({
                                         // types: any of videos, shorts, live (a channel's default: videos);
                                         // sort: date (default), viewCount
     { playlist: "PL…", name: "Lectures", exclude: ["word"] },  // or include; filterIn: "title"
-    { trending: "music" }               // all, music, gaming, film, sports, news, …
+    { trending: "music", home: false }  // all, music, gaming, film, sports, news, …;
+                                        // home: false keeps a row in Discover alone
   ],
   catalogRefresh: "2h"                  // "90m", "6h", "1d": at least 30 minutes
 }))

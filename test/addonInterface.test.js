@@ -155,6 +155,14 @@ describe("YouTube catalogs", () => {
     expect(res.cacheMaxAge).toBe(60 * 60);
   });
 
+  test("a catalog kept to Discover lists the same videos for Discover's genre, and pages the same", async () => {
+    routeFetch([["/videos?", (url) => (new URL(url).searchParams.get("pageToken") ? { items: [apiVideo("second00001")] } : { items: [apiVideo("first000001")], nextPageToken: "N" })]]);
+    const config = { youtubeKey: "KEY", catalogs: [{ trending: "all", home: false }] };
+    const first = await handleCatalog({ type: "youtube", id: "trending.all", extra: { genre: "All" }, config });
+    const next = await handleCatalog({ type: "youtube", id: "trending.all", extra: { genre: "All", skip: "1" }, config });
+    expect([first.metas.map((m) => m.id), next.metas.map((m) => m.id)]).toEqual([["yt_id:first000001"], ["yt_id:second00001"]]);
+  });
+
   test("pages follow skip", async () => {
     const fetch = routeFetch([["/videos?", (url) => (new URL(url).searchParams.get("pageToken") ? { items: [apiVideo("second00001")] } : { items: [apiVideo("first000001")], nextPageToken: "N" })]]);
     const res = await handleCatalog({ type: "youtube", id: "trending.all", extra: { skip: "1" }, config: TRENDING });

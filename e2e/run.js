@@ -205,7 +205,7 @@ async function addonChecks(state) {
     { trending: "all", types: ["videos"] },
     { channel: CHANNEL, name: "Channel" },
     { channel: CHANNEL, name: "Channel", types: ["shorts"] },
-    { playlist: PLAYLIST, name: "Playlist" },
+    { playlist: PLAYLIST, name: "Playlist", home: false },
     { q: "cricket highlights", sort: "date" },
     { q: "cricket highlights", sort: "date", types: ["videos", "live"] },
     { trending: "all", length: "under4+4to20", label: "Short and medium" },
@@ -219,6 +219,9 @@ async function addonChecks(state) {
     expect(manifest.catalogs.length === rows.length + 1, `${manifest.catalogs.length} catalogs`);
     expect(manifest.catalogs[rows.length].id === "search", "search is not last");
     for (const prefix of ["tt", "kitsu:", "mal:", "anilist:", "anidb:", "yt_id:"]) expect(manifest.idPrefixes.includes(prefix), `no ${prefix}`);
+    // Every row on the home screen but the one kept to Discover, which requires a genre.
+    const required = manifest.catalogs.slice(0, rows.length).map((c) => c.extra.filter((e) => e.isRequired).map((e) => e.name).join());
+    expect(required.join("|") === ["", "", "", "", "genre", "", "", "", ""].join("|"), `required: ${required.join("|")}`);
     const off = (await getJson(`/${segment({ anime: false })}/manifest.json`)).body;
     expect(!off.idPrefixes.includes("kitsu:") && !off.types.includes("anime"), "anime off still claims anime");
     return `v${manifest.version}, ${manifest.catalogs.length} catalogs`;
@@ -250,8 +253,8 @@ async function addonChecks(state) {
     expect(!long.length, `${long.length} Shorts over three minutes`);
     return `${videos.length} videos, ${shorts.length} Shorts`;
   });
-  await check("addon", "a playlist, in its own order", async () => {
-    const items = await catalog(4);
+  await check("addon", "a playlist kept to Discover, asked for as Discover asks", async () => {
+    const items = await catalog(4, "/genre=All");
     expect(items.length > 0, "empty");
     return `${items.length} videos`;
   });
@@ -502,6 +505,12 @@ async function browserRun(browser, device, options, state) {
       const renamed = await summaryLine(page, "Catalogs");
       expect(renamed === "2 rows: lofi hip hop · Videos & live, Music", `Catalogs: ${renamed}`);
       expect((await music.locator(".cat-made").textContent()) === "Trending Music · Over 1 hr", "no made name beneath");
+      // Kept off the home screen, by its switch: Discover alone.
+      expect(await music.locator(".cat-home input").isChecked(), "Show in Home is not on to begin with");
+      await music.locator(".home-toggle").click();
+      expect((await music.locator(".home-where").textContent()) === "Discover only", "the switch did not turn off");
+      const discover = await summaryLine(page, "Catalogs");
+      expect(discover === "2 rows: lofi hip hop · Videos & live, Music (Discover only)", `Catalogs: ${discover}`);
       expect((await overflow(page)) <= 0, "the rows scroll sideways");
     });
     await check("browser", `${device}: an install link that carries the settings`, async () => {
@@ -514,7 +523,7 @@ async function browserRun(browser, device, options, state) {
       const link = await page.inputValue("#manifest-url");
       const settings = JSON.parse(decodeURIComponent(link.slice(link.indexOf(BASE) + BASE.length + 1, -"/manifest.json".length)));
       expect(JSON.stringify(settings.types) === '["movie"]', `types ${JSON.stringify(settings.types)}`);
-      const rows = [{ q: "lofi hip hop", types: ["videos", "live"] }, { trending: "music", length: "over60", label: "Music" }];
+      const rows = [{ q: "lofi hip hop", types: ["videos", "live"] }, { trending: "music", length: "over60", label: "Music", home: false }];
       expect(JSON.stringify(settings.catalogs) === JSON.stringify(rows), `rows: ${JSON.stringify(settings.catalogs)}`);
       expect(await page.locator("#install-app").count(), "no Install in Nuvio");
     });

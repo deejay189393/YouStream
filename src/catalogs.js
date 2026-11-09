@@ -34,6 +34,11 @@ const crypto = require("crypto");
  *
  *   { q: "lofi hip hop", sort: "date", label: "Lofi" }
  *
+ * Any of them can stay off the apps' home screens, listed in Discover alone
+ * (every catalog is on the home screen too unless the reader says not):
+ *
+ *   { trending: "music", home: false }
+ *
  * Any of them can also keep only, or leave out, the videos that mention some
  * words in their title, channel name or description:
  *
@@ -475,7 +480,8 @@ function normalizeEntry(raw) {
   // A name of the reader's own is what apps show; like the filter, it is no
   // part of the id, so renaming a row never makes it a new one.
   const label = tidy(raw.label, MAX_NAME_LENGTH);
-  return { ...entry, ...(label ? { name: label, label } : {}), filter: filterOf(raw) };
+  // Nor is where the row shows, home screen and Discover or Discover alone.
+  return { ...entry, ...(label ? { name: label, label } : {}), home: raw.home !== false, filter: filterOf(raw) };
 }
 
 /** The reader's catalogs, in their order, without repeats, at most MAX_CATALOGS. */
@@ -495,7 +501,7 @@ function normalizeCatalogs(raw) {
 
 /** The compact form the install URL carries. */
 function toStoredEntry(entry) {
-  const source = { ...toStoredSource(entry), ...(entry.label ? { label: entry.label } : {}) };
+  const source = { ...toStoredSource(entry), ...(entry.label ? { label: entry.label } : {}), ...(entry.home === false ? { home: false } : {}) };
   if (!entry.filter) return source;
   const { mode, words, scope } = entry.filter;
   return { ...source, [mode]: words, ...(scope === "title" ? { filterIn: "title" } : {}) };

@@ -47,6 +47,7 @@ describe("a search catalog", () => {
       length: "any",
       within: "any",
       types: ["videos", "shorts", "live"],
+      home: true,
       filter: null
     });
   });
@@ -103,6 +104,7 @@ describe("a channel catalog", () => {
       types: ["videos"],
       sort: "date",
       length: "any",
+      home: true,
       filter: null
     });
   });
@@ -143,6 +145,7 @@ describe("a playlist catalog", () => {
       playlist: PLAYLIST,
       types: ["videos", "shorts", "live"],
       length: "any",
+      home: true,
       filter: null
     });
     expect(normalizeEntry({ playlist: PLAYLIST }).name).toBe("YouTube playlist");
@@ -221,6 +224,7 @@ describe("a Trending catalog", () => {
       trending: "all",
       types: ["videos", "shorts", "live"],
       length: "any",
+      home: true,
       filter: null
     });
     expect(normalizeEntry({ trending: "music" }).name).toBe("Trending Music");
@@ -384,6 +388,28 @@ describe("a row's name of its own", () => {
     const entry = normalizeEntry({ playlist: PLAYLIST, name: "P", label: "x".repeat(200), exclude: ["a"] });
     expect(entry.label).toHaveLength(MAX_NAME_LENGTH);
     expect(Object.keys(toStoredEntry(entry))).toEqual(["playlist", "name", "label", "exclude"]);
+  });
+});
+
+describe("where a row shows", () => {
+  test("on the home screen and in Discover, unless kept to Discover; stored only then", () => {
+    const home = normalizeEntry({ trending: "music" });
+    const discover = normalizeEntry({ trending: "music", home: false });
+    expect([home.home, discover.home]).toEqual([true, false]);
+    expect(toStoredEntry(home)).toEqual({ trending: "music" });
+    expect(toStoredEntry(discover)).toEqual({ trending: "music", home: false });
+    expect(normalizeEntry(discover)).toEqual(discover);
+  });
+
+  test("only false keeps a row off the home screen", () => {
+    for (const value of [true, "false", 0, null, "no"]) expect(normalizeEntry({ q: "x", home: value }).home).toBe(true);
+  });
+
+  test("is no part of the row: the same id and name, after its own name and before its filter", () => {
+    const entry = normalizeEntry({ q: "news", label: "News", home: false, include: ["india"] });
+    expect(entry.id).toBe(normalizeEntry({ q: "news" }).id);
+    expect(entry.name).toBe("News");
+    expect(Object.keys(toStoredEntry(entry))).toEqual(["q", "label", "home", "include"]);
   });
 });
 

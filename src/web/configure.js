@@ -474,6 +474,7 @@ module.exports = function start(window, hooks = {}) {
   function storedCatalog(entry) {
     const stored = storedSource(entry);
     if (entry.label) stored.label = entry.label;
+    if (entry.home === false) stored.home = false;
     if (entry.filter && entry.filter.words.length) {
       stored[entry.filter.mode] = entry.filter.words;
       if (entry.filter.scope === "title") stored.filterIn = "title";
@@ -740,6 +741,36 @@ module.exports = function start(window, hooks = {}) {
     return box;
   }
 
+  // Show in Home: on, the catalog is on the apps' home screens as well as in
+  // Discover; off, in Discover alone. On unless the reader turns it off.
+  function homeControls(index, title) {
+    const box = node("div", "cat-home");
+    const toggle = node("label", "home-toggle");
+    const check = node("input");
+    check.type = "checkbox";
+    check.setAttribute("role", "switch");
+    check.setAttribute("aria-label", "Show " + title + " in Home");
+    check.checked = CATALOGS[index].home !== false;
+    const where = node("span", "home-where");
+    const paint = () => {
+      where.textContent = check.checked ? "Home and Discover" : "Discover only";
+    };
+    check.addEventListener("change", () => {
+      const next = { ...CATALOGS[index] };
+      if (check.checked) delete next.home;
+      else next.home = false;
+      CATALOGS[index] = next;
+      paint();
+    });
+    toggle.appendChild(check);
+    toggle.appendChild(node("span", "home-switch"));
+    toggle.appendChild(node("span", "", "Show in Home"));
+    box.appendChild(toggle);
+    box.appendChild(where);
+    paint();
+    return box;
+  }
+
   // A drawn pencil, for renaming a row.
   const PENCIL =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>';
@@ -874,6 +905,7 @@ module.exports = function start(window, hooks = {}) {
       row.appendChild(typeControls(index, title, paint, lengths));
       row.appendChild(lengths.box);
       row.appendChild(filterControls(index, title));
+      row.appendChild(homeControls(index, title));
       paint();
       catalogList.appendChild(row);
     });
@@ -1033,7 +1065,11 @@ module.exports = function start(window, hooks = {}) {
       ["YouTube search in your app", ytSearch.checked ? ["On", shown(searchSort), lengthOf(searchLength.value()).short || "Any length"].join(" · ") : "Off", "catalogs"],
       [
         "Catalogs",
-        CATALOGS.length ? CATALOGS.length + (CATALOGS.length === 1 ? " row: " : " rows: ") + CATALOGS.map(shownName).join(", ") : "None yet",
+        CATALOGS.length
+          ? CATALOGS.length +
+            (CATALOGS.length === 1 ? " row: " : " rows: ") +
+            CATALOGS.map((entry) => shownName(entry) + (entry.home === false ? " (Discover only)" : "")).join(", ")
+          : "None yet",
         "catalogs"
       ]
     ];
