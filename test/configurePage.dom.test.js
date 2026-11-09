@@ -1107,6 +1107,30 @@ describe("editing an installed addon", () => {
     expect(segmentOf(p)).toBe(segment);
   });
 
+  test("a channel row saved with the one list it read comes back with its kinds: the same row, under the same id", () => {
+    const old = {
+      youtubeKey: "AIzaReaderKey_5",
+      playback: ["app", "youtube"],
+      playbackVersion: 1,
+      catalogs: [
+        { channel: CHANNEL, name: "Ch", show: "shorts", sort: "viewCount" },
+        { channel: CHANNEL, name: "Ch", show: "live" },
+        { channel: CHANNEL, name: "Ch", show: "all" },
+        { channel: CHANNEL, name: "Ch" }
+      ]
+    };
+    const p = loadPage({ existing: decodeConfig(encodeURIComponent(JSON.stringify(old))) });
+    p.submit();
+    expect(p.rawGenerated().catalogs).toEqual([
+      { channel: CHANNEL, name: "Ch", types: ["shorts"], sort: "viewCount" },
+      { channel: CHANNEL, name: "Ch", types: ["live"] },
+      { channel: CHANNEL, name: "Ch", types: ["videos", "shorts", "live"] },
+      { channel: CHANNEL, name: "Ch" }
+    ]);
+    const ids = (config) => normalizeConfig(config).catalogs.map((c) => [c.id, c.name]);
+    expect(ids(p.rawGenerated())).toEqual(ids(old));
+  });
+
   test("every setting changed, YouTube's too, is shown as saved and comes back as the very same link", async () => {
     const fetch = lookups((body) =>
       body.kind === "channel"

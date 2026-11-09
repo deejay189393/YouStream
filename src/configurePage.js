@@ -458,8 +458,8 @@ function keysCard({ s, p, tmdbNote, step }) {
         <h3>${step ? '<span class="step-no">1</span>Your YouTube key' : "Keys"}</h3>
         <p class="lead">
           ${ADDON_NAME} searches YouTube with your own key, which is free. A key can search 100 times a day.
-          A search is spent the first time a title is looked up, and nothing is spent after that for a day,
-          however often it is opened again.
+          A search is spent the first time a title is looked up, and nothing is spent after that for a day
+          (three hours for a release of the last month), however often it is opened again.
         </p>
         ${keyField({ id: "youtube-key", label: "YouTube API key", value: s.youtubeKey, placeholder: "AIza...", outside })}
         <p class="msg" id="key-status" role="status" hidden></p>

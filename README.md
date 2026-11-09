@@ -55,7 +55,7 @@ tt…:1:3                                         the id the app asks about
    rows.
 
 Searches and metadata are cached, shared by everyone on the server, in memory,
-Redis or files (see [Caching](#caching)).
+Redis, files or the database (see [Caching](#caching)).
 
 ## What counts as a match
 
@@ -208,26 +208,13 @@ AniList and the database: abbreviations that any title may happen to
 contain. **Kitsu alone** asks Kitsu only, as anime were looked up before,
 and needs the database to read any id but Kitsu's.
 
-Measured on the latest 600 uploads of two official anime channels, of which
-253 were episodes matched to their anime by the database's names and
-numbered the way the matcher reads them:
-
-| Anime names from | Named and numbered |
-|---|---|
-| Kitsu alone | 107 (42%) |
-| Automatic: every source | 233 (92%) |
-
-The uploads were matched to their anime with the database's names, so 92% is
-the most every source could reach here; Kitsu alone missing 126 of them is
-what the other sources add. Most of the rest write a name in a form no
-source lists, such as a Roman numeral as one character (Ⅱ).
-
-End to end, one episode asked for by its MyAnimeList id from a country the
-official channel streams it to: every source searched its English name and
-found the official upload; Kitsu alone, with no English name, searched its
-romanised Japanese one and found nothing. From a country the upload is not
-available in, neither finds it, rightly: YouTube's search leaves out what a
-country cannot play.
+Measured on 253 episode uploads of two official anime channels, numbered the
+way the matcher reads them: Kitsu's names alone named 107 (42%), every
+source's 233 (92%). The uploads were tied to their anime by the database's
+names, so 92% is the ceiling here. End to end, an episode asked for by its
+MyAnimeList id, from a country the official channel streams it to, was found
+with every source and not with Kitsu alone, which had no English name to
+search for.
 
 ## Runtime margins
 
@@ -295,14 +282,11 @@ first is what the play button and an app's autoplay land on.
 | **Open in the YouTube app** | `https://www.youtube.com/watch?v=…` | a browser can take this too |
 | **Open in SmartTube** | `vnd.youtube:<id>` | no browser claims it, so it can only land in a YouTube app. Off by default |
 
-In-app playback works the way Newsio's does. Nuvio resolves a bare `ytId` on
-the device through the extractor its trailers use
-(`YouTubeStreamResolver` → `InAppYouTubeExtractor.extractSingleUrl`, which
-prefers YouTube's HLS playlist, so every quality is available). It does this
-only when the stream has no `url` or `externalUrl`, which is why this row
-carries neither. That needs a Nuvio release newer than 1.1.0-beta.2. Stremio
-plays `ytId` in its built-in YouTube player. Nothing passes through this
-server, so YouTube blocking datacenter addresses never matters.
+**Play in app** sends a bare `ytId`, with no `url` or `externalUrl`: that is
+what has Nuvio (newer than 1.1.0-beta.2) resolve the video on the device,
+through the extractor its trailers use, at every quality YouTube offers, and
+Stremio play it in its built-in YouTube player. Nothing passes through this
+server.
 
 Age-restricted videos play only for a signed-in viewer, so they get no in-app
 row, only the external ones. Each row's `bingeGroup` names the way of
@@ -337,32 +321,24 @@ erring.
 
 ### How sharp a stream is said to be
 
-The YouTube Data API says only whether a video is HD (720p or better) or SD.
-The formats YouTube actually serves, and their frame rate and bitrate, are in
-its private player data, which its developer policies forbid an API client to
-read. So for an HD video, or a live one, YouStream estimates, and the first
-of these that applies decides:
+The YouTube Data API says only whether a video is HD (720p or better) or SD;
+the formats YouTube serves are in its private player data, which its
+developer policies forbid reading. So for an HD or a live video YouStream
+estimates, and the first of these that applies decides:
 
-1. **The title names a resolution**: 4K, 8K, UHD or 2160p, 1440p, 1080p, FHD
-   or Full HD, 720p, the highest it names. ("4K subscribers" is a count.)
+1. **The title names a resolution** (4K, 8K, UHD or 2160p, 1440p, 1080p or
+   FHD, 720p): the highest it names. ("4K subscribers" is a count.)
 2. **It is live**: 1080p.
 3. **It came out in 2019 or later, on a channel of 300,000 subscribers or
-   more**: 4K (2160p).
+   more**: 4K.
 4. **Otherwise** 1080p.
 
-YouTube calls every stream SD while it is live, which tells nothing, so a live
-stream goes by its title or is 1080p; any other SD video is 480p. "Came out"
-is the film's or episode's own release date when the video was found for
-one, since official channels upload old films that are rarely 4K, and the
-upload date for a YouTube video opened from a catalog or search. 8K counts as 4K, the sharpest AIOStreams knows. A channel's
-subscriber count costs 1 unit per fifty channels, asked only when the estimate
-turns on it and kept for everyone for a day; when YouTube cannot be asked, the
-video is 1080p.
-
-It is an estimate. A big channel that uploads in 1080p shows 4K, and so does
-a re-upload channel past 300,000 subscribers; a small channel that uploads in
-4K shows 1080p. Playback is not affected: the app plays the best quality the
-upload has.
+Any other SD video is 480p. "Came out" is the film's or episode's release
+when the video was found for one, and the upload date otherwise. A channel's
+subscriber count costs 1 unit per fifty channels, only when the estimate
+turns on it, and is kept for a day. It is an estimate: a big channel that
+uploads in 1080p shows 4K, a small one that uploads in 4K shows 1080p.
+Playback is not affected.
 
 ### With AIOStreams
 
@@ -377,50 +353,24 @@ text (its docs: Addon protocol → Streams), so YouStream sends:
 | `publishDate` | `2023-10-16T00:00:09Z` | the age; sent for films and episodes only |
 | `indexer` | `YouTube` | the source |
 
-The filename is built from the title the video was matched to, not from the
-video's own title. So AIOStreams' title matching (Tamtaro's template asks for
-an exact match), its strict year matching and its season and episode matching
-all pass, and a YouTube title's stray words cannot read as a resolution, a 3D
-format or a language. The year is the film's, or the year the show began:
-AIOStreams checks an episode's against the show's first year, the season's
-and the episode's, which also tells apart two shows of one name.
+The filename is built from the title the video matched, not from the video's
+own title, so AIOStreams' title, year, season and episode matching pass, and
+a YouTube title's stray words cannot read as a resolution, a format or a
+language. There is no `videoSize`: the API gives no file size or bitrate,
+and a made-up one would be taken as fact by AIOStreams' size filters. Text
+AIOStreams would misread in a stream's name is kept out: debrid codes are
+broken with an invisible joiner, a YouTube title's flags, seeder marks and
+sizes are cleared, and a language gets a flag only where AIOStreams reads it
+back as that language. The configure page warns about any you type into a
+template.
 
-There is no `videoSize`. The YouTube Data API gives a video's length and its
-definition, HD or SD, but never its file size or bitrate, and YouTube does not
-stream at fixed bitrates: the player adapts to the connection. A size made up
-from the length would be read as fact by AIOStreams' size and bitrate filters
-and sorting, while a stream without one passes those filters untouched.
-
-AIOStreams also reads a stream's text: debrid codes in the name ("RD", "TB",
-"EN"...), seeders after 👤 or 👥, a size such as "1.5 GB", and a language for
-every flag. The presets use none of these; values written into a name have
-any such code broken by an invisible word joiner; a YouTube title's flags,
-👤, 👥 and sizes are cleared before it is shown; and a language gets a flag
-only where AIOStreams reads that flag back as the same language (India's flag
-reads as Hindi, so Tamil, Telugu and the rest get none). The configure page
-warns about any you type into a template yourself.
-
-In AIOStreams an in-app row (`ytId`) is stream type `youtube`, and a
-YouTube-app or SmartTube row (`externalUrl`) is `external`. Tamtaro's
-template removes every `external` stream ("Info & Other Unwanted"), so with it
-only the in-app rows appear; to keep the others, turn on **Result Passthrough**
-for YouStream. Under that template an in-app row sorts by its estimated
-resolution, as a WEB-DL, and its SELect step keeps the first few of each
-resolution and quality, in YouStream's order, best first. A stream with no
-debrid service counts as instant, like a cached one, so a 4K estimate sits
-with your cached 4K files. AIOStreams writes its own name and
-description from what it parsed; to show YouStream's instead, turn on
-**Format Passthrough** for it.
-
-A video opened as a YouTube item, from a catalog, search or the library,
-carries no `publishDate`. AIOStreams weighs a stream's age against the
-title's release date, which it looks up itself in TMDB and TVDB; a
-`yt_id:` id is neither, so for an item it has no date and takes the title
-to come out tomorrow. Tamtaro's "Info & Other Unwanted" then drops every
-stream published over a week before that as a fake release, which for a
-YouTube item meant any video more than a week old. With no age to weigh, the
-in-app row comes through without passthrough. Films and episodes keep the
-date: AIOStreams has their real release dates.
+In AIOStreams an in-app row is stream type `youtube`, and a YouTube-app or
+SmartTube row `external`. Tamtaro's template drops every `external` stream,
+so only in-app rows appear unless you turn on **Result Passthrough** for
+YouStream; in-app rows sort by their estimated resolution, as WEB-DL, and
+count as instant. **Format Passthrough** shows YouStream's own stream text.
+A video opened as a YouTube item carries no `publishDate`, as AIOStreams
+cannot know its release date and its age filters would drop it.
 
 ## YouTube in your app: search, catalogs and your library
 
@@ -430,66 +380,34 @@ you choose.
 
 ### The type `youtube` and `yt_id:` ids
 
-Every video YouStream lists is an item of its own type, **`youtube`**, lower
-case like `movie` and `series`, with the id **`yt_id:<video id>`**, for
-example `yt_id:B7i390JbgJE`. A video is not a film or an episode, so it gets
-a type of its own; Nuvio shows it as "Youtube" (it capitalizes a type's first
-letter only), and in its library you pick that in the type list to see every
-video you saved.
-
-The id names YouTube, not YouStream, the way a film's `tt` id names IMDb:
-`yt_id:` is the prefix Stremio's own YouTube add-on uses. Any add-on can give
-metadata or streams for the same video, and YouStream gives streams for
-videos other add-ons list, including the channel videos of Stremio's YouTube
-add-on (`yt_id:<channel id>:<video id>`, type `channel`).
-
-The manifest declares this per resource. Metadata is claimed only for type
-`youtube` and `yt_id:` ids, and streams for those and for films and shows.
-Metadata addons are never asked about a video, and YouStream is never asked
-about a film. Nuvio and Stremio both route requests by these per-resource
-types and prefixes, and AIOStreams matches the type exactly, case included.
-
-**Videos saved before 0.8.0** are type `YouTube` with `youstream:` ids. They
-keep working: YouStream still answers their pages and streams, and an app
-still holding the old manifest gets its rows in the old form. Once the app
-reloads the manifest, new rows use `youtube` and `yt_id:`; Nuvio may then
-list the old saved videos under a type of their own, and forget the order
-you gave YouStream's rows on the home screen, since it keys them by type.
+Every video YouStream lists is of its own type, **`youtube`**, with the id
+**`yt_id:<video id>`**, since a video is not a film or an episode. `yt_id:`
+is the prefix Stremio's own YouTube add-on uses, so any add-on can give
+metadata or streams for the same video, and YouStream gives streams for the
+videos other add-ons list, the channel videos of Stremio's YouTube add-on
+included (`yt_id:<channel id>:<video id>`, type `channel`). In Nuvio's
+library, "Youtube" in the type list shows the videos you saved. Videos saved
+before 0.8.0, type `YouTube` with `youstream:` ids, keep working.
 
 ### Search
 
-The app's search gets one row of YouTube results, named after the addon
-(**YouStream**). It is on unless you switch it off under Configure, also for
-an addon installed before search existed. It is live: each new search asks YouTube, ranked the way
-YouTube ranks it unless you choose newest, most viewed or top rated. It can
-be kept to under 4 minutes, 4 to 20, or over 20. **SafeSearch** is YouTube's
-moderate by default, or strict, or off. Your country and audio language are
-passed as ranking hints, not filters, so a search finds what YouTube finds.
+The app's search gets one row of YouTube results, named **YouStream**. It is
+on unless you switch it off in Catalogs, ranked the way YouTube ranks it
+unless you choose newest, most viewed or top rated, optionally kept to under
+4 minutes, 4 to 20, or over 20, with **SafeSearch** moderate (YouTube's
+default), strict or off. Your country and audio language are ranking hints,
+not filters.
 
 A search costs **100 of your 10,000 daily units**, and Nuvio searches as you
-type: 350 ms after each keystroke, from the second letter, and on a TV remote
-every letter takes longer than that. Typing a title would spend a search per
-letter. So YouStream:
-
-- skips anything under **3 characters** (one is enough in Chinese, Japanese
-  or Korean, which write a word in a character or two), though it notes that
-  you are typing;
-- waits **one second** for typing to settle, and longer while you are
-  plainly still typing (your last search, under five seconds earlier, was
-  the start of this one, or this the start of it): the slowest gap between
-  your letters so far and half as much again, **five seconds** at most. A
-  newer, different search from you in that time drops the one waiting;
-- drops a search the app has already abandoned while it waited;
-- makes a search sent twice at once only once.
-
-So typing a title costs one search, on a phone or a letter at a time on a TV
-remote, unless you stop mid-word for longer than that. Replaying Nuvio's live
-search, "interstellar" typed at a steady 1 to 3.5 seconds a letter cost one
-search every time. With each letter's pace drawn at random from 1 to 4
-seconds, a harsher test than real typing, it averaged 1.2.
-
-Results are kept **two minutes**, so going back or scrolling on costs nothing,
-and ten more as a fallback. What you search is not logged.
+type, from the second letter, 350 ms after each keystroke, so typing a title
+would spend a search per letter. YouStream skips anything under three
+characters (one in Chinese, Japanese or Korean), waits a second for typing to
+settle, longer while you are plainly still typing (five seconds at most),
+drops a search that a newer one from you replaces or that the app abandoned,
+and makes a search sent twice at once only once. Replaying Nuvio's search
+letter by letter, at 1 to 4 seconds a letter, typing a title cost 1.2
+searches on average. Results are kept two minutes; what you search is not
+logged.
 
 ### Catalogs
 
@@ -509,61 +427,34 @@ the arrows. A search orders by relevance, newest, most viewed or top rated,
 and a channel by newest or most viewed. A playlist keeps its own order and
 Trending is YouTube's ranking, so those two have no choice to make.
 
-**Videos, Shorts and live streams.** Every row can keep to some kinds of
-video: under the row, tick any of Videos, Shorts and Live streams. A row
-lists every kind until told otherwise, except a channel's, which lists its
-videos, as it always has. The row's name says what it keeps to ("cricket ·
-Videos & live"), and the kinds are stored with it:
+**Videos, Shorts and live streams.** Under each row, tick any of Videos,
+Shorts and Live. A row lists every kind until told otherwise; a channel's
+lists its videos, as it always has. The row's name says what it keeps to
+("cricket · Videos & live"), and the kinds are stored with it:
 `{ q: "cricket highlights", types: ["videos", "live"] }`.
 
-YouTube's API has no field for a video's kind and no search filter for
-Shorts: search's own `videoType` means YouTube's movies and episodes. So
-YouStream tells the kinds from what it fetches anyway, at no extra cost.
-The details call costs 1 unit whatever it returns, and asking it for the
-player's size gives each video's shape.
+YouTube's API has no field for a video's kind, so YouStream tells it from
+what it fetches anyway, at no extra cost: the details call also gives the
+player's shape. A **Short** is upright (taller than wide) and up to 3 minutes
+long, or 1 minute if uploaded before 15 October 2024; a square video is left
+a video, as square uploads are as often songs. A **live stream** is live now,
+or the recording of one. A premiere carries the same live details but is a
+video, as YouTube files it, told apart by its showing outlasting the video
+by the countdown before it. Measured against YouTube's own answer for 576
+videos: 214 of the 217 Shorts were told, the other 3 being square, and no
+video was taken for a Short; 52 of 53 streams and premieres were told apart.
 
-- A **Short** is upright, its player taller than wide, and up to 3 minutes
-  long, or 1 minute if it was uploaded before 15 October 2024, when Shorts
-  could first run 3. A square video is left a video, because square uploads
-  are as often songs as Shorts.
-- A **live stream** is one live now, or the recording of a past one. A
-  premiere, a video first shown at a set time, carries the same live
-  details, but it is a video, as YouTube files it. Its showing outlasts the
-  video by the countdown before it, a minute or two, while a stream's
-  recording runs as long as the stream did, give or take seconds.
-
-Measured against YouTube's own answer for 576 videos from 9 searches and 3
-Trending charts: 214 of the 217 Shorts were told, the other 3 being square,
-and no video was taken for a Short. Counting square videos too would have
-caught all 217 but hidden 6 songs. Going by length alone would have hidden
-84 videos at 3 minutes, and 115 at YouTube's own "under 4 minutes". Of 53
-videos with live details, 52 were told right as a stream or a premiere. How
-many Shorts a row carries varies widely: 44 of 50 in a search for cricket
-highlights, newest first; 47 of 50 for easy recipes, most viewed; 5 of 47
-for stand-up comedy; 1 of 50 for official trailers; none of 129 in
-Trending.
-
-A search row of Shorts alone asks YouTube for videos under 4 minutes,
-which every Short is, so its pages fill with far more of them, and it has
-no length of its own to choose. A channel row of one kind reads YouTube's
-own list of that kind, which is exact. YouTube keeps every channel's
-videos, Shorts and live streams as playlists of their own (`UULF`, `UUSH`
-and `UULV` in place of the channel id's `UC`), and beside each the same
-list most viewed first, its top 200 (`UULP`, `UUPS`, `UUPV`, and `PU` for
-everything), so either order costs the same. A channel row of two kinds
-reads all of the channel's uploads (`UU`, or `PU` most viewed) and leaves
-the third kind out the way any other row does. These lists are not in
-YouTube's documentation; should YouTube stop keeping one, its row comes
-back empty rather than failing.
-
-The kinds are told on the pages already kept, so changing them costs no
-call to YouTube. A row that keeps to some kinds is a row of its own,
-though: its id says them, so one search can be a row of videos and another
-of Shorts, and a row of every kind keeps the id it always had. A page kept
-before kinds were told is fetched again, once, for a row that keeps to
-some. Leaving a kind out thins a row: without Shorts, a page of the search
-for cricket highlights keeps 6 of its 50 videos. A page that keeps none
-moves on to the next, which for a search costs another 101 units.
+A channel row of one kind reads YouTube's own list of it, which is exact:
+`UULF`, `UUSH` or `UULV` in place of the channel id's `UC` (`UULP`, `UUPS`,
+`UUPV` most viewed). A row of two kinds reads all the channel's uploads
+(`UU`, or `PU` most viewed) and tells the third kind apart. These lists are
+not in YouTube's documentation; should YouTube stop keeping one, its row
+comes back empty rather than failing. A search of Shorts alone asks YouTube
+for videos under 4 minutes. The kinds are told on the pages already kept, so
+changing them costs nothing, but a row of some kinds has an id of its own.
+Leaving a kind out thins a row: without Shorts, a page of one search for
+cricket highlights kept 6 of its 50 videos. A page that keeps none moves on
+to the next, which for a search costs another 101 units.
 
 A pasted playlist or channel is looked up once, at 1 unit, on the configure
 page (`POST /api/youtube-source`), as the source you chose. Something else
@@ -597,86 +488,46 @@ stays within one page of YouTube's, so it costs at most one call.
 this server was asked to block (`BLOCKED_VIDEOS`, `BLOCKED_CHANNELS`), and
 non-embeddable videos when you asked for embeddable only.
 
-**Keyword filter.** Any row can keep only the videos that mention some
-words, or hide them: under the row, choose "Only videos mentioning" or
-"Hide videos mentioning" and type the words, separated by commas. A
-word or a name is looked for in the video's title, its channel's name and
-its whole description, or, choosing "In the title or channel only", in the
-first two alone, for when descriptions that credit or tag someone hide too
-much. Whole words, in any case, with or without accents, in any script. A
-plural or a possessive counts ("Kapoor's"), and so does a name written as
-one word, the way a hashtag or a handle writes it (`#GauravKapoor`). Up to
-20 words, of up to 60 characters each, stored with the row:
-`{ q: "indian stand up comedy", exclude: ["Gaurav Kapoor"] }`, with
-`filterIn: "title"` when only titles and channels count.
-
-The filter works on the pages already kept, so changing it costs nothing
-and applies at once, and the row keeps its id and name. Measured on a real
-search, "indian stand up comedy" by relevance, 100 videos: leaving out
-"Gaurav Kapoor" left out 16, 13 of them his own (named in the title or the
-channel) and 3 that thank or tag him in their description, and kept none
-that name him. On a later run of the same search, "In the title or channel
-only" left out the same 11 videos as looking everywhere: all 11 named him in
-the title or the channel, and none of that day's 100 named him only in a
-description. A row whose filter leaves out every video on a page moves on
-to the next page, which for a search costs another 101 units.
+**Keyword filter.** Any row can keep only, or hide, the videos that mention
+some words: under the row, choose "Only videos mentioning" or "Hide videos
+mentioning" and type them, separated by commas. Whole words, in any case and
+any script, with or without accents; a plural or a possessive counts, and so
+does a name run together the way a hashtag writes it. They are looked for in
+the title, the channel's name and the whole description, or, with "In the
+title or channel only", in the first two, for when descriptions that credit
+someone hide too much. Up to 20 words of up to 60 characters, stored with
+the row: `exclude: ["Some Name"]` or `include: [...]`, with `filterIn:
+"title"` for titles and channels only. The filter works on the pages already
+kept, so changing it costs nothing, and the row keeps its id and name.
+Measured on 100 results of a stand-up comedy search, hiding one comedian's
+name hid 16 videos: 13 naming him in the title or the channel, 3 crediting
+him in the description, and none that named him was kept.
 
 ### Metadata and streams
 
-A video's page has its title, the upload date, the length, its category and
-its uploader's tags, a link to the channel, 16:9 artwork, and a description
-that leads with the channel and how the video has been received:
+A video's page has its title, upload date, length, category, its uploader's
+tags (generic words, handles and hashtags dropped, six at most), a link to
+the channel, 16:9 artwork, and a description that leads with the channel and
+how the video has been received:
 
 ```
 Example Science
 1.2M views · 👍🏻 45K · 👎🏻 ~1.3K
-
-How an engine works, explained in thirteen minutes. …
 ```
 
-Views and likes are YouTube's own counts. Dislikes are an estimate, marked
-with a `~`: YouTube stopped publishing dislike counts in December 2021 and
-its API gives them only to a video's owner, so the count comes from
-[Return YouTube Dislike](https://returnyoutubedislike.com), which builds it
-from its own users' votes and counts archived before the change. It is asked
-for a video's page only, with nothing but the video's id, and kept as long
-as the video's details. After a refusal or an error that service is left
-alone for a minute, and the page goes without a dislike count. An
-age-restricted video says where it plays, between the counts and the
-description. A count YouTube does not give, such as likes an uploader hid,
-is left out with its separator. A row's cards say the same without the
-dislikes, which would take a lookup per card.
+Dislikes are an estimate, marked `~`, from
+[Return YouTube Dislike](https://returnyoutubedislike.com), since YouTube
+stopped publishing them in 2021; it is asked for a video's page only, with
+nothing but the video's id. A stream that is live says so, with how many are
+watching in place of its views (`🔴 Live · 12.4K watching`), its name starts
+with 🔴, and its page is asked for again every two minutes. An
+age-restricted video says where it plays.
 
-A stream that is live now says so, with how many are watching in place of
-its views so far, as YouTube shows it:
-
-```
-Example Radio
-🔴 Live · 12.4K watching · 👍🏻 1.6M · 👎🏻 ~20K
-```
-
-Its name starts with 🔴 as well, unless the uploader's title already does. A
-channel can hide that count; the line then says only that it is live. Its
-page is asked for again after two minutes, and its details are kept for two
-minutes rather than a day, so the count stays current and a stream that has
-ended goes back to its views.
-
-Tags are cleaned the way Newsio cleans publishers' keywords:
-- generic words, the channel's own name, handles, hashtags and slug families
-  are dropped;
-- rewordings of one phrase are kept once;
-- the result is capped at six.
-
-Every video a row lists is also kept by id for everyone for a day, so opening
-one costs nothing. One opened from the library a month later costs one unit.
-A video YouTube no longer has answers **404**, which Nuvio takes as final;
-YouTube failing to answer is an error, which the app asks about again.
-
-Its streams are the ways to watch you chose, written by your stream name and
-description templates. A YouTube video has no film or show behind it, so the
-presets leave out the line that names one. A live stream shows 🔴 Live where
-its length would be. The configure page previews this on its **YouTube
-video** tab.
+Every video a row lists is kept by id for everyone for a day, so opening one
+costs nothing; one opened from the library later costs a unit. A video
+YouTube no longer has answers 404. Its streams are the ways to watch you
+chose, written by your stream templates; the configure page previews them on
+its **YouTube video** tab.
 
 ## Quota
 
@@ -697,8 +548,8 @@ For films and episodes YouStream spends **one search per title looked up**:
   resets at midnight Pacific time, or for an hour, whichever comes first.
   Meanwhile anything searched before is still answered from the cache, even
   if it is out of date.
-- Switching off a content type you do not want saves your searches for the
-  other.
+- Switching off a content type you do not want (movies, series or anime)
+  saves your searches for the others.
 
 Stremio asks every stream addon whenever you open a title's stream list, so
 each new title you open costs one search. YouTube's terms forbid working
@@ -759,10 +610,11 @@ encodeURIComponent(JSON.stringify({
   searchLength: "any",                  // or short (under 4 min), medium, long (over 20 min)
   safeSearch: "moderate",               // YouTube's default; or strict, none
   catalogs: [                           // rows on the home screen, in order, up to 20
-    { q: "lofi hip hop", sort: "date", length: "long", within: "week" },
-    { channel: "UC…", name: "Marques Brownlee", show: "shorts", sort: "viewCount" },
-                                        // show: videos (default), shorts, live, all; sort: date (default), viewCount
-    { playlist: "PL…", name: "Lectures" },
+    { q: "lofi hip hop", sort: "date", length: "long", within: "week", types: ["videos", "live"] },
+    { channel: "UC…", name: "A channel", types: ["shorts"], sort: "viewCount" },
+                                        // types: any of videos, shorts, live (a channel's default: videos);
+                                        // sort: date (default), viewCount
+    { playlist: "PL…", name: "Lectures", exclude: ["word"] },  // or include; filterIn: "title"
     { trending: "music" }               // all, music, gaming, film, sports, news, …
   ],
   catalogRefresh: "2h"                  // "90m", "6h", "1d": at least 30 minutes
@@ -774,8 +626,10 @@ encodeURIComponent(JSON.stringify({
 **Editing your setup.** The Configure button on an installed addon opens
 `/<your config>/configure` with every setting filled in as saved: your
 rows in their order, each with its choices. Save without changing anything
-and the link is the same, character for character. The tests hold this for
-links built by earlier versions of the page too.
+and the link is the same, character for character, for links built by
+earlier versions of the page too. One thing is rewritten: a channel row
+saved before 0.13.0 to list Shorts, live streams or everything (`show`) is
+saved with its kinds (`types`), the same row under the same id.
 
 Search templates take `{title} {year} {season} {episode} {s00e00}
 {episodeTitle} {absolute} {language}`. `{language}` is your audio language by
@@ -907,7 +761,7 @@ https://<host>/<your config>/explain/series/<imdb id>:<season>:<episode>.json
 | `GET /configure.js?v=…` | The configure page's script, at an address that carries its version, so browsers keep it a year |
 | `GET /app.webmanifest`, `GET /sw.js` | The configure page as an installable app |
 | `GET /terms` | Terms of use and privacy policy |
-| `GET /health` | Health check used by Railway; also names the cache store, and whether profiles are `off`, `starting`, `ready` or `unavailable` |
+| `GET /health` | Health check used by Railway; also names the cache store, whether IMDb's data and the anime database are loaded (or `off`), and whether profiles are `off`, `starting`, `ready` or `unavailable` |
 | `GET /admin/cache` | What the cache holds (only with `CACHE_ADMIN_TOKEN`) |
 | `DELETE /admin/cache/:namespace` | Empty `search`, `metadata`, `cooldown`, `browse`, `video`, `dislikes`, `channel` or `all` (only with `CACHE_ADMIN_TOKEN`) |
 
@@ -941,7 +795,7 @@ has, so an app that installs it anyway never asks it about anything.
 ```bash
 npm install
 npm start                 # http://localhost:3000/configure
-npm test                  # about 1,700 tests
+npm test                  # about 1,800 tests
 npm run test:coverage     # pinned at 100% statements, branches, functions, lines
 ```
 
@@ -964,6 +818,21 @@ set (CI starts a PostgreSQL for it), on a real PostgreSQL as well:
 
 ```bash
 POSTGRES_TEST_URL=postgres://postgres@127.0.0.1:5432/youstream_test npm test
+```
+
+### End to end
+
+`e2e/run.js` tests a running server against the real YouTube, Kitsu,
+AniList and the rest, and its pages in a real browser on a phone and a
+desktop: about 50 checks, from the manifest, every kind of row and stream
+lookups for a film, an episode and an anime, to a profile made, saved,
+signed out of and deleted (when the server has profiles on). It spends about
+620 units of the key's quota. The browser checks need Playwright, and are
+skipped without it.
+
+```bash
+YOUTUBE_KEY=AIza… node e2e/run.js http://localhost:3000
+E2E_ONLY=server,addon node e2e/run.js https://youstream-beta.up.railway.app
 ```
 
 ### Real-data tests
@@ -1030,12 +899,11 @@ read again and expire on their own. To empty the cache by hand, use
 `DELETE /admin/cache/<namespace>` or change `CACHE_PREFIX`.
 
 **When the store fails** (Redis or the database unreachable, a disk full),
-the addon answers without its cache rather than not at all, and says so in
-the log once a minute at most. Measured with Redis down: lookups answered in
-0.05 s; when Redis came back, caching resumed without a restart. The
-database store waits two seconds at most for its first connection, and
-after a failed statement stops asking for ten, so a database that is down
-costs one short wait, not one per lookup.
+the addon answers without its cache rather than not at all, says so in the
+log once a minute at most, and picks the store up again when it is back,
+without a restart. The database store waits two seconds at most for its
+first connection, and after a failed statement stops asking for ten, so a
+database that is down costs one short wait, not one per lookup.
 
 **In the app.** Stream lists tell Stremio and Nuvio how long to reuse them: 6
 hours with videos in them, 1 hour when empty (no longer than the server's own
