@@ -850,8 +850,9 @@ POSTGRES_TEST_URL=postgres://postgres@127.0.0.1:5432/youstream_test npm test
 AniList and the rest, and its pages in a real browser on a phone and a
 desktop: about 50 checks, from the manifest, every kind of row and stream
 lookups for a film, an episode and an anime, to a profile made, saved,
-signed out of and deleted (when the server has profiles on). It spends about
-620 units of the key's quota. The browser checks need Playwright, and are
+signed out of and deleted (when the server has profiles on; a failed check
+or Ctrl-C never leaves one behind). It spends about 620 units of the key's
+quota. The browser checks need Playwright, and are
 skipped without it.
 
 ```bash

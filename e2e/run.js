@@ -13,9 +13,10 @@
  * six searches: a search row, the app's search, a film, an episode and an
  * anime episode. A second run within a day costs less, as the server keeps
  * what it found. Profiles are tested when the server has them on: a profile
- * is created, used and deleted. The browser checks need Playwright
- * (npm i -g playwright && npx playwright install chromium) and are skipped
- * without it. The key is never printed.
+ * is created, used and deleted. Whatever fails, or if the run is stopped
+ * with Ctrl-C, every profile it made is deleted before it ends. The browser
+ * checks need Playwright (npm i -g playwright && npx playwright install
+ * chromium) and are skipped without it. The key is never printed.
  */
 const fs = require("fs");
 const os = require("os");
@@ -32,16 +33,19 @@ const ANIME = { kitsu: "kitsu:45398:3", mal: "mal:50265:3", anilist: "anilist:14
 const CHANNEL = "UCBJycsmduvYEL83R_U4JriQ";
 const PLAYLIST = "PLBCF2DAC6FFB574DE";
 const PASSWORD = `e2e ${Math.random().toString(36).slice(2)} password`;
+const NEW_PASSWORD = `${PASSWORD} changed`;
 
 const results = [];
 const redact = (text) => String(text).replace(/AIza[0-9A-Za-z_-]{20,}/g, "AIza…").replace(/[0-9a-f-]{36}\.[A-Za-z0-9_-]{20,}/g, "<link>");
+const wanted = (group) => !ONLY || ONLY.includes(group);
+let stopping = false;
 
 function expect(condition, message) {
   if (!condition) throw new Error(message);
 }
 
 async function check(group, name, fn) {
-  if (ONLY && !ONLY.includes(group)) return undefined;
+  if (stopping) return undefined;
   try {
     const note = await fn();
     results.push({ group, name, ok: true });
@@ -78,16 +82,61 @@ function seconds(runtime) {
   return (h ? h[1] * 3600 : 0) + (m ? m[1] * 60 : 0) + (s ? Number(s[1]) : 0);
 }
 
+// --- Test profiles, never left behind -------------------------------------
+
+/** Every profile the run has made and not yet deleted, by ID, with the password it has now. */
+const madeProfiles = new Map();
+
+/** Deleted by ID and password, no sign-in needed; "gone" when none of the run's passwords opens it. */
+async function deleteProfile(id, passwords) {
+  for (const password of passwords) {
+    const status = await fetch(url("/api/profile"), {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, password })
+    }).then((res) => res.status, () => "no answer");
+    if (status === 204) return "deleted";
+    if (status !== 401) return typeof status === "number" ? `HTTP ${status}` : status;
+  }
+  return "gone";
+}
+
+/** Deletes what a failed check or a stop left behind; true when nothing is left. */
+async function deleteLeftovers() {
+  for (const [id, current] of [...madeProfiles]) {
+    const outcome = await deleteProfile(id, [...new Set([current, PASSWORD, NEW_PASSWORD])]);
+    if (outcome === "deleted") console.log(`  - deleted test profile ${id.slice(0, 8)}, left by a check that did not finish`);
+    if (outcome === "deleted" || outcome === "gone") madeProfiles.delete(id);
+    else console.log(`  ✗ test profile ${id} could not be deleted: ${outcome}`);
+  }
+  return madeProfiles.size === 0;
+}
+
+let cleaning = null;
+const cleanUp = () => (cleaning = cleaning || deleteLeftovers());
+
+// Stopped part way, the run deletes its profiles first; stopped again, at once.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    const code = 128 + os.constants.signals[signal];
+    if (stopping) process.exit(code);
+    stopping = true;
+    console.log("\nStopped.");
+    cleanUp().finally(() => process.exit(code));
+  });
+}
+
 // --- The server's own pages ----------------------------------------------
 
 async function serverChecks(state) {
+  if (!wanted("server")) return;
   console.log("\nserver");
   await check("server", "/health says what is on", async () => {
     const { res, body } = await getJson("/health");
     expect(res.status === 200 && body && body.ok === true, `HTTP ${res.status}`);
     for (const k of ["cache", "imdb", "anime", "profiles"]) expect(k in body, `no "${k}" in it`);
     state.health = body;
-    const anime = body.anime === "off" ? "off" : body.anime.loaded ? `${body.anime.anime} anime` : "anime loading";
+    const anime = body.anime === "off" ? "anime off" : body.anime.loaded ? `${body.anime.anime} anime` : "anime loading";
     return `cache ${body.cache}, profiles ${typeof body.profiles === "string" ? body.profiles : JSON.stringify(body.profiles)}, ${anime}`;
   });
   await check("server", "/ leads to the configure page", async () => {
@@ -149,6 +198,7 @@ async function serverChecks(state) {
 // --- The addon protocol, with settings in the link -----------------------
 
 async function addonChecks(state) {
+  if (!wanted("addon")) return;
   console.log("\naddon");
   const rows = [
     { trending: "all" },
@@ -297,6 +347,7 @@ async function addonChecks(state) {
 // --- Profiles, through the API --------------------------------------------
 
 async function profileChecks(state) {
+  if (!wanted("profiles")) return;
   console.log("\nprofiles");
   if (!state.health || state.health.profiles !== "ready") {
     console.log("  - skipped: this server has profiles off");
@@ -318,6 +369,7 @@ async function profileChecks(state) {
   let profile;
   await check("profiles", "a profile is made, signed in, with one install link", async () => {
     const made = await call("POST", "", { config: { youtubeKey: KEY, catalogs: [{ trending: "all" }] }, password: PASSWORD, remember: false });
+    if (made.body && made.body.id) madeProfiles.set(made.body.id, PASSWORD);
     expect(made.status === 201 && made.body.id && made.body.installUrl, `HTTP ${made.status}`);
     profile = made.body;
     const read = await call("GET", "");
@@ -344,15 +396,16 @@ async function profileChecks(state) {
     expect(wrong.status === 401 || wrong.status === 403, `HTTP ${wrong.status}`);
     expect((await call("POST", "/session", { id: profile.id, password: PASSWORD, remember: false })).status === 200, "not signed in again");
   });
-  let newPassword = PASSWORD;
+  let password = PASSWORD;
   await check("profiles", "the password is changed, and the install link kept", async () => {
-    newPassword = `${PASSWORD} changed`;
-    const changed = await call("POST", "/password", { currentPassword: PASSWORD, newPassword });
+    const changed = await call("POST", "/password", { currentPassword: PASSWORD, newPassword: NEW_PASSWORD });
     expect(changed.status === 200 && changed.body.changed, `HTTP ${changed.status}`);
+    password = NEW_PASSWORD;
+    madeProfiles.set(profile.id, password);
     expect((await manifestOf(profile.installUrl)).catalogs.length === 1, "the install link changed");
   });
   await check("profiles", "a replaced install link works, and the old one no longer does", async () => {
-    const replaced = await call("POST", "/link", { password: newPassword });
+    const replaced = await call("POST", "/link", { password });
     expect(replaced.status === 200 && replaced.body.installUrl !== profile.installUrl, `HTTP ${replaced.status}`);
     const fresh = await manifestOf(replaced.body.installUrl);
     expect(fresh.catalogs.some((c) => c.id === "trending.music"), "the new link has not its rows");
@@ -361,8 +414,9 @@ async function profileChecks(state) {
     profile.installUrl = replaced.body.installUrl;
   });
   await check("profiles", "deleted: gone, and its link says so", async () => {
-    const gone = await call("DELETE", "", { password: newPassword });
+    const gone = await call("DELETE", "", { password });
     expect(gone.status === 204, `HTTP ${gone.status}`);
+    madeProfiles.delete(profile.id);
     const manifest = await manifestOf(profile.installUrl);
     expect(!(manifest && manifest.catalogs && manifest.catalogs.some((c) => c.id === "trending.music")), "still answering");
   });
@@ -371,6 +425,7 @@ async function profileChecks(state) {
 // --- The configure page in a browser --------------------------------------
 
 async function browserChecks(state) {
+  if (!wanted("browser")) return;
   console.log("\nbrowser");
   let playwright;
   try {
@@ -379,7 +434,8 @@ async function browserChecks(state) {
     console.log("  - skipped: Playwright is not installed");
     return;
   }
-  const browser = await playwright.chromium.launch();
+  // Playwright's own Ctrl-C handling would end the run before its profiles are deleted.
+  const browser = await playwright.chromium.launch({ handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false });
   const devices = [
     ["phone", { ...playwright.devices["iPhone 13"] }],
     ["desktop", { viewport: { width: 1280, height: 900 } }]
@@ -498,7 +554,11 @@ async function profileInBrowser(browser) {
       await page.fill("#create-password", PASSWORD);
       await page.fill("#create-password2", PASSWORD);
       await page.check("#agree");
-      await page.click("#submit-btn");
+      // Its ID is noted the moment it is made, so that it is deleted whatever happens next.
+      const creating = (res) => res.request().method() === "POST" && new URL(res.url()).pathname === "/api/profile";
+      const [created] = await Promise.all([page.waitForResponse(creating, { timeout: 30000 }), page.click("#submit-btn")]);
+      const made = await created.json().catch(() => null);
+      if (made && made.id) madeProfiles.set(made.id, PASSWORD);
       await page.waitForURL(/done=created/, { timeout: 30000 });
       expect(/\/manifest\.json$/.test(await page.inputValue("#profile-url")), "no install link");
       id = (await page.textContent("#profile-id")).trim();
@@ -539,14 +599,15 @@ async function profileInBrowser(browser) {
       await page.check("#delete-sure");
       await page.click("#delete-btn");
       await page.waitForFunction(() => !document.getElementById("profile-id"), null, { timeout: 15000 });
-      id = null;
+      madeProfiles.delete(id);
     });
     await check("browser", "profile: no script error on the way", async () => {
       expect(!errors.length, errors.join(" | "));
     });
   } finally {
-    // Never leave a test profile behind.
-    if (id) await fetch(url("/api/profile"), { method: "DELETE" }).catch(() => {});
+    // A profile the page made whose ID was never noted is the one it is signed in to.
+    const me = await context.request.get(url("/api/profile")).then((res) => (res.ok() ? res.json() : null), () => null);
+    if (me && me.id && !madeProfiles.has(me.id)) madeProfiles.set(me.id, PASSWORD);
     await context.close();
   }
 }
@@ -559,15 +620,18 @@ async function profileInBrowser(browser) {
     process.exit(2);
   }
   console.log(`YouStream end to end at ${BASE}`);
-  const state = {};
+  // What the server has on decides which checks apply, whichever groups run.
+  const state = { health: (await getJson("/health").catch(() => ({}))).body };
   await serverChecks(state);
   await addonChecks(state);
   await profileChecks(state);
   await browserChecks(state);
+  const clean = await cleanUp();
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length} of ${results.length} passed${failed.length ? `; failed: ${failed.map((f) => f.name).join("; ")}` : ""}`);
-  process.exit(failed.length ? 1 : 0);
-})().catch((err) => {
+  process.exit(failed.length || !clean ? 1 : 0);
+})().catch(async (err) => {
   console.error(redact(err.stack));
+  await cleanUp().catch(() => {});
   process.exit(1);
 });
