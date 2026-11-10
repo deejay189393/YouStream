@@ -361,7 +361,12 @@ describe("how sharp a stream is said to be", () => {
     routeFetch([
       ["/meta/series/tt9999901.json", { meta: { name: "Example Show", year: "2025-", runtime: "50 min", videos: [{ season: 2, episode: 8, name: "The Final Round", released: `${today}T00:00:00.000Z` }] } }],
       // A recent release is matched on an official channel only.
-      ...youtubeReturns([apiVideo("episode0008", { snippet: { title: "Example Show S02E08 - The Final Round", channelId: "UCbig" }, contentDetails: { duration: "PT50M", licensedContent: true } })]),
+      ...youtubeReturns([
+        apiVideo("episode0008", {
+          snippet: { title: "Example Show S02E08 - The Final Round", channelId: "UCbig", publishedAt: `${today}T12:00:00Z` },
+          contentDetails: { duration: "PT50M", licensedContent: true }
+        })
+      ]),
       channels(12100000)
     ]);
     const res = await handleStream({ id: "tt9999901:2:8", config: CONFIG });

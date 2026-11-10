@@ -6,7 +6,7 @@ const kitsu = require("../src/metadata/kitsu");
 const anilist = require("../src/metadata/anilist");
 const animeDb = require("../src/metadata/animeDb");
 const tvmaze = require("../src/metadata/tvmaze");
-const { resolveTitle, uniqueAliases } = require("../src/metadata");
+const { resolveTitle, uniqueAliases, shortNames } = require("../src/metadata");
 const imdb = require("../src/metadata/imdb");
 const tvdbClient = require("../src/metadata/tvdb");
 const { hostConfig } = require("../src/hostConfig");
@@ -1360,5 +1360,33 @@ describe("uniqueAliases", () => {
   test("adds the main title of a name with a subtitle, unless it is too short to mean anything", () => {
     expect(uniqueAliases("Baahubali: The Beginning", [])).toEqual(["Baahubali"]);
     expect(uniqueAliases("Up: A Story", ["It: Chapter Two"])).toEqual(["It: Chapter Two"]);
+  });
+
+  test("adds each name's short names", () => {
+    expect(uniqueAliases("The Nation Wants to Guess with Gursimran Kamba", [])).toEqual([
+      "Nation Wants to Guess with Gursimran Kamba",
+      "The Nation Wants to Guess",
+      "Nation Wants to Guess"
+    ]);
+  });
+});
+
+describe("shortNames", () => {
+  test("without a leading The, a trailing host, or both", () => {
+    expect(shortNames("Last Week Tonight with John Oliver")).toEqual(["Last Week Tonight"]);
+    expect(shortNames("The Big Bang Theory")).toEqual(["Big Bang Theory"]);
+    expect(shortNames("the late show with someone")).toEqual(["late show with someone", "the late show"]);
+  });
+
+  test("only when three words or more remain", () => {
+    expect(shortNames("The Office")).toEqual([]);
+    expect(shortNames("Real Time with Bill Maher")).toEqual([]);
+    expect(shortNames("Gone with the Wind")).toEqual([]);
+    expect(shortNames("The Girl with the Dragon Tattoo")).toEqual(["Girl with the Dragon Tattoo"]);
+  });
+
+  test("a host's name is one to three words at the very end", () => {
+    expect(shortNames("Dinner with Friends and Their Families Tonight")).toEqual([]);
+    expect(shortNames("Kota Factory")).toEqual([]);
   });
 });

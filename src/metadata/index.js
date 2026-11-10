@@ -54,6 +54,26 @@ async function attempt(label, fn) {
   }
 }
 
+const LEADING_THE = /^\s*the\s+/i;
+/** "with" and a name of one to three words, at the end: "... with John Oliver". */
+const TRAILING_HOST = /\s+with\s+\S+(?:\s+\S+){0,2}\s*$/i;
+
+/**
+ * The shorter names a show goes by on YouTube, from its listed one: without
+ * a leading "The", without a trailing "with" and its host, or without both.
+ * "The Nation Wants to Guess with Gursimran Khamba" is uploaded as "Nation
+ * Wants to Guess with Khamba | EP7" and "Nation Wants To Guess S2 | EP1".
+ *
+ * A short name counts only if three words or more remain, so none becomes a
+ * common word or phrase: "The Office" is not "Office", "Real Time with Bill
+ * Maher" not "Real Time". Every other check still applies to it.
+ */
+function shortNames(name) {
+  const withoutHost = name.replace(TRAILING_HOST, "");
+  const shorter = new Set([name.replace(LEADING_THE, ""), withoutHost, withoutHost.replace(LEADING_THE, "")]);
+  return [...shorter].filter((short) => short !== name && tokens(short).length >= 3);
+}
+
 /**
  * The names a match may use, without the primary title or any repeat.
  *
@@ -62,12 +82,14 @@ async function attempt(label, fn) {
  * as that main title is not trivially short. A sequel such as "Baahubali:
  * The Conclusion" still fails, because what follows a colon after the name
  * is read as part of it (see anchoredName).
+ *
+ * Each name also counts by its short names (see shortNames).
  */
 function uniqueAliases(title, candidates) {
   const withMainTitles = [];
   [title, ...candidates].forEach((name) => {
     if (typeof name !== "string") return;
-    withMainTitles.push(name);
+    withMainTitles.push(name, ...shortNames(name));
     const main = name.split(":")[0];
     if (main !== name && tokens(main).join("").length >= 4) withMainTitles.push(main);
   });
@@ -391,4 +413,4 @@ async function lookUp(parsed, { tmdbKey = "", region = "", animeSource = "auto" 
   return animeTitle(parsed, animeSource);
 }
 
-module.exports = { resolveTitle, uniqueAliases };
+module.exports = { resolveTitle, uniqueAliases, shortNames };

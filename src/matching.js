@@ -185,9 +185,9 @@ function markerWords(rawTitle) {
 /**
  * Season and episode numbers a video's title states.
  *
- * Recognises S01E02, S1 E2, S01EP02, 1x02, "Season 1 Episode 2", "Ep. 2",
- * "E02", "Episode #2", "Ep. No. 2", "season 1episode 2", and the same in
- * Spanish, Portuguese, French, German, Italian and Hindi.
+ * Recognises S01E02, S1 E2, S01EP02, 1x02, "Season 1 Episode 2", "Series 1,
+ * Episode 2", "Ep. 2", "E02", "Episode #2", "Ep. No. 2", "season 1episode 2",
+ * and the same in Spanish, Portuguese, French, German, Italian and Hindi.
  */
 function parseEpisodeMarkers(rawTitle) {
   const seasons = new Set();
@@ -204,10 +204,13 @@ function parseEpisodeMarkers(rawTitle) {
   };
 
   words.forEach((word, i) => {
-    const isSeason = word === "s" || SEASON_WORDS.has(word);
+    const isSeries = word === "series";
+    const isSeason = isSeries || word === "s" || SEASON_WORDS.has(word);
     if (!isSeason && !EPISODE_WORDS.has(word)) return;
     const n = numberAt(i + 1);
-    if (n === null) return;
+    // "Series 15, Episode 1" is British for a season; "Animated Series 1994"
+    // is not.
+    if (n === null || (isSeries && n > 99)) return;
     (isSeason ? seasons : episodes).add(n);
   });
 
@@ -510,6 +513,81 @@ function excludedWord(videoTitle, words, names) {
   return null;
 }
 
+// --- Air date ------------------------------------------------------------
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How many days after an episode first aired a video was uploaded (negative
+ * before), or null when either date is unknown or the title is a film.
+ */
+function daysAfterAiring(video, title) {
+  if (!title.isEpisode || !title.released || !video.publishedAt) return null;
+  const days = (Date.parse(video.publishedAt) - Date.parse(title.released)) / DAY_MS;
+  return Number.isFinite(days) ? days : null;
+}
+
+/**
+ * How long before an episode's first airing an upload can still be it: time
+ * zones, and a premiere a day or two early. Anything older that does not
+ * state its season is another episode -- "EP7" of a first season IMDb lists
+ * only six episodes of, which the second season's first otherwise takes for
+ * its absolute number.
+ */
+const EARLY_UPLOAD_DAYS = 3;
+
+/** An upload within this many days of the airing, either side, is its own. */
+const AIR_DATE_DAYS = 2;
+
+// --- The show's own channel ------------------------------------------------
+
+/**
+ * Whether a video is from a show's own channel, and of which kind:
+ *
+ *   "show"    named after the show, or after it and "Official": "Good
+ *             Mythical Morning", "Taskmaster"
+ *   "person"  named after one of its credited people: a host's own channel,
+ *             "Gursimran Khamba"
+ *
+ * and a YouTube partner channel either way (licensed), since a fan channel
+ * can take a show's name but not its partner status. null otherwise.
+ */
+function ownChannel(video, title, names) {
+  if (!video.licensed) return null;
+  const channel = tokens(video.channelTitle).filter((w) => w !== "official").join(" ");
+  if (!channel) return null;
+  if (names.some((name) => fold(name) === channel)) return "show";
+  if ((title.people || []).some((person) => fold(person) === channel)) return "person";
+  return null;
+}
+
+/**
+ * Whether a video's title has most of the words that make the show's name
+ * its own, in order: what a host's own channel is trusted with. Common
+ * words, generic ones and the credited people's names (a letter off
+ * included) are left out, so "The Nation Wants to Guess with Gursimran
+ * Kamba" is judged on "nation wants guess" -- all three in "Nation Wants To
+ * Guess S2 | EP1". A name with fewer than two such words is never judged
+ * this way.
+ */
+function namesMostOf(foldedTitle, names, people) {
+  const credits = [...peopleWords(people)];
+  const isCredit = (w) => credits.some((c) => c === w || (w.length >= 5 && nearlyEqual(c, w)));
+  const present = foldedTitle.split(" ");
+  return names.some((name) => {
+    const words = tokens(name).filter((w) => !STOPWORDS.has(w) && !GENERIC_WORDS.has(w) && !isCredit(w));
+    let from = 0;
+    let found = 0;
+    words.forEach((word) => {
+      const at = present.indexOf(word, from);
+      if (at < 0) return;
+      found++;
+      from = at + 1;
+    });
+    return words.length >= 2 && found >= Math.ceil((words.length * 2) / 3);
+  });
+}
+
 // --- The verdict ---------------------------------------------------------
 
 /** How many calendar years back a release counts as recent. */
@@ -635,18 +713,46 @@ function evaluate(video, title, window, settings) {
   const excludedInDescription = excludedWord(fold(video.description || ""), settings.excludeDescription, ownWords);
   if (excludedInDescription) return fail(`description says "${excludedInDescription}"`);
 
-  if (!anchoredName(video.title, names, title.people).ok) return fail("does not name the title");
+  // A show's own channel need not name it in every title: Good Mythical
+  // Morning's uploads are called "International Viral Foods Taste Test". A
+  // channel named after the show is trusted without the name; a host's own,
+  // with most of it. Neither if the title names the show inside another
+  // name, as a spin-off does ("Junior Taskmaster").
+  const named = anchoredName(video.title, names, title.people).ok;
+  const own =
+    !named && title.isEpisode && !names.some((name) => hasPhrase(foldedTitle, fold(name))) ? ownChannel(video, title, names) : null;
+  const trusted = own === "show" || (own === "person" && namesMostOf(foldedTitle, names, title.people));
+  if (!named && !trusted) return fail("does not name the title");
   const links = linkedImdbIds(video.description);
   if (title.imdbId && links.length && !links.includes(title.imdbId)) return fail("links another title on IMDb");
 
   let score = 100;
   let how = null;
   let namesEpisode = false;
+  const days = daysAfterAiring(video, title);
   if (title.isEpisode) {
     const verdict = episodeVerdict(video, title, foldedTitle, names);
     if (!verdict.ok) return fail(verdict.reason);
     how = verdict.how;
     namesEpisode = verdict.namesEpisode;
+    // Without the show's whole name, the episode must be pinned down: by its
+    // season and number, or by its own name on the day it aired. "Episode 1"
+    // alone could be any season's first, or a spin-off's ("Taskmasterclass,
+    // Episode 1" on Taskmaster's channel); a name alone could be a clip's,
+    // or a later episode's of the same name ("Discontinued Snacks Taste
+    // Test" is a yearly one on Good Mythical Morning).
+    if (!named) {
+      const numbered = how === "season and episode" || (how === "episode" && title.seasonCount === 1);
+      const onAirDate = days !== null && Math.abs(days) <= AIR_DATE_DAYS;
+      if (!numbered && !(namesEpisode && onAirDate)) {
+        return fail(namesEpisode ? "not uploaded when the episode aired" : "numbers the episode without its season");
+      }
+    }
+    // A title stating the season as well is trusted over the listed date,
+    // which for a show that moved from YouTube to a streaming service can be
+    // that service's later release (one such show's first episode, uploaded
+    // in 2016, is listed as first aired in 2021).
+    if (how !== "season and episode" && days !== null && days < -EARLY_UPLOAD_DAYS) return fail("uploaded before the episode aired");
     score += { "season and episode": 15, episode: 10, "absolute episode": 10, "episode title": 8 }[how];
     if (namesEpisode && how !== "episode title") score += 5;
   } else {
@@ -664,6 +770,10 @@ function evaluate(video, title, window, settings) {
   if (video.licensed && window.basis === "exact" && (how === "season and episode" || (how === "episode" && title.seasonCount === 1))) {
     evidence.push("official numbering");
   }
+  // A partner channel's upload on the day the episode first aired: how
+  // YouTube-first shows are released, and what IMDb's dates for them record.
+  const airDate = video.licensed && days !== null && Math.abs(days) <= AIR_DATE_DAYS;
+  if (airDate) evidence.push("air date");
   if (!evidence.length) return fail("no year, credits or episode title");
 
   // Recent films and episodes are not free on YouTube except from their own
@@ -678,6 +788,7 @@ function evaluate(video, title, window, settings) {
   // official channel measured (studios, TV networks, TVF, Dice Media) and of
   // few unofficial uploads.
   if (video.licensed) score += 10;
+  if (airDate) score += 5;
 
   // Inside the window, closeness counts for less than how widely a video
   // has been watched. Measured: the studios' own uploads of Indian films run
@@ -728,6 +839,9 @@ module.exports = {
   yearVerdict,
   excludedWord,
   episodeVerdict,
+  daysAfterAiring,
+  ownChannel,
+  namesMostOf,
   regionBlocked,
   titleLanguages,
   audioLanguages,

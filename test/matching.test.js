@@ -20,12 +20,16 @@ const {
   yearVerdict,
   excludedWord,
   regionBlocked,
+  daysAfterAiring,
+  ownChannel,
+  namesMostOf,
   evaluate,
   rankMatches,
   UNKNOWN_RUNTIME
 } = require("../src/matching");
 const { normalizeConfig } = require("../src/config");
 const { fold } = require("../src/text");
+const { uniqueAliases } = require("../src/metadata");
 const { video } = require("./helpers");
 
 const SETTINGS = normalizeConfig({ youtubeKey: "k" });
@@ -195,6 +199,8 @@ describe("parseEpisodeMarkers", () => {
     ["Saison 2 Épisode 4", [2], [4]],
     ["Staffel 2 Folge 4", [2], [4]],
     ["सीज़न 2 एपिसोड 3", [2], [3]],
+    ["Series 15, Episode 1 - The Curse Of Politeness", [15], [1]],
+    ["Animated Series 1994 Episode 3", [], [3]],
     ["Fast X 1080p 4k", [], []],
     ["Season finale", [], []]
   ])("%s", (title, seasons, episodes) => {
@@ -715,6 +721,196 @@ describe("evaluate: episodes", () => {
 
     test("with no absolute number known, a bare number from another season is turned away", () => {
       expect(judge2("Kota Factory Episode 6", { ...S2, absoluteEpisode: null })).toMatchObject({ ok: false, reason: "episode 6" });
+    });
+  });
+});
+
+describe("evaluate: an episode's air date", () => {
+  const AIRED = { ...EPISODE, released: "2025-12-07T00:00:00.000Z", releaseYear: 2025 };
+  const window = durationWindow(AIRED, SETTINGS);
+  const judge = (title, overrides = {}, t = AIRED) =>
+    evaluate(video({ title, durationSeconds: 2211, publishedAt: "2025-12-07T15:30:00Z", ...overrides }), t, window, SETTINGS);
+
+  test("days from the airing to the upload, when both are known and the title is an episode", () => {
+    expect(daysAfterAiring({ publishedAt: "2025-12-09T00:00:00Z" }, AIRED)).toBe(2);
+    expect(daysAfterAiring({ publishedAt: "2025-12-06T00:00:00Z" }, AIRED)).toBe(-1);
+    expect(daysAfterAiring({ publishedAt: null }, AIRED)).toBeNull();
+    expect(daysAfterAiring({ publishedAt: "2025-12-06T00:00:00Z" }, { ...AIRED, released: null })).toBeNull();
+    expect(daysAfterAiring({ publishedAt: "2025-12-06T00:00:00Z" }, { ...AIRED, released: "soon" })).toBeNull();
+    expect(daysAfterAiring({ publishedAt: "2025-12-06T00:00:00Z" }, { ...MOVIE, released: "2025-12-07" })).toBeNull();
+  });
+
+  test("an upload from before the episode aired is another episode", () => {
+    const old = { publishedAt: "2025-02-08T00:00:00Z", licensed: true, description: "With Jitendra Kumar" };
+    expect(judge("Kota Factory Episode 3", old)).toMatchObject({ ok: false, reason: "uploaded before the episode aired" });
+    expect(judge("Kota Factory | Optimization", old)).toMatchObject({ ok: false, reason: "uploaded before the episode aired" });
+  });
+
+  test("unless it states the season too: the listed date can be a streaming service's later release", () => {
+    const old = { publishedAt: "2019-04-23T00:00:00Z", licensed: true, description: "With Jitendra Kumar" };
+    expect(judge("Kota Factory - S01 E03", old)).toMatchObject({ ok: true, how: "season and episode" });
+  });
+
+  test("a few days early is still it: time zones, an early premiere", () => {
+    const early = { publishedAt: "2025-12-04T12:00:00Z", licensed: true, description: "With Jitendra Kumar" };
+    expect(judge("Kota Factory Episode 3", early)).toMatchObject({ ok: true, evidence: ["credits"] });
+  });
+
+  test("an official upload on the day it aired is evidence, and ranks higher", () => {
+    const onTheDay = judge("Kota Factory Episode 3", { licensed: true });
+    expect(onTheDay).toMatchObject({ ok: true, how: "episode", evidence: ["air date"] });
+    const later = judge("Kota Factory Episode 3", { licensed: true, publishedAt: "2026-03-01T00:00:00Z", description: "With Jitendra Kumar" });
+    const sameDay = judge("Kota Factory Episode 3", { licensed: true, description: "With Jitendra Kumar" });
+    expect(sameDay.score).toBeGreaterThan(later.score);
+  });
+
+  test("but not an unofficial one", () => {
+    expect(judge("Kota Factory Episode 3")).toMatchObject({ ok: false, reason: "no year, credits or episode title" });
+  });
+
+  test("without a date for the episode, nothing changes", () => {
+    const undated = { ...AIRED, released: null };
+    expect(judge("Kota Factory Episode 3", { licensed: true, publishedAt: "2019-01-01T00:00:00Z", description: "With Jitendra Kumar" }, undated)).toMatchObject({
+      ok: true,
+      evidence: ["credits"]
+    });
+  });
+});
+
+describe("evaluate: a show's own channel", () => {
+  // A show whose uploads mostly leave its name out.
+  const SHOW = {
+    isEpisode: true,
+    title: "Good Mythical Morning",
+    aliases: [],
+    year: 2012,
+    people: ["Rhett McLaughlin", "Link Neal"],
+    imdbId: "tt4087032",
+    runtimeSeconds: 1140,
+    otherRuntimes: [],
+    runtimeKind: "typical",
+    season: 30,
+    episode: 1,
+    absoluteEpisode: 3106,
+    episodeTitle: "International Viral Foods Taste Test",
+    released: "2026-09-07T00:00:00.000Z",
+    releaseYear: 2026,
+    seasonCount: 30
+  };
+  const window = durationWindow(SHOW, SETTINGS);
+  const OWN = { channelTitle: "Good Mythical Morning", licensed: true, durationSeconds: 1380, publishedAt: "2026-09-07T10:00:00Z" };
+  const judge = (title, overrides = {}, t = SHOW) => evaluate(video({ title, ...OWN, ...overrides }), t, window, SETTINGS);
+
+  test("the kind of channel: named after the show, or after one of its people, and a partner either way", () => {
+    expect(ownChannel(video(OWN), SHOW, [SHOW.title])).toBe("show");
+    expect(ownChannel(video({ ...OWN, channelTitle: "Good Mythical Morning Official" }), SHOW, [SHOW.title])).toBe("show");
+    expect(ownChannel(video({ ...OWN, channelTitle: "Link Neal" }), SHOW, [SHOW.title])).toBe("person");
+    expect(ownChannel(video({ ...OWN, licensed: false }), SHOW, [SHOW.title])).toBeNull();
+    expect(ownChannel(video({ ...OWN, channelTitle: "Official" }), SHOW, [SHOW.title])).toBeNull();
+    expect(ownChannel(video({ ...OWN, channelTitle: "Mythical Kitchen" }), SHOW, [SHOW.title])).toBeNull();
+    expect(ownChannel(video({ ...OWN, channelTitle: "Someone" }), { ...SHOW, people: undefined }, [SHOW.title])).toBeNull();
+  });
+
+  test("a channel named after the show needs no name in the title: the episode's own name, on the day it aired", () => {
+    expect(judge("International Viral Foods Taste Test")).toMatchObject({ ok: true, how: "episode title", evidence: ["episode title", "air date"] });
+  });
+
+  test("but its name on another day is a clip's, or a later episode's of the same name", () => {
+    expect(judge("International Viral Foods Taste Test", { publishedAt: "2027-01-20T00:00:00Z" })).toMatchObject({
+      ok: false,
+      reason: "not uploaded when the episode aired"
+    });
+  });
+
+  test("its season and number need no date, though evidence still counts", () => {
+    const later = { publishedAt: "2027-01-20T00:00:00Z" };
+    expect(judge("Season 30, Episode 1 | Full Episode", later)).toMatchObject({ ok: false, reason: "no year, credits or episode title" });
+    expect(judge("Season 30, Episode 1 | Full Episode", { ...later, description: "Rhett McLaughlin and Link Neal" })).toMatchObject({
+      ok: true,
+      how: "season and episode"
+    });
+    expect(judge("Series 30, Episode 1")).toMatchObject({ ok: true, how: "season and episode" });
+  });
+
+  test('"Episode 1" alone could be any season\'s, or a spin-off\'s', () => {
+    const first = { ...SHOW, season: 1, absoluteEpisode: 1 };
+    expect(judge("Mythicalclass, Episode 1", {}, first)).toMatchObject({ ok: false, reason: "numbers the episode without its season" });
+    expect(judge("Episode 1 | Full Episode", {}, first)).toMatchObject({
+      ok: false,
+      reason: "numbers the episode without its season"
+    });
+  });
+
+  test("unless the show has a single season", () => {
+    expect(judge("Episode 1 | Full Episode", {}, { ...SHOW, season: 1, absoluteEpisode: 1, seasonCount: 1, episodeTitle: null })).toMatchObject({
+      ok: true,
+      how: "episode"
+    });
+  });
+
+  test("a title naming the show inside another name is that other show's, on the channel too", () => {
+    expect(judge("Junior Good Mythical Morning Series 30, Episode 1")).toMatchObject({ ok: false, reason: "does not name the title" });
+  });
+
+  test("not from a partner channel, a fan channel of the same name is not trusted", () => {
+    expect(judge("International Viral Foods Taste Test", { licensed: false })).toMatchObject({ ok: false, reason: "does not name the title" });
+  });
+
+  test("films are never matched this way", () => {
+    const film = { ...MOVIE, title: "Some Channel Film" };
+    const w = durationWindow(film, SETTINGS);
+    const v = video({ title: "A Different Title (1968)", channelTitle: "Some Channel Film", licensed: true, durationSeconds: 5760 });
+    expect(evaluate(v, film, w, SETTINGS)).toMatchObject({ ok: false, reason: "does not name the title" });
+  });
+
+  describe("a host's own channel", () => {
+    // Listed with a misspelt host, and uploaded under shorter names.
+    const HOSTED = {
+      ...SHOW,
+      title: "The Nation Wants to Guess with Gursimran Kamba",
+      people: ["Gursimran Khamba", "Amaan Shaikh"],
+      imdbId: "tt39314779",
+      runtimeSeconds: null,
+      runtimeKind: null,
+      season: 2,
+      episode: 1,
+      absoluteEpisode: 7,
+      episodeTitle: "Episode 1",
+      released: "2026-11-01T00:00:00.000Z",
+      seasonCount: 2
+    };
+    const w = durationWindow(HOSTED, SETTINGS);
+    const HOST = { channelTitle: "Gursimran Khamba", licensed: true, durationSeconds: 6120, publishedAt: "2026-11-01T12:00:00Z", description: "Hosted by Gursimran Khamba" };
+    const judgeHost = (title, overrides = {}, t = HOSTED) => evaluate(video({ title, ...HOST, ...overrides }), t, w, SETTINGS);
+
+    test("is trusted with most of the show's name", () => {
+      expect(judgeHost("Wants To Guess Nation S2 | EP1 Season Opener")).toMatchObject({ ok: false, reason: "does not name the title" });
+      expect(judgeHost("Nation Wants Guessing Game S2 | EP1")).toMatchObject({ ok: true, how: "season and episode" });
+    });
+
+    test("not with a word of it", () => {
+      expect(judgeHost("Guess Who S2 | EP1")).toMatchObject({ ok: false, reason: "does not name the title" });
+    });
+
+    test("with its short names known, the title names the show anyway, from any channel", () => {
+      const known = { ...HOSTED, aliases: uniqueAliases(HOSTED.title, []) };
+      expect(judgeHost("Nation Wants To Guess S2 | EP1 @someone", { channelTitle: "Somebody Else" }, known)).toMatchObject({
+        ok: true,
+        how: "season and episode",
+        evidence: ["credits", "air date"]
+      });
+      // The first season's seventh, uploaded months before this one aired.
+      expect(judgeHost("Nation Wants To Guess with Khamba | EP7", { publishedAt: "2026-02-08T12:00:00Z" }, known)).toMatchObject({
+        ok: false,
+        reason: "uploaded before the episode aired"
+      });
+    });
+
+    test("the words judged leave out common ones, generic ones and the credited people, a letter off included", () => {
+      expect(namesMostOf("nation wants to guess s2 ep1", [HOSTED.title], HOSTED.people)).toBe(true);
+      expect(namesMostOf("nation s2 ep1", [HOSTED.title], HOSTED.people)).toBe(false);
+      // Fewer than two such words: never judged this way.
+      expect(namesMostOf("bean s2 ep1", ["The Bean Show with Gursimran Khamba"], HOSTED.people)).toBe(false);
     });
   });
 });

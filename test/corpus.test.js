@@ -147,3 +147,59 @@ describe.each([
     expect(counts.C).toBeGreaterThanOrEqual(55);
   });
 });
+
+/**
+ * Shows made for YouTube, and shows their own channels upload: 14 real
+ * searches (creator-shows.json in youstream-fixtures), with each episode's
+ * first airing. What they test: a show listed on IMDb under a longer name
+ * than its uploads use, a first season IMDb lists only half of, uploads that
+ * leave the show's name out, and British "Series 2" numbering.
+ */
+const shows = privateFixture("creator-shows.json");
+const describeShows = shows ? global.describe : global.describe.skip;
+
+describeShows("shows made for YouTube, with the default settings", () => {
+  const { cases: showCases, labels: showLabels } = shows || { cases: [], labels: {} };
+  const s = normalizeConfig({ youtubeKey: "k", region: "IN" });
+  const matched = Object.fromEntries(
+    showCases.map((c) => {
+      const title = {
+        ...c.title,
+        aliases: uniqueAliases(c.title.title, c.title.aliases || []),
+        people: [...c.cast, ...c.director],
+        imdbId: c.streamId.split(":")[0],
+        otherRuntimes: c.title.otherRuntimes || []
+      };
+      const window = durationWindow(title, s);
+      const ranked = rankMatches(c.videos.map((v) => evaluate(video(v), title, window, s))).slice(0, s.maxResults);
+      return [c.streamId, ranked.map((m) => m.video.id)];
+    })
+  );
+  const all = Object.values(matched).flat();
+
+  global.test("every match was checked by hand", () => {
+    all.forEach((id) => expect([id, showLabels[id]]).toEqual([id, expect.any(String)]));
+  });
+
+  // "Champion of Champions 1 - Episode 1 | Full Episode | Taskmaster": a
+  // special numbered like the show's first episode, on the show's channel,
+  // with the show's cast. Nothing in it says it is not.
+  global.test("the one wrong match is a special numbered like the first episode", () => {
+    expect(all.filter((id) => showLabels[id] === "W")).toEqual(["hGOUR26pLz0"]);
+  });
+
+  global.test("a host's show, listed under a longer name than its uploads use, finds exactly the episode asked for", () => {
+    // Season 2's first, not season 1's seventh, which IMDb's list makes its
+    // number across the show.
+    expect(matched["tt39314779:2:1"]).toEqual(["R2MK5oikbVI"]);
+    expect(matched["tt39314779:1:3"]).toEqual(["hMuyfGbwwZE"]);
+  });
+
+  global.test("an upload without the show's name is found on the show's own channel, on the day it aired", () => {
+    expect(matched["tt4087032:30:1"]).toEqual(["PH9m6xw7pSY"]);
+  });
+
+  global.test('"Series 16, Episode 1" is not the first series\' first episode', () => {
+    expect(matched["tt4934214:1:1"]).toEqual(["v4YhsooE5xY", "hGOUR26pLz0"]);
+  });
+});

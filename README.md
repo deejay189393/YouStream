@@ -75,6 +75,7 @@ the reasons are logged and shown by the [explain endpoint](#explain-endpoint).
 | links another IMDb title | a description linking a different film's IMDb page |
 | **films:** year, sequel | a remake's year when you asked for the original; "Title 2" when you asked for *Title* |
 | **episodes:** names this episode | every other episode of the same show |
+| **episodes:** not uploaded before it aired | an episode of the same number from an earlier season, when the title states no season |
 | **evidence it is this title** | anything that cannot show it is the film or episode asked for |
 | recent releases: official channel | unofficial uploads of anything released in the last five years |
 
@@ -83,6 +84,21 @@ video's title, with only generic words beside it ("full movie", "HD",
 "Hindi dubbed", "S01E03"), a year, or a credited cast member's name. So
 "Title: Part Two" is not *Title*, a longer name that only ends in the
 title's is not the title, and "Title 2" is not *Title*.
+
+A title also goes by its **short names**: its listed name without a leading
+"The", without a trailing "with" and a host's name, or without both, where
+three words or more remain. IMDb lists some shows with their host's name,
+which their uploads leave out or shorten.
+
+On a show's **own channel**, the name can be missing altogether, as it is
+from the titles of some shows made for YouTube. A content partner's channel
+named after the show (or after it and "Official") is trusted without the
+name, and one named after a credited person, such as the host's own channel,
+with most of the name's distinctive words in order. Either way, the title
+must not name the show inside a longer name (a spin-off), and must pin the
+episode down without it: by its season and number, or by its own title on
+the day it first aired. A title alone, on another day, is more often a clip
+or a later episode reusing the name.
 
 **Evidence** is what a namesake, a fan film or a recap cannot fake by having
 the right length and name. A match needs at least one of:
@@ -93,7 +109,10 @@ the right length and name. A match needs at least one of:
 - the **episode's own title**, allowing one typo or different spacing;
 - a link to the title's **IMDb page** (some studios link every episode's);
 - an **official channel's own numbering**: a content partner's "S01 E03" for
-  an episode whose runtime is known exactly.
+  an episode whose runtime is known exactly;
+- an **official upload on the day the episode first aired**, give or take
+  two days: how shows made for YouTube are released, and the date IMDb
+  lists for them.
 
 **Official channels** are what YouTube marks as a content partner's upload
 (`licensedContent`): studios, TV networks and the channels they license.
@@ -105,13 +124,20 @@ everything, at the cost of some public-domain uploads.
 Episodes are where length alone is not enough, since every episode of a show
 runs about the same. So a video has to name the episode, and the parser reads
 the ways uploads actually write it: `S01E03`, `S1 E3`, `1x03`,
-`Season 1 Episode 3`, `EP 03`, `Ep. No. 3`, a bare `<show> 03`, the
+`Season 1 Episode 3`, `Series 1, Episode 3`, `EP 03`, `Ep. No. 3`, a bare `<show> 03`, the
 episode's own title, and the same words in Spanish, Portuguese, French,
 German, Italian and Hindi (`सीज़न 2 एपिसोड 3`). A video naming a different
 season or episode is turned away, and so is one naming a span ("Episodes
 1-5"). For season 2 onwards, a bare "Episode 1" with no season is more likely
 season 1's, so it only counts if it also carries this episode's name. Uploads
 numbered across the whole show ("Episode 6" for S2E1) are matched too.
+
+An upload that does not state its season, and is more than three days older
+than the episode's first airing, is another episode: as when IMDb lists only
+half of a first season, and its seventh episode would pass for the second
+season's first. One that states its season is trusted over the date, which
+for a show that moved from YouTube to a streaming service can be the later
+release.
 
 An excluded word that is part of the title's own name is ignored for that
 title, so a show with "Trailer" in its name is not hidden by the word
@@ -138,6 +164,19 @@ tests](#real-data-tests)):
 
 Every film and show in the sample that is not on YouTube finds nothing, and
 the official uploads that are there are found.
+
+**Shows made for YouTube**, and shows their own channels upload: 14 real
+searches (700 results) for talk, game and web shows hosted on their own or
+their host's channels, and a few broadcast shows on theirs. Then, for the
+own-channel rule, the latest 1,600 uploads of eight such channels, judged
+against 311 of their shows' episodes. Asserted in the same file:
+
+| | Searches: matches | Right episode | Wrong content | Own channels: matches |
+|---|---|---|---|---|
+| Before short names, air dates and own channels | 8 | 3 official, 1 unofficial | **4**: other series' first episodes, read as this one's | 18 |
+| Now | 8 | 6 official, 1 unofficial | **1**: a special numbered like the first episode | 31, the 13 new all right, none lost |
+
+The broad sample above finds exactly what it did before.
 
 **Single titles in detail**, from YouTube's results page and then from the
 live Data API with a real key, asserted in

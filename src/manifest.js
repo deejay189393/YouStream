@@ -20,7 +20,7 @@ const { SKIP_OPTIONS } = require("./catalogs");
  *   YouTube add-on ("channel", yt_id:) get streams.
  */
 const ADDON_ID = "org.deejay189393.youstream";
-const ADDON_VERSION = "0.16.0";
+const ADDON_VERSION = "0.17.0";
 const ADDON_NAME = "YouStream";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION =
