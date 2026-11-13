@@ -199,8 +199,10 @@ module.exports = function start(window, hooks = {}) {
     const rows = pbRows();
     const target = rows.indexOf(row) + delta;
     if (target < 0 || target >= rows.length) return;
-    if (delta < 0) pbList.insertBefore(row, rows[target]);
-    else pbList.insertBefore(rows[target], row);
+    changeSettings(() => {
+      if (delta < 0) pbList.insertBefore(row, rows[target]);
+      else pbList.insertBefore(rows[target], row);
+    });
     refreshPbArrows();
     renderPreview();
   }
@@ -215,7 +217,9 @@ module.exports = function start(window, hooks = {}) {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       const id = btn.getAttribute("data-reset");
-      $(id).value = DEFAULTS[id];
+      changeSettings(() => {
+        $(id).value = DEFAULTS[id];
+      });
     });
   });
 
@@ -287,8 +291,10 @@ module.exports = function start(window, hooks = {}) {
   presetSelect.addEventListener("change", () => {
     const preset = FORMAT.presets[presetSelect.value];
     if (preset) {
-      nameInput.value = preset.name;
-      descriptionInput.value = preset.description;
+      changeSettings(() => {
+        nameInput.value = preset.name;
+        descriptionInput.value = preset.description;
+      });
     }
     renderPreview();
   });
@@ -518,8 +524,10 @@ module.exports = function start(window, hooks = {}) {
 
   function moveCatalog(from, to) {
     if (to < 0 || to >= CATALOGS.length) return;
-    CATALOGS.splice(to, 0, CATALOGS.splice(from, 1)[0]);
-    renderCatalogs();
+    changeSettings(() => {
+      CATALOGS.splice(to, 0, CATALOGS.splice(from, 1)[0]);
+      renderCatalogs();
+    });
   }
 
   // A row's option changed: kept, unless the row would then repeat another.
@@ -531,7 +539,9 @@ module.exports = function start(window, hooks = {}) {
       note("You already have that catalog.", true);
       return;
     }
-    CATALOGS[index] = changed;
+    changeSettings(() => {
+      CATALOGS[index] = changed;
+    });
     paint();
     note("");
     renderQuota();
@@ -621,7 +631,9 @@ module.exports = function start(window, hooks = {}) {
         return;
       }
       if (next !== word && onChange(next) === false) return show();
-      word = next;
+      changeSettings(() => {
+        word = next;
+      });
       show();
     }
     checks.forEach((check) =>
@@ -698,8 +710,10 @@ module.exports = function start(window, hooks = {}) {
           check.checked = !check.checked;
           return note("You already have that catalog.", true);
         }
-        CATALOGS[index] = changed;
-        lengths.set(changed.length);
+        changeSettings(() => {
+          CATALOGS[index] = changed;
+          lengths.set(changed.length);
+        });
         paint();
         sync(changed);
         note("");
@@ -740,7 +754,9 @@ module.exports = function start(window, hooks = {}) {
     function update() {
       const mode = select.value;
       show(Boolean(mode));
-      CATALOGS[index].filter = mode ? { mode, words: filterWords(words.value), scope: scope.value } : null;
+      changeSettings(() => {
+        CATALOGS[index].filter = mode ? { mode, words: filterWords(words.value), scope: scope.value } : null;
+      });
     }
     words.addEventListener("input", update);
     [select, words, scope, hint].forEach((el) => box.appendChild(el));
@@ -766,7 +782,9 @@ module.exports = function start(window, hooks = {}) {
       const next = { ...CATALOGS[index] };
       if (check.checked) delete next.home;
       else next.home = false;
-      CATALOGS[index] = next;
+      changeSettings(() => {
+        CATALOGS[index] = next;
+      });
       paint();
     });
     toggle.appendChild(check);
@@ -817,9 +835,10 @@ module.exports = function start(window, hooks = {}) {
           const next = { ...CATALOGS[index] };
           if (label) next.label = label;
           else delete next.label;
-          CATALOGS[index] = next;
+          changeSettings(() => {
+            CATALOGS[index] = next;
+          });
           paint();
-          settingsChanged();
         }
         if (byKey) button.focus();
       }
@@ -886,10 +905,12 @@ module.exports = function start(window, hooks = {}) {
       btns.appendChild(up);
       btns.appendChild(down);
       btns.appendChild(
-        smallButton("×", "remove", "Remove " + title, () => {
-          CATALOGS.splice(index, 1);
-          renderCatalogs();
-        })
+        smallButton("×", "remove", "Remove " + title, () =>
+          changeSettings(() => {
+            CATALOGS.splice(index, 1);
+            renderCatalogs();
+          })
+        )
       );
       row.appendChild(btns);
       const lengths = lengthPicker({
@@ -902,7 +923,9 @@ module.exports = function start(window, hooks = {}) {
             note("You already have that catalog.", true);
             return false;
           }
-          CATALOGS[index] = changed;
+          changeSettings(() => {
+            CATALOGS[index] = changed;
+          });
           paint();
           note("");
           renderQuota();
@@ -918,7 +941,6 @@ module.exports = function start(window, hooks = {}) {
     });
     renderTrendingChips();
     renderQuota();
-    settingsChanged();
   }
 
   // Only the Trending rows not added yet.
@@ -934,10 +956,12 @@ module.exports = function start(window, hooks = {}) {
   function addCatalog(entry) {
     if (CATALOGS.length >= YT.maxCatalogs) return note("You can have at most " + YT.maxCatalogs + " catalogs.", true);
     if (CATALOGS.some((other) => sameCatalog(other, entry))) return note("You already have that catalog.", true);
-    CATALOGS.push(entry);
+    changeSettings(() => {
+      CATALOGS.push(entry);
+      renderCatalogs();
+    });
     catalogInput.value = "";
     note("");
-    renderCatalogs();
   }
 
   function addSearch(q) {
@@ -1093,6 +1117,7 @@ module.exports = function start(window, hooks = {}) {
   }
 
   renderCatalogs();
+  renderSummary();
 
   // --- Reading the form ---------------------------------------------------
   // A config, or { problem, field }: what is wrong, and the field to fix.
@@ -1357,10 +1382,18 @@ module.exports = function start(window, hooks = {}) {
   //
   // "Settings" are what saving would store: readConfig's reading of the
   // page, the very object the save sends. So nothing counts as a change
-  // unless saving would store something else, and nothing that would is
-  // missed, whichever control or code path made it. A page that cannot be
-  // read as it stands -- a margin half typed -- holds something other than
-  // the saved settings, which could always be read.
+  // unless saving would store something else. A page that cannot be read
+  // as it stands -- a margin half typed -- holds something other than the
+  // saved settings, which could always be read.
+  //
+  // The settings live in two places, and each kind of change ends in the
+  // comparison:
+  //
+  //   the settings form's own boxes and menus, which the reader changes,
+  //     and the browser then reports as an input or change event, always;
+  //   the page's own state -- the catalogs, the order of the ways to watch,
+  //     a length picker's choice -- and any box the page fills in itself,
+  //     which only the page changes, every time through changeSettings.
   function settingsNow() {
     const config = readConfig();
     return config.problem ? null : JSON.stringify(config);
@@ -1378,29 +1411,24 @@ module.exports = function start(window, hooks = {}) {
   }
 
   // A setting changed: the summary follows, and the settings are compared.
-  // The catalog editor, whose rows are not form controls, ends each change
-  // of its own here, including one that lands after a link is looked up.
   function settingsChanged() {
     renderSummary();
     compareSettings();
   }
 
-  // And after every typed or chosen value and every click, once the
-  // control's own handlers have run, the settings are compared, whatever
-  // was clicked: a removed catalog's button is already off the page by then.
-  // The summary is redrawn for the settings form's own controls only, so a
-  // click on one of its links is never redrawn away under the pointer.
+  // The one way the page changes a setting itself: the change, then, last,
+  // what follows from it -- whatever event, timer or answer set it off,
+  // and with no event at all, as when a looked-up channel arrives.
+  function changeSettings(change) {
+    change();
+    settingsChanged();
+  }
+
   ["input", "change"].forEach((type) =>
     document.addEventListener(type, (e) => {
-      if (e.target.form === form) renderSummary();
-      compareSettings();
+      if (e.target.form === form) settingsChanged();
     })
   );
-  document.addEventListener("click", (e) => {
-    const button = e.target.closest("button");
-    if (button && button.form === form && button.type !== "submit") renderSummary();
-    compareSettings();
-  });
   window.addEventListener("beforeunload", (e) => {
     if (!unsaved || leaving) return;
     e.preventDefault();

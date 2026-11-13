@@ -323,6 +323,23 @@ describe("signed in", () => {
       expect(p.shown("#save-bar")).toBe(true);
     });
 
+    test("a box the page fills in itself counts: a template from a preset, a default put back", () => {
+      const p = signedIn();
+      const choose = (id) => {
+        p.$("#format-preset").value = id;
+        p.$("#format-preset").dispatchEvent(new p.window.Event("change", { bubbles: true }));
+      };
+      choose("compact");
+      expect(p.shown("#save-bar")).toBe(true);
+      choose("youstream");
+      expect(p.shown("#save-bar")).toBe(false);
+      p.set("movie-query", "{title} {year} full film");
+      p.input("#movie-query");
+      expect(p.shown("#save-bar")).toBe(true);
+      p.click('.reset[data-reset="movie-query"]');
+      expect(p.shown("#save-bar")).toBe(false);
+    });
+
     test("a value changed and changed back is no change", () => {
       const p = signedIn();
       p.set("max-results", "8");
