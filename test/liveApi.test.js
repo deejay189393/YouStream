@@ -122,3 +122,39 @@ describe("anime through Kitsu: Muse India's Spy x Family S1E3", () => {
     expect(row.behaviorHints.filename).toMatch(/ Hindi$/);
   });
 });
+
+/**
+ * Going My Home (2012): every episode on one unofficial channel, titled
+ * "Going My Home S01E02 (2012) by Hirokazu Kore-eda". Asked for "season 1
+ * episode 2", YouTube's search returns other shows' second episodes and
+ * none of its own; asked for "S01E02", its episodes fill the top of the
+ * list. Searched for both ways on the same day.
+ */
+describe("a series whose uploads say S01E02, which YouTube ranks only for that wording", () => {
+  const S00E00 = 1;
+
+  test('searched as "season 1 episode 2", the episode is not among the results, so nothing is found', () => {
+    const { found, matches } = run("tt2185380:1:2");
+    expect(found.query).toBe("Going My Home season 1 episode 2");
+    expect(found.videos.some((v) => v.title.includes("S01E02"))).toBe(false);
+    expect(matches).toEqual([]);
+    expect(run("tt2185380:1:1").matches).toEqual([]);
+  });
+
+  test('searched as "S01E02", its episode is found, and nothing else', () => {
+    const { found, titles } = run("tt2185380:1:2", {}, S00E00);
+    expect(found.query).toBe("Going My Home S01E02");
+    expect(titles).toEqual(["Going My Home S01E02 (2012) by Hirokazu Kore-eda"]);
+  });
+
+  test("the first episode, uploaded in two parts, offers both", () => {
+    expect(run("tt2185380:1:1", {}, S00E00).titles.sort()).toEqual([
+      "Going My Home S01E01 Part 1 (2012) by Hirokazu Kore-eda",
+      "Going My Home S01E01 Part 2 (2012) by Hirokazu Kore-eda"
+    ]);
+  });
+
+  test("the credited director in each title is the evidence", () => {
+    expect(run("tt2185380:1:2", {}, S00E00).matches[0].evidence).toEqual(["credits"]);
+  });
+});
