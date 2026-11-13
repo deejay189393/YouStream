@@ -8,6 +8,7 @@ const { renderConfigurePage } = require("../src/configurePage");
 const startPage = require("../src/web/configure");
 const { createFormatter } = require("../src/formatter");
 const { templateWarnings } = require("../src/templateCheck");
+const { normalizeEntry } = require("../src/catalogs");
 
 const BASE = "https://youstream.example";
 const ID = "3b84d0e4-1e9d-4508-b9c4-46c8125f335f";
@@ -217,6 +218,7 @@ describe("signed in", () => {
       return event.defaultPrevented;
     };
     expect(leave()).toBe(false);
+    p.set("max-results", "8");
     p.input("#max-results");
     expect(leave()).toBe(true);
     p.click("#save-bar-btn");
@@ -245,11 +247,135 @@ describe("signed in", () => {
 
   test("a save that fails says why, and keeps the changes", async () => {
     const p = signedIn({ fetch: api({ "PUT /api/profile": { status: 401, body: { error: "You're signed out. Sign in again." } } }) });
+    p.set("max-results", "8");
     p.input("#max-results");
     p.submit();
     await settle();
     expect(p.text("#error")).toBe("You're signed out. Sign in again.");
     expect(p.shown("#save-bar")).toBe(true);
+  });
+
+  describe("the save bar follows the settings, not the clicks", () => {
+    const withCatalogs = (opts = {}) => signedIn({ existing: { youtubeKey: "AIzaSyTESTKEY", maxResults: 5, catalogs: [{ trending: "all" }, { trending: "music" }] }, ...opts });
+    const names = (p) => Array.from(p.document.querySelectorAll("#catalog-list .cat-name")).map((el) => el.textContent);
+    const rows = (p) => Array.from(p.document.querySelectorAll("#catalog-list .cat-row"));
+
+    test("removing a catalog is a change", () => {
+      const p = withCatalogs();
+      expect(p.shown("#save-bar")).toBe(false);
+      p.click(rows(p)[0].querySelector(".remove"));
+      expect(names(p)).toEqual(["Trending Music"]);
+      expect(p.shown("#save-bar")).toBe(true);
+      expect(p.document.body.className).toBe("has-save-bar");
+    });
+
+    test("so is moving one, and moving it back is none", () => {
+      const p = withCatalogs();
+      p.click(rows(p)[0].querySelector(".cat-down"));
+      expect(names(p)).toEqual(["Trending Music", "Trending"]);
+      expect(p.shown("#save-bar")).toBe(true);
+      p.click(rows(p)[0].querySelector(".cat-down"));
+      expect(names(p)).toEqual(["Trending", "Trending Music"]);
+      expect(p.shown("#save-bar")).toBe(false);
+      expect(p.document.body.className).toBe("");
+    });
+
+    test("adding one, and removing it again", () => {
+      const p = withCatalogs();
+      p.click(p.$("#trending-chips button"));
+      expect(names(p)).toHaveLength(3);
+      expect(p.shown("#save-bar")).toBe(true);
+      p.click(rows(p)[2].querySelector(".remove"));
+      expect(p.shown("#save-bar")).toBe(false);
+    });
+
+    test("renaming one, and naming it as it was", () => {
+      const p = withCatalogs();
+      const rename = (name) => {
+        p.click(rows(p)[0].querySelector(".cat-rename"));
+        const before = p.shown("#save-bar");
+        const box = p.$(".cat-name-input");
+        box.value = name;
+        // A name being typed is no change yet.
+        p.input(box);
+        expect(p.shown("#save-bar")).toBe(before);
+        box.dispatchEvent(new p.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      };
+      rename("Hot right now");
+      expect(names(p)[0]).toBe("Hot right now");
+      expect(p.shown("#save-bar")).toBe(true);
+      rename("");
+      expect(names(p)[0]).toBe("Trending");
+      expect(p.shown("#save-bar")).toBe(false);
+    });
+
+    test("a catalog found by looking a link up counts once it is added", async () => {
+      const entry = normalizeEntry({ channel: "UCBJycsmduvYEL83R_U4JriQ", name: "Marques Brownlee" });
+      const p = withCatalogs({ fetch: api({ "POST /api/youtube-source": { body: { entry } } }) });
+      p.$("#catalog-source").value = "channel";
+      p.set("catalog-input", "mkbhd");
+      p.input("#catalog-input");
+      p.click("#catalog-add");
+      // Typed and asked for, but nothing added yet.
+      expect(p.shown("#save-bar")).toBe(false);
+      await settle();
+      expect(names(p)).toContain("Marques Brownlee");
+      expect(p.shown("#save-bar")).toBe(true);
+    });
+
+    test("a value changed and changed back is no change", () => {
+      const p = signedIn();
+      p.set("max-results", "8");
+      p.input("#max-results");
+      expect(p.shown("#save-bar")).toBe(true);
+      p.set("max-results", "5");
+      p.input("#max-results");
+      expect(p.shown("#save-bar")).toBe(false);
+    });
+
+    test("an event that changes nothing is no change", () => {
+      const p = signedIn();
+      p.input("#max-results");
+      p.$("#type-movie").dispatchEvent(new p.window.Event("change", { bubbles: true }));
+      p.click("#config-form");
+      expect(p.shown("#save-bar")).toBe(false);
+    });
+
+    test("a value that cannot be read is not the saved one", () => {
+      const p = signedIn();
+      p.set("max-results", "eight");
+      p.input("#max-results");
+      expect(p.shown("#save-bar")).toBe(true);
+    });
+
+    test("a change made while saving is still unsaved once the save lands", async () => {
+      const p = signedIn({ fetch: api({ "PUT /api/profile": { body: { saved: true, manifestChanged: false } } }) });
+      p.set("max-results", "8");
+      p.input("#max-results");
+      p.click("#save-bar-btn");
+      p.set("max-results", "9");
+      p.input("#max-results");
+      await settle();
+      expect(p.sent("PUT /api/profile")[0].config.maxResults).toBe(8);
+      expect(p.text("#save-status")).toMatch(/^Saved\./);
+      expect(p.shown("#save-bar")).toBe(true);
+      // Put back to what was saved, there is nothing left to save.
+      p.set("max-results", "8");
+      p.input("#max-results");
+      expect(p.shown("#save-bar")).toBe(false);
+    });
+
+    test("a Saved. note goes once there is something new to save", async () => {
+      const p = signedIn({ fetch: api({ "PUT /api/profile": { body: { saved: true, manifestChanged: false } } }) });
+      p.set("max-results", "8");
+      p.input("#max-results");
+      p.click("#save-bar-btn");
+      await settle();
+      expect(p.shown("#save-status")).toBe(true);
+      p.set("max-results", "7");
+      p.input("#max-results");
+      expect(p.shown("#save-status")).toBe(false);
+    });
   });
 
   test("discarding goes back to the profile as saved", () => {

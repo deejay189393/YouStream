@@ -55,6 +55,13 @@ module.exports = function start(window, hooks = {}) {
   const submitBtn = $("submit-btn");
   const saveStatus = $("save-status");
 
+  // Unsaved changes (see "Unsaved changes" below): the profile's settings as
+  // saved, whether the page holds others, and whether the two are compared
+  // yet -- not until the page shows the saved settings in full.
+  let savedSettings;
+  let unsaved = false;
+  let comparing = false;
+
   function node(tag, className, text) {
     const el = document.createElement(tag);
     if (className) el.className = className;
@@ -812,7 +819,7 @@ module.exports = function start(window, hooks = {}) {
           else delete next.label;
           CATALOGS[index] = next;
           paint();
-          edited();
+          settingsChanged();
         }
         if (byKey) button.focus();
       }
@@ -911,7 +918,7 @@ module.exports = function start(window, hooks = {}) {
     });
     renderTrendingChips();
     renderQuota();
-    renderSummary();
+    settingsChanged();
   }
 
   // Only the Trending rows not added yet.
@@ -1288,7 +1295,6 @@ module.exports = function start(window, hooks = {}) {
   // profile's install link, not signed in to it) or "new".
   let noProfile = !PROFILE.usable;
   let leaving = false;
-  let dirty = false;
   const saveBar = $("save-bar");
 
   // Leaves the page without the unsaved-changes question.
@@ -1343,45 +1349,71 @@ module.exports = function start(window, hooks = {}) {
     return match ? match[0] : "";
   }
 
-  function markDirty() {
-    if (PROFILE.mode !== "profile" || dirty) return;
-    dirty = true;
-    saveBar.hidden = false;
-    document.body.classList.add("has-save-bar");
-    say(saveStatus, "");
+  // --- Unsaved changes ------------------------------------------------------
+  // The save bar shows whenever the page holds settings other than the
+  // profile's saved ones, and goes once they are the same again, however
+  // that came about: a box ticked, a catalog added, removed, moved or
+  // renamed, a key typed in Account, or a change undone by hand.
+  //
+  // "Settings" are what saving would store: readConfig's reading of the
+  // page, the very object the save sends. So nothing counts as a change
+  // unless saving would store something else, and nothing that would is
+  // missed, whichever control or code path made it. A page that cannot be
+  // read as it stands -- a margin half typed -- holds something other than
+  // the saved settings, which could always be read.
+  function settingsNow() {
+    const config = readConfig();
+    return config.problem ? null : JSON.stringify(config);
   }
 
-  function markClean() {
-    dirty = false;
-    saveBar.hidden = true;
-    document.body.classList.remove("has-save-bar");
+  function compareSettings() {
+    if (!comparing) return;
+    const now = settingsNow() !== savedSettings;
+    if (now === unsaved) return;
+    unsaved = now;
+    saveBar.hidden = !now;
+    document.body.classList.toggle("has-save-bar", now);
+    // A "Saved." from before no longer holds.
+    if (now) say(saveStatus, "");
   }
 
-  // Any edit to a setting: typing, choosing, and every button but the eye on
-  // a key and the preview's tabs. A setting is whatever belongs to the
-  // settings form, even a key box that sits outside it, in Account. The
-  // summary follows every one.
-  function edited() {
-    markDirty();
+  // A setting changed: the summary follows, and the settings are compared.
+  // The catalog editor, whose rows are not form controls, ends each change
+  // of its own here, including one that lands after a link is looked up.
+  function settingsChanged() {
     renderSummary();
+    compareSettings();
   }
+
+  // And after every typed or chosen value and every click, once the
+  // control's own handlers have run, the settings are compared, whatever
+  // was clicked: a removed catalog's button is already off the page by then.
+  // The summary is redrawn for the settings form's own controls only, so a
+  // click on one of its links is never redrawn away under the pointer.
   ["input", "change"].forEach((type) =>
     document.addEventListener(type, (e) => {
-      if (e.target.form === form) edited();
+      if (e.target.form === form) renderSummary();
+      compareSettings();
     })
   );
   document.addEventListener("click", (e) => {
     const button = e.target.closest("button");
-    if (!button || button.form !== form || button.type === "submit" || button.matches(".key-toggle, .preview-tab, .cat-rename")) return;
-    edited();
+    if (button && button.form === form && button.type !== "submit") renderSummary();
+    compareSettings();
   });
   window.addEventListener("beforeunload", (e) => {
-    if (!dirty || leaving) return;
+    if (!unsaved || leaving) return;
     e.preventDefault();
     e.returnValue = "";
   });
+  if (PROFILE.mode === "profile") {
+    // Settings just imported from a file are not the saved ones, whatever
+    // they hold, until they are saved: nothing read from the page matches.
+    if (!PROFILE.imported) savedSettings = settingsNow();
+    comparing = true;
+    compareSettings();
+  }
   if (PROFILE.imported) {
-    markDirty();
     // Reloading should not post the file again: the page reads as /configure.
     window.history.replaceState(null, "", "/configure");
   }
@@ -1398,7 +1430,10 @@ module.exports = function start(window, hooks = {}) {
     api("PUT", "/api/profile", { config }).then(
       (data) => {
         idle(submitBtn);
-        markClean();
+        // What was sent is saved; a change made while it was on its way
+        // still counts.
+        savedSettings = JSON.stringify(config);
+        compareSettings();
         say(
           saveStatus,
           "Saved. " +

@@ -730,6 +730,10 @@ see [Hosting profiles](#hosting-profiles)), you can keep your settings in a
   of the manifest, the rows and the content types, takes longer, and the page
   says so when a save changes it: Stremio shows it after a reinstall, Nuvio
   the next time it starts, AIOStreams within six hours.
+- **Save or discard.** Signed in, a bar along the bottom offers both
+  whenever the page holds settings other than the saved ones, whatever the
+  change (a catalog removed, moved or renamed included), and goes again if
+  you undo it by hand.
 - **Your keys are not in the link.** The link opens your settings for the
   addon's own use and nothing else: its configure page asks for your
   password. A link that gets out lets someone use YouStream on your YouTube
