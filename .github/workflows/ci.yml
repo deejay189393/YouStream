@@ -47,7 +47,7 @@ jobs:
         run: git clone --depth 1 "https://x-access-token:${FIXTURES_TOKEN}@github.com/deejay189393/youstream-fixtures.git" test/fixtures/private
       - name: Say so when the real-data tests are skipped
         if: env.FIXTURES_TOKEN == ''
-        run: echo "::warning title=Real-data tests skipped::FIXTURES_TOKEN is not set, so the corpus, realWorld and liveApi suites did not run."
+        run: echo "::warning title=Real-data tests skipped::FIXTURES_TOKEN is not set, so the corpus, realWorld, liveApi and episodeWording suites did not run."
       - uses: actions/setup-node@v6
         with:
           # The Node the Dockerfile runs in production.

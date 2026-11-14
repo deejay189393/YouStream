@@ -914,8 +914,9 @@ E2E_ONLY=server,addon node e2e/run.js https://youstream-beta.up.railway.app
 
 The precision figures above come from replaying real YouTube search results
 and IMDb runtimes. Their owners' terms do not allow publishing that data, so
-it lives in a private repository, `youstream-fixtures`, and the three suites
-that use it (`corpus`, `realWorld`, `liveApi`) are skipped without it.
+it lives in a private repository, `youstream-fixtures`, and the four suites
+that use it (`corpus`, `realWorld`, `liveApi`, `episodeWording`) are skipped
+without it.
 Everything else, at 100% coverage, runs without it. With access:
 
 ```bash
