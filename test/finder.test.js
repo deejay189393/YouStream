@@ -29,7 +29,7 @@ const EPISODE = {
 describe("buildQuery", () => {
   test("the default searches", () => {
     expect(buildQuery(MOVIE, SETTINGS)).toBe("Don 1978 full movie");
-    expect(buildQuery(EPISODE, SETTINGS)).toBe("Kota Factory season 1 episode 3");
+    expect(buildQuery(EPISODE, SETTINGS)).toBe("Kota Factory S01E03");
   });
 
   test("{language} is the reader's audio language by name", () => {
@@ -154,7 +154,7 @@ describe("findVideos", () => {
     ]);
     const result = await findVideos("tt9432978:1:3", normalizeConfig({ youtubeKey: "KEY", region: "IN", audioLanguage: "hi" }));
     expect(result.status).toBe("ok");
-    expect(result.query).toBe("Kota Factory season 1 episode 3");
+    expect(result.query).toBe("Kota Factory S01E03");
     expect(result.cached).toBe(false);
     expect(result.matches.map((m) => m.video.id)).toEqual(["e3"]);
     expect(result.evaluations.find((e) => e.video.id === "e4").reason).toBe("episode 4");

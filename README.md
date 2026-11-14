@@ -34,7 +34,7 @@ downloaded, proxied or re-hosted.
 tt…:1:3                                         the id the app asks about
   -> the show, S1 E3, the episode's name,      metadata: Cinemeta, IMDb, TheTVDB, TMDB; Kitsu, AniList and the anime offline database
      runs ~43 min, cast, IMDb id
-  -> "<show> season 1 episode 3"               one YouTube search, long videos only
+  -> "<show> S01E03"                           one YouTube search, long videos only
   -> 50 results, each judged                   length, name, episode, exclusions
   -> the official S01 E03 upload               ranked matches -> stream rows
 ```
@@ -177,6 +177,20 @@ against 311 of their shows' episodes. Asserted in the same file:
 | Now | 8 | 6 official, 1 unofficial | **1**: a special numbered like the first episode | 31, the 13 new all right, none lost |
 
 The broad sample above finds exactly what it did before.
+
+**How an episode is searched for.** Since 0.18.0 the search is the show's
+name and the episode's code, "<show> S01E02", rather than "<show> season 1
+episode 2". YouTube's search weighs those two words heavily: asked for
+"season 1 episode 2", it returned none of one series' own uploads, titled
+"<show> S01E02 (2012)", with or without the length filter, and filled its 50
+results with other shows' second episodes; asked for "S01E02", it put that
+series' episodes at the top. Measured on 47 episodes, the broad sample's and
+those of the shows above, through the YouTube Data API: every official
+episode the old wording found is still found, nothing wrong is matched that
+was not before, and what drops out is spare copies, two of them official
+uploads in another language titled "Episode 1". Asserted in
+[`test/episodeWording.test.js`](test/episodeWording.test.js). A search you
+wrote yourself (Streams, Fine-tuning) is kept as it is.
 
 **Single titles in detail**, from YouTube's results page and then from the
 live Data API with a real key, asserted in
@@ -668,7 +682,7 @@ encodeURIComponent(JSON.stringify({
   exclude: ["trailer", "reaction", …],  // words that rule out a video's title
   excludeDescription: ["fan movie", …], // phrases that rule out its description
   movieQuery: "{title} {year} full movie {language}",
-  episodeQuery: "{title} season {season} episode {episode}",
+  episodeQuery: "{title} {s00e00}",
   format: "youstream",                  // stream text preset: youstream, compact, tamtaro, classic
   nameTemplate: "…",                    // or your own templates, in AIOStreams' formatter syntax
   descriptionTemplate: "…",

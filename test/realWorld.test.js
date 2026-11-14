@@ -2,7 +2,7 @@
  * The matching rules against real searches.
  *
  * test/fixtures/real-searches.json holds real Cinemeta metadata and the real
- * YouTube results for the exact query the addon sends, each video with the
+ * YouTube results for the exact query the addon sent, each video with the
  * fields videos.list returns for it. Each case states what a person
  * checking those results by hand wants back -- the one official upload of an
  * episode, nothing at all for a title that is not on YouTube -- so a change
@@ -108,6 +108,11 @@ describe("why an episode's own runtime matters", () => {
   });
 });
 
-test("the fixtures were captured with the query the addon sends today", () => {
-  cases.forEach((c) => expect(buildQuery(c.title, SETTINGS)).toBe(c.query));
+// Episodes were searched for as "<show> season 1 episode 3" until 0.18.0,
+// when they were captured; films as they still are.
+const CAPTURED_WITH = normalizeConfig({ youtubeKey: "k", episodeQuery: "{title} season {season} episode {episode}" });
+
+test("the fixtures were captured with the query the addon sent then", () => {
+  cases.forEach((c) => expect(buildQuery(c.title, CAPTURED_WITH)).toBe(c.query));
+  cases.filter((c) => !c.title.isEpisode).forEach((c) => expect(buildQuery(c.title, SETTINGS)).toBe(c.query));
 });

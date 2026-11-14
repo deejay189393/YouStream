@@ -9,6 +9,7 @@
 const { durationWindow, evaluate, rankMatches } = require("../src/matching");
 const { normalizeConfig } = require("../src/config");
 const { toStreams } = require("../src/streams");
+const { buildQuery } = require("../src/finder");
 const { video, privateFixture } = require("./helpers");
 
 // Real search results from the private youstream-fixtures repository (see
@@ -144,6 +145,8 @@ describe("a series whose uploads say S01E02, which YouTube ranks only for that w
   test('searched as "S01E02", its episode is found, and nothing else', () => {
     const { found, titles } = run("tt2185380:1:2", {}, S00E00);
     expect(found.query).toBe("Going My Home S01E02");
+    // The wording YouStream sends by default.
+    expect(buildQuery(found.title, normalizeConfig({ youtubeKey: "k" }))).toBe(found.query);
     expect(titles).toEqual(["Going My Home S01E02 (2012) by Hirokazu Kore-eda"]);
   });
 

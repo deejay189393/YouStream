@@ -157,7 +157,7 @@ describe("normalizeConfig", () => {
       embeddableOnly: true,
       exclude: [" Trailer ", "trailer", "", 5, "Reaction"],
       movieQuery: "  {title}   full  movie ",
-      episodeQuery: "{title} {s00e00}"
+      episodeQuery: "{title} {s00e00} {episodeTitle}"
     });
     expect(n).toMatchObject({
       youtubeKey: "yt",
@@ -173,7 +173,7 @@ describe("normalizeConfig", () => {
       embeddableOnly: true,
       exclude: ["trailer", "reaction"],
       movieQuery: "{title} full movie",
-      episodeQuery: "{title} {s00e00}"
+      episodeQuery: "{title} {s00e00} {episodeTitle}"
     });
   });
 
@@ -314,7 +314,7 @@ describe("encodeConfig", () => {
         exclude: ["trailer"],
         excludeDescription: ["fan movie"],
         movieQuery: "{title} movie",
-        episodeQuery: "{title} {s00e00}",
+        episodeQuery: "{title} {s00e00} {episodeTitle}",
         search: false,
         searchSort: "viewCount",
         searchLength: "long",
@@ -341,7 +341,7 @@ describe("encodeConfig", () => {
       exclude: ["trailer"],
       excludeDescription: ["fan movie"],
       movieQuery: "{title} movie",
-      episodeQuery: "{title} {s00e00}",
+      episodeQuery: "{title} {s00e00} {episodeTitle}",
       search: false,
       searchSort: "viewCount",
       searchLength: "long",

@@ -37,7 +37,7 @@ const { normalizeCatalogs, toStoredCatalogs, SORTS, lengthOf } = require("./cata
  *   exclude         [...]  words that disqualify a video's title
  *   excludeDescription [...] phrases that disqualify a video's description
  *   movieQuery      "{title} {year} full movie {language}"
- *   episodeQuery    "{title} season {season} episode {episode}"
+ *   episodeQuery    "{title} {s00e00}"
  *   format          "youstream"  the preset a stream's name and description
  *                   come from: youstream, compact, tamtaro or classic
  *   nameTemplate, descriptionTemplate   the reader's own, in AIOStreams'
@@ -180,7 +180,11 @@ const DEFAULT_EXCLUDE_DESCRIPTION = [
 ];
 
 const DEFAULT_MOVIE_QUERY = "{title} {year} full movie {language}";
-const DEFAULT_EPISODE_QUERY = "{title} season {season} episode {episode}";
+// "Going My Home S01E02": measured on 47 episodes through the YouTube Data
+// API, the episode's code finds every official episode "season 1 episode 2"
+// does, and the uploads titled with the code that the words bury under other
+// shows' second episodes. See test/episodeWording.test.js.
+const DEFAULT_EPISODE_QUERY = "{title} {s00e00}";
 const MAX_QUERY_LENGTH = 200;
 const MAX_EXCLUDE_WORDS = 200;
 const MAX_WORD_LENGTH = 40;

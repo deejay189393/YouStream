@@ -120,7 +120,7 @@ describe("building the install link", () => {
     p.check("official-only", true);
     p.set("exclude-description", "Fan Movie, , fan movie");
     p.set("movie-query", "{title} film");
-    p.set("episode-query", "{title} {s00e00}");
+    p.set("episode-query", "{title} {s00e00} {episodeTitle}");
     p.set("exclude", "Trailer, reaction, , trailer");
     p.submit();
     expect(p.error()).toBeNull();
@@ -139,7 +139,7 @@ describe("building the install link", () => {
       embeddableOnly: true,
       officialOnly: true,
       movieQuery: "{title} film",
-      episodeQuery: "{title} {s00e00}",
+      episodeQuery: "{title} {s00e00} {episodeTitle}",
       exclude: ["trailer", "reaction"],
       excludeDescription: ["fan movie"]
     });
@@ -180,7 +180,7 @@ describe("building the install link", () => {
     p.set("exclude-description", "w");
     p.document.querySelectorAll(".reset").forEach((b) => p.click(b));
     expect(p.$("#movie-query").value).toBe("{title} {year} full movie {language}");
-    expect(p.$("#episode-query").value).toBe("{title} season {season} episode {episode}");
+    expect(p.$("#episode-query").value).toBe("{title} {s00e00}");
     expect(p.$("#exclude").value).toBe(DEFAULT_EXCLUDE.join(", "));
     expect(p.$("#exclude-description").value).toBe(DEFAULT_EXCLUDE_DESCRIPTION.join(", "));
   });
@@ -1326,7 +1326,7 @@ describe("editing an installed addon", () => {
     "a key alone":
       "%7B%22youtubeKey%22%3A%22AIzaReaderKey_1%22%2C%22playback%22%3A%5B%22app%22%2C%22youtube%22%5D%2C%22playbackVersion%22%3A1%2C%22region%22%3A%22US%22%7D",
     "every setting of its day changed":
-      "%7B%22youtubeKey%22%3A%22AIzaReaderKey_2%22%2C%22tmdbKey%22%3A%22eyJtoken.part-2%22%2C%22movieMargin%22%3A%2212.5%25%22%2C%22episodeMargin%22%3A%2260s%22%2C%22typicalMargin%22%3A%223m%22%2C%22playback%22%3A%5B%22app%22%2C%22smarttube%22%5D%2C%22playbackVersion%22%3A1%2C%22types%22%3A%5B%22series%22%5D%2C%22maxResults%22%3A8%2C%22minViews%22%3A0%2C%22region%22%3A%22IN%22%2C%22audioLanguage%22%3A%22hi%22%2C%22embeddableOnly%22%3Atrue%2C%22officialOnly%22%3Atrue%2C%22movieQuery%22%3A%22%7Btitle%7D%20film%22%2C%22episodeQuery%22%3A%22%7Btitle%7D%20%7Bs00e00%7D%22%2C%22nameTemplate%22%3A%22YouStream%20%7Bvideo.definition%7D%22%2C%22descriptionTemplate%22%3A%22%7Bvideo.title%7D%5Cn%7Bvideo.channel%7D%22%2C%22exclude%22%3A%5B%22trailer%22%2C%22reaction%22%5D%2C%22excludeDescription%22%3A%5B%22fan%20movie%22%5D%7D",
+      "%7B%22youtubeKey%22%3A%22AIzaReaderKey_2%22%2C%22tmdbKey%22%3A%22eyJtoken.part-2%22%2C%22movieMargin%22%3A%2212.5%25%22%2C%22episodeMargin%22%3A%2260s%22%2C%22typicalMargin%22%3A%223m%22%2C%22playback%22%3A%5B%22app%22%2C%22smarttube%22%5D%2C%22playbackVersion%22%3A1%2C%22types%22%3A%5B%22series%22%5D%2C%22maxResults%22%3A8%2C%22minViews%22%3A0%2C%22region%22%3A%22IN%22%2C%22audioLanguage%22%3A%22hi%22%2C%22embeddableOnly%22%3Atrue%2C%22officialOnly%22%3Atrue%2C%22movieQuery%22%3A%22%7Btitle%7D%20film%22%2C%22episodeQuery%22%3A%22%7Btitle%7D%20%7Bs00e00%7D%20%7BepisodeTitle%7D%22%2C%22nameTemplate%22%3A%22YouStream%20%7Bvideo.definition%7D%22%2C%22descriptionTemplate%22%3A%22%7Bvideo.title%7D%5Cn%7Bvideo.channel%7D%22%2C%22exclude%22%3A%5B%22trailer%22%2C%22reaction%22%5D%2C%22excludeDescription%22%3A%5B%22fan%20movie%22%5D%7D",
     "a preset, one type and any country":
       "%7B%22youtubeKey%22%3A%22AIzaReaderKey_3%22%2C%22playback%22%3A%5B%22app%22%2C%22youtube%22%5D%2C%22playbackVersion%22%3A1%2C%22types%22%3A%5B%22movie%22%5D%2C%22format%22%3A%22compact%22%7D"
   };
@@ -1390,7 +1390,7 @@ describe("editing an installed addon", () => {
     first.set("audio-language", "en");
     first.check("embeddable-only", true);
     first.set("exclude", "trailer, reaction");
-    first.set("episode-query", "{title} {s00e00}");
+    first.set("episode-query", "{title} {s00e00} {episodeTitle}");
     first.set("name-template", "YouStream {video.definition}");
     first.set("description-template", "{video.title}");
     first.set("search-sort", "viewCount");

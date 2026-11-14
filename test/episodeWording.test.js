@@ -1,14 +1,16 @@
 /**
- * Episode searches worded "{title} {s00e00}" ("Going My Home S01E02") rather
- * than the default "{title} season {season} episode {episode}": 36 live
- * searches through the YouTube Data API, the episodes of the broad sample
- * (corpus.test.js) and of shows made for YouTube or uploaded by their own
- * channels, with every video matched labelled by hand. Where that wording
- * found less than the earlier recordings, the default wording was searched
- * again the same day (episode-wording.json in youstream-fixtures).
+ * Episode searches worded "{title} {s00e00}" ("Going My Home S01E02"), the
+ * default since 0.18.0, rather than "{title} season {season} episode
+ * {episode}", the default before: 36 live searches through the YouTube Data
+ * API, the episodes of the broad sample (corpus.test.js) and of shows made
+ * for YouTube or uploaded by their own channels, with every video matched
+ * labelled by hand. Where that wording found less than the earlier
+ * recordings, the old wording was searched again the same day
+ * (episode-wording.json in youstream-fixtures).
  */
 const { durationWindow, evaluate, rankMatches } = require("../src/matching");
 const { normalizeConfig } = require("../src/config");
+const { buildQuery } = require("../src/finder");
 const { video, privateFixture } = require("./helpers");
 
 // Real search results from the private youstream-fixtures repository (see
@@ -32,8 +34,10 @@ describe('episodes searched as "S01E02"', () => {
   const worded = cases.filter((c) => c.settings.episodeQuery === S00E00);
   const all = worded.flatMap((c) => matchesFor(c.id, S00E00));
 
-  test("the query is the title and the episode's code", () => {
-    expect(worded.find((c) => c.id === "tt39314779:1:3").query).toBe("The Nation Wants to Guess with Gursimran Kamba S01E03");
+  test("the query is the title and the episode's code, the default wording", () => {
+    const episode = worded.find((c) => c.id === "tt39314779:1:3");
+    expect(episode.query).toBe("The Nation Wants to Guess with Gursimran Kamba S01E03");
+    expect(buildQuery(episode.title, normalizeConfig({ youtubeKey: "k" }))).toBe(episode.query);
     expect(worded).toHaveLength(36);
   });
 
@@ -60,7 +64,7 @@ describe('episodes searched as "S01E02"', () => {
   });
 });
 
-describe("where the S01E02 wording found less than earlier recordings, the default wording the same day", () => {
+describe("where the S01E02 wording found less than earlier recordings, the old wording the same day", () => {
   test("a show's own upload no longer returned either way: nothing found by both", () => {
     expect(matchesFor("tt4087032:30:1", null)).toEqual([]);
     expect(matchesFor("tt4087032:30:1", S00E00)).toEqual([]);
